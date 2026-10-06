@@ -52,7 +52,7 @@ def test_callback_stores_token_and_redirects(logged_in_client, db_session, monke
         f"/api/docs/google/callback?code=abc&state={state}", follow_redirects=False
     )
     assert response.status_code == 302
-    assert response.headers["location"] == "/essays?connected=1"
+    assert response.headers["location"] == "/#/essays?connected=1"
     row = db_session.query(OAuthToken).filter_by(provider="google").one()
     assert decrypt_value(row.encrypted_refresh_token) == "rt"
     assert response.text == ""
