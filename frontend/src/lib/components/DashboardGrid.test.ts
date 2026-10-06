@@ -37,3 +37,15 @@ describe("DashboardGrid", () => {
     expect(destroy).toHaveBeenCalledWith(false);
   });
 });
+
+describe("DashboardGrid updateSettings", () => {
+  it("merges settings into the entry and persists them", async () => {
+    const { LAYOUT_STORAGE_KEY } = await import("../dashboard/layout");
+    const { component } = render(DashboardGrid, { defaultLayout, widget });
+    (component as any).updateSettings("b", { limit: 7 });
+    (component as any).updateSettings("b", { extra: 1 });
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY)!);
+    expect(saved.find((e: any) => e.id === "b").settings).toEqual({ limit: 7, extra: 1 });
+    expect(saved.find((e: any) => e.id === "a").settings).toEqual({});
+  });
+});
