@@ -2,8 +2,10 @@
   import { applications, moveApplicationStatus } from "../stores/applications";
   import { showToast } from "../stores/toast";
   import { KANBAN_COLUMNS, groupByStatus } from "../kanban/grouping";
-  import type { ApplicationStatus } from "../types/application";
+  import type { Application, ApplicationStatus } from "../types/application";
   import ApplicationCard from "./ApplicationCard.svelte";
+
+  let { onopen }: { onopen?: (app: Application) => void } = $props();
 
   const grouped = $derived(groupByStatus($applications));
 
@@ -34,7 +36,7 @@
     <section class="column" aria-label={label(status)} ondragover={onDragOver} ondrop={(e) => onDrop(e, status)}>
       <h2>{label(status)} ({grouped[status].length})</h2>
       {#each grouped[status] as application (application.id)}
-        <ApplicationCard {application} />
+        <ApplicationCard {application} {onopen} />
       {/each}
     </section>
   {/each}

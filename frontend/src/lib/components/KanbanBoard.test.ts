@@ -52,4 +52,11 @@ describe("KanbanBoard", () => {
       expect(showToast).toHaveBeenCalledWith("Couldn't move application — try again."),
     );
   });
+
+  it("reports a card click via onopen", async () => {
+    const onopen = vi.fn();
+    render(KanbanBoard, { onopen });
+    await fireEvent.click(screen.getByText("Globex"));
+    expect(onopen).toHaveBeenCalledWith(expect.objectContaining({ id: 7 }));
+  });
 });
