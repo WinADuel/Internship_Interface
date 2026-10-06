@@ -53,7 +53,7 @@ def google_callback(
         google_docs_service.store_token(db, token_response, scopes=google_docs_service.GOOGLE_SCOPE)
     except GoogleAuthError:
         raise HTTPException(status_code=502, detail="google authorization failed")
-    response = RedirectResponse("/essays?connected=1", status_code=302)
+    response = RedirectResponse("/#/essays?connected=1", status_code=302)
     response.delete_cookie(STATE_COOKIE, path=STATE_COOKIE_PATH)
     return response
 
