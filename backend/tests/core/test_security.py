@@ -97,3 +97,23 @@ def test_decode_token_rejects_expired_token():
 def test_decode_token_rejects_garbage():
     with pytest.raises(jwt.PyJWTError):
         decode_token("not-a-real-token")
+
+
+def test_verify_totp_code_accepts_previous_step():
+    """Verify that codes from the previous 30-second step are accepted."""
+    secret = generate_totp_secret()
+    now = datetime.now(timezone.utc)
+    # Generate code for 30 seconds ago (previous step)
+    previous_step_code = pyotp.TOTP(secret).at(now - timedelta(seconds=30))
+    # Verify it's accepted
+    assert verify_totp_code(secret, previous_step_code)
+
+
+def test_verify_totp_code_rejects_code_two_steps_old():
+    """Verify that codes from two steps ago (90 seconds old) are rejected."""
+    secret = generate_totp_secret()
+    now = datetime.now(timezone.utc)
+    # Generate code for 90 seconds ago (two steps back)
+    two_steps_old_code = pyotp.TOTP(secret).at(now - timedelta(seconds=90))
+    # Verify it's rejected
+    assert not verify_totp_code(secret, two_steps_old_code)
