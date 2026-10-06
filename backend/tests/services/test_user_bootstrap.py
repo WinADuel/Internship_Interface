@@ -63,3 +63,15 @@ def test_confirm_enrollment_wrong_code(db_session):
     bad = f"{(int(good) + 500000) % 1000000:06d}"
     assert confirm_enrollment(db_session, cred, secret, bad) is False
     assert cred.totp_confirmed is False
+
+
+@pytest.mark.parametrize("username", ["", "   "])
+def test_empty_username_rejected(db_session, username):
+    with pytest.raises(ValueError, match="username must not be empty"):
+        create_or_reset_user(db_session, username, PASSWORD, reset=False)
+    assert _count(db_session) == 0
+
+
+def test_username_is_stripped(db_session):
+    cred, _ = create_or_reset_user(db_session, " dxwu ", PASSWORD, reset=False)
+    assert cred.username == "dxwu"

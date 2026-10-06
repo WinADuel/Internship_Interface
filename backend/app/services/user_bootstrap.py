@@ -29,6 +29,9 @@ def create_or_reset_user(
 
     Returns the credential (unconfirmed TOTP) and the new plaintext TOTP secret.
     """
+    username = username.strip()
+    if not username:
+        raise ValueError("username must not be empty")
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters long.")
 
