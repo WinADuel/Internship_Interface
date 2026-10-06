@@ -32,10 +32,12 @@ describe("checkSession", () => {
   });
 
   it("ends logged out when refresh fails, without throwing", async () => {
-    globalThis.fetch = vi.fn()
+    const f = vi.fn()
       .mockResolvedValueOnce(res(401))
       .mockResolvedValueOnce(res(401));
+    globalThis.fetch = f;
     await expect(checkSession()).resolves.toBeUndefined();
+    expect(f).toHaveBeenCalledTimes(2);
     expect(get(session)).toEqual({ loggedIn: false, checked: true });
   });
 
@@ -59,5 +61,45 @@ describe("apiFetch 401 handling", () => {
     globalThis.fetch = vi.fn().mockResolvedValue(res(401));
     await expect(apiFetch("/api/auth/login")).rejects.toMatchObject({ status: 401 });
     expect(get(session)).toEqual({ loggedIn: true, checked: true });
+  });
+
+  it("refreshes and retries once on 401, staying logged in", async () => {
+    session.set({ loggedIn: true, checked: true });
+    const f = vi.fn()
+      .mockResolvedValueOnce(res(401))
+      .mockResolvedValueOnce(res(200))
+      .mockResolvedValueOnce(res(200, { data: 1 }));
+    globalThis.fetch = f;
+    await expect(apiFetch("/api/applications")).resolves.toEqual({ data: 1 });
+    expect(f.mock.calls.map((c) => [c[0], c[1]?.method])).toEqual([
+      ["/api/applications", undefined],
+      ["/api/auth/refresh", "POST"],
+      ["/api/applications", undefined],
+    ]);
+    expect(get(session)).toEqual({ loggedIn: true, checked: true });
+  });
+
+  it("logs out and throws when refresh fails", async () => {
+    session.set({ loggedIn: true, checked: true });
+    const f = vi.fn().mockResolvedValue(res(401));
+    globalThis.fetch = f;
+    await expect(apiFetch("/api/applications")).rejects.toMatchObject({ status: 401 });
+    expect(f).toHaveBeenCalledTimes(2);
+    expect(get(session)).toEqual({ loggedIn: false, checked: true });
+  });
+
+  it("shares one refresh across concurrent 401s", async () => {
+    session.set({ loggedIn: true, checked: true });
+    const seen: Record<string, number> = {};
+    const f = vi.fn(async (path: string) => {
+      seen[path] = (seen[path] ?? 0) + 1;
+      if (path === "/api/auth/refresh") return res(200);
+      return seen[path] === 1 ? res(401) : res(200, { ok: path });
+    });
+    globalThis.fetch = f as unknown as typeof fetch;
+    const [a, b] = await Promise.all([apiFetch("/api/a"), apiFetch("/api/b")]);
+    expect(a).toEqual({ ok: "/api/a" });
+    expect(b).toEqual({ ok: "/api/b" });
+    expect(f.mock.calls.filter((c) => c[0] === "/api/auth/refresh")).toHaveLength(1);
   });
 });
