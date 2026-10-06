@@ -1,7 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
 import jwt
 import pyotp
 import pytest
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -58,10 +61,37 @@ def test_refresh_token_roundtrip():
     assert payload["type"] == "refresh"
 
 
-def test_access_and_refresh_tokens_are_not_interchangeable():
+def test_decode_token_rejects_wrong_expected_type():
     access = create_access_token(subject="1")
     refresh = create_refresh_token(subject="1")
-    assert decode_token(access)["type"] != decode_token(refresh)["type"]
+    with pytest.raises(jwt.InvalidTokenError):
+        decode_token(access, expected_type="refresh")
+    with pytest.raises(jwt.InvalidTokenError):
+        decode_token(refresh, expected_type="access")
+
+
+def test_decode_token_accepts_matching_expected_type():
+    assert decode_token(create_access_token("1"), expected_type="access")["type"] == "access"
+    assert decode_token(create_refresh_token("1"), expected_type="refresh")["type"] == "refresh"
+
+
+def _sign(payload: dict) -> str:
+    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def test_decode_token_rejects_missing_exp():
+    token = _sign({"sub": "1", "type": "access", "iat": datetime.now(timezone.utc)})
+    with pytest.raises(jwt.PyJWTError):
+        decode_token(token)
+
+
+def test_decode_token_rejects_expired_token():
+    now = datetime.now(timezone.utc)
+    token = _sign(
+        {"sub": "1", "type": "access", "iat": now - timedelta(hours=2), "exp": now - timedelta(hours=1)}
+    )
+    with pytest.raises(jwt.PyJWTError):
+        decode_token(token)
 
 
 def test_decode_token_rejects_garbage():

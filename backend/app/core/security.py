@@ -103,10 +103,23 @@ def create_refresh_token(subject: str) -> str:
     )
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def decode_token(token: str, *, expected_type: str | None = None) -> dict[str, Any]:
     """Decode and verify a JWT, returning its payload.
 
+    Requires the `exp`, `iat`, `sub` and `type` claims. If `expected_type` is
+    given, the token's `type` claim must match it (so access and refresh tokens
+    cannot be swapped).
+
     Raises `jwt.PyJWTError` (or a subclass, e.g. `ExpiredSignatureError`,
-    `InvalidTokenError`) if the token is malformed, expired, or has a bad signature.
+    `InvalidTokenError`) if the token is malformed, expired, missing a required
+    claim, has a bad signature, or has the wrong type.
     """
-    return jwt.decode(token, settings.jwt_secret, algorithms=[_JWT_ALGORITHM])
+    payload = jwt.decode(
+        token,
+        settings.jwt_secret,
+        algorithms=[_JWT_ALGORITHM],
+        options={"require": ["exp", "iat", "sub", "type"]},
+    )
+    if expected_type is not None and payload.get("type") != expected_type:
+        raise jwt.InvalidTokenError(f"Expected token type {expected_type!r}")
+    return payload
