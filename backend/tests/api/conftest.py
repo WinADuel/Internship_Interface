@@ -1,4 +1,5 @@
 import pytest
+from app.core.config import settings
 
 from tests.credentials import seed_credential
 
@@ -30,3 +31,10 @@ def logged_in_client(client, seeded_credential):
     )
     assert response.status_code == 200
     return client
+
+
+@pytest.fixture(autouse=True)
+def insecure_cookies(monkeypatch):
+    """TestClient talks to http://testserver, where Secure cookies would not
+    round-trip; tests that care about Secure set it back to True themselves."""
+    monkeypatch.setattr(settings, "cookie_secure", False)
