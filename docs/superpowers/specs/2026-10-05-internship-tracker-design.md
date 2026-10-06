@@ -124,10 +124,12 @@ src/
       ApplicationCard.svelte
       ApplicationDetailPanel.svelte
       StatusBadge.svelte
+      DashboardGrid.svelte        # Gridstack.js wrapper, loads/saves layout to localStorage
       DashboardWidget/
         RecentActivityFeed.svelte
         RemindersList.svelte
         BucketPreview.svelte     # Undone / Working On / Completed preview columns
+        KanbanSnapshot.svelte
     api/
       applications.ts   # typed fetch wrappers to backend
       auth.ts
@@ -144,11 +146,19 @@ Same rule as the backend: components stay small and single-purpose; a growing co
 ## 6. UI / Page Structure
 
 - **Login** — username + password + TOTP code field.
-- **Dashboard (home)**:
+- **Dashboard (home)** — a customizable widget grid (see §6a). Default widgets:
   - Kanban snapshot (counts per stage)
   - "What's New" feed, sourced from `status_history` (e.g. "Moved Stripe to Interview — 2h ago")
   - Reminders block: upcoming `follow_up_date` and `interview_datetime` entries
   - Three-bucket recent-applications preview: **Undone** (wishlist), **Working On** (applied/phone_screen/interview), **Completed** (offer/rejected) — each showing the most recently updated applications in that bucket, derived from existing `status`, no new data required
+
+### 6a. Customizable Dashboard Layout
+
+The dashboard is a draggable, resizable widget grid, built on **Gridstack.js** (a mature library purpose-built for this — dashboard-style drag/resize grids, not a custom-built interaction).
+
+- Each widget (What's New, Reminders, Bucket Preview, Kanban Snapshot) can be dragged to a new position and resized by dragging a corner handle; the grid snaps widgets into place.
+- Each widget also exposes a small content-amount setting independent of its physical size — e.g. a dropdown on "What's New" for "show 3 / 5 / 10 items."
+- Layout (widget positions, sizes, and per-widget content settings) is persisted in browser **`localStorage`**, per device — not synced via the backend. This is deliberate: the user's phone, MacBook, and PC have different screen sizes and are expected to want different arrangements, so a per-device layout is actually the better fit than forcing one synced layout across all of them.
 - **Applications** — full kanban board, drag-and-drop between stages; clicking a card opens a detail panel showing every field, the status-history timeline, notes, and the linked Google Doc (read-only preview) if attached.
 - **Essays** — prompt-template library with copy-to-clipboard buttons and a link out to claude.ai; attach/view a linked Google Doc per application here as well.
 - Sidebar includes visible-but-disabled "coming soon" slots for **Job Discovery**, **Interview Prep**, and **Email Sync** so the nav doesn't need restructuring when those phases land.
