@@ -26,9 +26,12 @@ export async function moveApplicationStatus(id: number, newStatus: ApplicationSt
     const updated = await changeStatus(id, newStatus);
     applications.update((all) => all.map((a) => (a.id === id ? updated : a)));
   } catch (err) {
+    // Revert only if no later move has taken over this card.
     if (previous !== undefined) {
       const restore = previous;
-      applications.update((all) => all.map((a) => (a.id === id ? { ...a, status: restore } : a)));
+      applications.update((all) =>
+        all.map((a) => (a.id === id && a.status === newStatus ? { ...a, status: restore } : a)),
+      );
     }
     throw err;
   }

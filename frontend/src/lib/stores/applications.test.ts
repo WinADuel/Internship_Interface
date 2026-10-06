@@ -35,4 +35,33 @@ describe("applications store", () => {
     await expect(moveApplicationStatus(1, "applied")).rejects.toThrow();
     expect(get(applications)[0].status).toBe("wishlist");
   });
+
+  it("a failed earlier move does not clobber a later move that succeeds", async () => {
+    applications.set([fakeApplication({ id: 1, status: "wishlist" })]);
+    let fail1!: (e: Error) => void;
+    let resolve2!: (a: Application) => void;
+    vi.spyOn(apiModule, "changeStatus")
+      .mockReturnValueOnce(new Promise<Application>((_, rej) => (fail1 = rej)))
+      .mockReturnValueOnce(new Promise<Application>((r) => (resolve2 = r)));
+    const p1 = moveApplicationStatus(1, "applied");
+    const p2 = moveApplicationStatus(1, "interview");
+    resolve2(fakeApplication({ id: 1, status: "interview" }));
+    await p2;
+    fail1(new Error("boom"));
+    await expect(p1).rejects.toThrow("boom");
+    expect(get(applications)[0].status).toBe("interview");
+  });
+
+  it("a failed earlier move leaves the card at the later status while the later call is pending", async () => {
+    applications.set([fakeApplication({ id: 1, status: "wishlist" })]);
+    let fail1!: (e: Error) => void;
+    vi.spyOn(apiModule, "changeStatus")
+      .mockReturnValueOnce(new Promise<Application>((_, rej) => (fail1 = rej)))
+      .mockReturnValueOnce(new Promise<Application>(() => {}));
+    const p1 = moveApplicationStatus(1, "applied");
+    void moveApplicationStatus(1, "interview");
+    fail1(new Error("boom"));
+    await expect(p1).rejects.toThrow("boom");
+    expect(get(applications)[0].status).toBe("interview");
+  });
 });
