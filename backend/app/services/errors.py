@@ -16,3 +16,15 @@ class ApplicationNotFoundError(Exception):
 
 class GoogleAuthError(Exception):
     """Google OAuth failed or the app is not connected to Google."""
+
+
+class GoogleNotConnectedError(Exception):
+    """No Google token is stored, so docs cannot be fetched."""
+
+
+class GoogleDocsFetchError(Exception):
+    """Fetching a Google Doc failed (non-2xx response or network error)."""
+
+
+class InvalidDocRefError(Exception):
+    """The doc reference is not a valid Drive file id or docs.google.com URL."""

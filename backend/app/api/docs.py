@@ -8,7 +8,12 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 from app.db.session import get_db
 from app.services import google_docs_service
-from app.services.errors import GoogleAuthError
+from app.services.errors import (
+    GoogleAuthError,
+    GoogleDocsFetchError,
+    GoogleNotConnectedError,
+    InvalidDocRefError,
+)
 
 router = APIRouter(
     prefix="/api/docs",
@@ -51,3 +56,13 @@ def google_callback(
     response = RedirectResponse("/essays?connected=1", status_code=302)
     response.delete_cookie(STATE_COOKIE, path=STATE_COOKIE_PATH)
     return response
+
+
+@router.get("/content")
+def doc_content(doc_ref: str, db: Session = Depends(get_db)) -> dict[str, str]:
+    try:
+        return {"content": google_docs_service.fetch_doc_text(db, doc_ref)}
+    except InvalidDocRefError:
+        raise HTTPException(status_code=422, detail="invalid doc reference")
+    except (GoogleDocsFetchError, GoogleNotConnectedError, GoogleAuthError):
+        raise HTTPException(status_code=502, detail="couldn't load doc")
