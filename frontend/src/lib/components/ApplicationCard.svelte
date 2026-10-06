@@ -18,7 +18,11 @@
   ondragstart={onDragStart}
   onclick={() => onopen?.(application)}
   onkeydown={(e) => {
-    if (e.key === "Enter") onopen?.(application);
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onopen?.(application);
+    }
   }}
 >
   <strong>{application.company}</strong>
