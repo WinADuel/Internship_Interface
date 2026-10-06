@@ -16,8 +16,29 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
 }
 
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshOnce(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch("/api/auth/refresh", { method: "POST", credentials: "include" })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, { ...options, credentials: "include" });
+  const isAuthPath = path.startsWith("/api/auth/");
+  let response = await fetch(path, { ...options, credentials: "include" });
+  if (response.status === 401 && !isAuthPath) {
+    if (await refreshOnce()) {
+      response = await fetch(path, { ...options, credentials: "include" });
+    }
+    if (response.status === 401) onUnauthorized?.();
+  }
   if (!response.ok) {
     let detail: unknown = response.statusText || "Request failed";
     try {
@@ -26,7 +47,6 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     } catch {
       // non-JSON error body; keep fallback detail
     }
-    if (response.status === 401 && !path.startsWith("/api/auth/")) onUnauthorized?.();
     throw new ApiError(response.status, detail);
   }
   if (response.status === 204) return undefined as T;
