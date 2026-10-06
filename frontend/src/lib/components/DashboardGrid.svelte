@@ -11,11 +11,17 @@
   } = $props();
 
   // Layout is read once at mount; Gridstack owns positions afterwards.
+  // svelte-ignore state_referenced_locally
   let layout: WidgetLayoutEntry[] = $state(loadLayout(defaultLayout));
   let container: HTMLElement;
 
+  const gsAttrs = (e: WidgetLayoutEntry): Record<string, string | number> => ({
+    "gs-id": e.id, "gs-x": e.x, "gs-y": e.y, "gs-w": e.w, "gs-h": e.h,
+  });
+
   onMount(() => {
-    const grid = GridStack.init({ cellHeight: 80, margin: 8, float: false }, container);
+    const grid = GridStack.init({ cellHeight: 80, margin: 8 }, container);
+    if (!grid) return;
     grid.on("change", () => {
       const saved = grid.save(false) as { id?: string | number; x?: number; y?: number; w?: number; h?: number }[];
       const byId = new Map(saved.map((n) => [String(n.id), n]));
@@ -35,11 +41,7 @@
   {#each layout as entry (entry.id)}
     <div
       class="grid-stack-item"
-      gs-id={entry.id}
-      gs-x={entry.x}
-      gs-y={entry.y}
-      gs-w={entry.w}
-      gs-h={entry.h}
+      {...gsAttrs(entry)}
     >
       <div class="grid-stack-item-content">
         {@render widget(entry.id)}
