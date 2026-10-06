@@ -1,8 +1,11 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.application import ApplicationStatus, Priority
+
+
+_NON_NULLABLE_FIELDS = ("company", "role_title", "status", "priority")
 
 
 class ApplicationCreate(BaseModel):
@@ -39,6 +42,15 @@ class ApplicationUpdate(BaseModel):
     follow_up_date: date | None = None
     interview_datetime: datetime | None = None
     google_doc_link: str | None = None
+
+    @model_validator(mode="after")
+    def _reject_explicit_nulls(self) -> "ApplicationUpdate":
+        # Omitted means "leave unchanged"; an explicit null on a NOT NULL
+        # column would otherwise surface as a DB IntegrityError (500).
+        bad = [f for f in _NON_NULLABLE_FIELDS if f in self.model_fields_set and getattr(self, f) is None]
+        if bad:
+            raise ValueError(f"{', '.join(bad)} cannot be null")
+        return self
 
 
 class ApplicationOut(ApplicationCreate):
