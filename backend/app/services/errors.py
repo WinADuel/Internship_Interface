@@ -12,3 +12,7 @@ class InvalidTotpCodeError(Exception):
 
 class ApplicationNotFoundError(Exception):
     """No application exists with the requested id."""
+
+
+class GoogleAuthError(Exception):
+    """Google OAuth failed or the app is not connected to Google."""
