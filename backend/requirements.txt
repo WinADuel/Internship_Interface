@@ -7,6 +7,9 @@ pydantic
 pydantic-settings
 python-dotenv
 passlib[bcrypt]
+# passlib 1.7.4's bcrypt backend probes a `bcrypt.__about__` attribute that
+# was removed in bcrypt 4.1+, raising on import; pin below that line.
+bcrypt<4.1
 pyotp
 qrcode[pil]
 pyjwt
