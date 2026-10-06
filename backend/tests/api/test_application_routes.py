@@ -103,6 +103,10 @@ def test_status_change_rejects_invalid_value(logged_in_client):
         f"/api/applications/{created['id']}/status", json={"new_status": "not-a-status"}
     )
     assert response.status_code == 422
+    fetched = logged_in_client.get(f"/api/applications/{created['id']}").json()
+    assert fetched["status"] == "wishlist"
+    history = logged_in_client.get(f"/api/applications/{created['id']}/history").json()
+    assert len(history) == 1
 
 
 def test_status_change_missing_application_returns_404(logged_in_client):
