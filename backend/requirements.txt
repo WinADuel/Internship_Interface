@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+alembic
+pydantic
+pydantic-settings
+python-dotenv
+passlib[bcrypt]
+pyotp
+qrcode[pil]
+pyjwt
+cryptography
+httpx
+pytest
+pytest-cov
