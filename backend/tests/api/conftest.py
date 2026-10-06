@@ -1,0 +1,32 @@
+import pytest
+
+from tests.credentials import seed_credential
+
+
+@pytest.fixture()
+def seeded_credential(db_session):
+    return seed_credential(db_session, with_totp=True, confirmed=True)
+
+
+@pytest.fixture()
+def seeded_credential_confirmed(seeded_credential):
+    return seeded_credential
+
+
+@pytest.fixture()
+def seeded_credential_unconfirmed(db_session):
+    return seed_credential(db_session, with_totp=True, confirmed=False)
+
+
+@pytest.fixture()
+def logged_in_client(client, seeded_credential):
+    response = client.post(
+        "/api/auth/login",
+        json={
+            "username": "dxwu",
+            "password": "correct-horse",
+            "totp_code": seeded_credential.current_totp_code(),
+        },
+    )
+    assert response.status_code == 200
+    return client
