@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     google_redirect_uri: str
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
+    cookie_secure: bool = True
 
 
 settings = Settings()

@@ -56,3 +56,8 @@ def test_confirm_totp_setup_marks_confirmed(db_session, seeded_credential_unconf
     confirm_totp_setup(db_session, seeded_credential_unconfirmed.current_totp_code())
     db_session.refresh(seeded_credential_unconfirmed.row)
     assert seeded_credential_unconfirmed.row.totp_confirmed is True
+
+
+def test_authenticate_skips_totp_when_not_confirmed(db_session, seeded_credential_unconfirmed):
+    """Deliberate: the second factor is enforced only once TOTP is confirmed."""
+    authenticate(db_session, "dxwu", "correct-horse", "")

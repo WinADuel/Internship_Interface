@@ -43,6 +43,7 @@ def _set_access_cookie(response: Response, username: str) -> None:
         max_age=settings.access_token_expire_minutes * 60,
         httponly=True,
         samesite="lax",
+        secure=settings.cookie_secure,
     )
 
 
@@ -53,6 +54,7 @@ def _set_refresh_cookie(response: Response, username: str) -> None:
         max_age=settings.refresh_token_expire_days * 86400,
         httponly=True,
         samesite="lax",
+        secure=settings.cookie_secure,
     )
 
 
@@ -110,6 +112,10 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
 
 @router.post("/logout")
 def logout(response: Response) -> dict[str, str]:
-    response.delete_cookie(ACCESS_COOKIE)
-    response.delete_cookie(REFRESH_COOKIE)
+    response.delete_cookie(
+        ACCESS_COOKIE, httponly=True, samesite="lax", secure=settings.cookie_secure
+    )
+    response.delete_cookie(
+        REFRESH_COOKIE, httponly=True, samesite="lax", secure=settings.cookie_secure
+    )
     return {"detail": "ok"}
