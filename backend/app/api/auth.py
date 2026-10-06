@@ -11,6 +11,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
 )
+from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.auth_credential import AuthCredential
 from app.services import auth_service
@@ -108,6 +109,11 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         raise unauthorized
     _set_access_cookie(response, payload["sub"])
     return {"detail": "ok"}
+
+
+@router.get("/me")
+def me(user: AuthCredential = Depends(get_current_user)) -> dict[str, str]:
+    return {"username": user.username}
 
 
 @router.post("/logout")
