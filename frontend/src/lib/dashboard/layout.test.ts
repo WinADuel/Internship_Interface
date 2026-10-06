@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LAYOUT_STORAGE_KEY, loadLayout, saveLayout } from "./layout";
+import { LAYOUT_STORAGE_KEY, loadLayout, reconcileLayout, saveLayout } from "./layout";
 
 const defaults = [{ id: "activity", x: 0, y: 0, w: 4, h: 2, settings: {} }];
 
@@ -16,7 +16,7 @@ describe("layout persistence", () => {
   it("returns the stored layout when present", () => {
     const stored = [{ id: "activity", x: 1, y: 1, w: 6, h: 3, settings: { limit: 5 } }];
     saveLayout(stored);
-    expect(loadLayout([])).toEqual(stored);
+    expect(loadLayout(defaults)).toEqual(stored);
   });
 
   it("falls back to defaults on corrupted storage", () => {

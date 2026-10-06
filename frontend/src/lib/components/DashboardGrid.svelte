@@ -15,6 +15,12 @@
   let layout: WidgetLayoutEntry[] = $state(loadLayout(defaultLayout));
   let container: HTMLElement;
 
+  /** Merges settings into one entry and persists; the single path for settings writes so Gridstack saves never clobber them. */
+  export function updateSettings(id: string, settings: Record<string, unknown>): void {
+    layout = layout.map((e) => (e.id === id ? { ...e, settings: { ...e.settings, ...settings } } : e));
+    saveLayout($state.snapshot(layout));
+  }
+
   const gsAttrs = (e: WidgetLayoutEntry): Record<string, string | number> => ({
     "gs-id": e.id, "gs-x": e.x, "gs-y": e.y, "gs-w": e.w, "gs-h": e.h,
   });
