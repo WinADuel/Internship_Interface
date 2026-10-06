@@ -3,23 +3,23 @@
 
   let { docRef }: { docRef: string | null } = $props();
 
-  let state = $state<"loading" | "ready" | "error">("loading");
+  let status = $state<"loading" | "ready" | "error">("loading");
   let content = $state("");
 
   $effect(() => {
     const ref = docRef;
     if (ref === null) return;
     let cancelled = false;
-    state = "loading";
+    status = "loading";
     getDocContent(ref).then(
       (text) => {
         if (cancelled) return;
         content = text;
-        state = "ready";
+        status = "ready";
       },
       () => {
         if (cancelled) return;
-        state = "error";
+        status = "error";
       },
     );
     return () => {
@@ -30,9 +30,9 @@
 
 {#if docRef !== null}
   <section class="doc">
-    {#if state === "loading"}
+    {#if status === "loading"}
       <p>Loading doc…</p>
-    {:else if state === "error"}
+    {:else if status === "error"}
       <p>Couldn't load doc.</p>
       <a href={googleDocUrl(docRef)} target="_blank" rel="noopener noreferrer">Open in Google Docs</a>
     {:else}

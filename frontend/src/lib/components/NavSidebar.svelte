@@ -1,3 +1,5 @@
+<script lang="ts"></script>
+
 <nav class="sidebar">
   <a href="#/">Dashboard</a>
   <a href="#/applications">Applications</a>
