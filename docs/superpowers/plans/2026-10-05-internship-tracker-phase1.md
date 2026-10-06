@@ -1132,3 +1132,28 @@ git commit -m "feat: essays page with prompt library and linked google doc viewe
 git add backend/Dockerfile frontend/Dockerfile docker-compose.yml Caddyfile .env.example
 git commit -m "feat: docker compose deployment with caddy reverse proxy and automatic https"
 ```
+
+---
+
+## Task 19: CI Pipeline (GitHub Actions)
+
+**Files:**
+- Create: `.github/workflows/ci.yml`
+
+**Interfaces:**
+- Consumes: the backend pytest suite (Tasks 1–8) and the frontend Vitest suite (Tasks 9–17) — this task runs them, it does not add new tests of its own.
+
+- [ ] **Step 1: Write `.github/workflows/ci.yml`** with two jobs, triggered `on: push: branches: [main]` and `on: pull_request`:
+  - `backend-tests`: `runs-on: ubuntu-latest`; a `services.postgres` block (`image: postgres:16`, env `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` set to fixed test values, port 5432 mapped, a healthcheck); steps: checkout, `actions/setup-python@v5` with `python-version: "3.12"`, `pip install -r backend/requirements.txt`, `alembic -c backend/alembic.ini upgrade head` with `TEST_DATABASE_URL`/`DATABASE_URL` env pointing at the service container (`postgresql+psycopg://<user>:<password>@localhost:5432/<db>`), then `pytest backend/tests -v`.
+  - `frontend-tests`: `runs-on: ubuntu-latest`; steps: checkout, `actions/setup-node@v4` with `node-version: "20"`, `npm ci` in `frontend/`, `npm run test -- --run` in `frontend/`.
+
+- [ ] **Step 2: Verify the workflow syntax** — `python -c "import yaml, sys; yaml.safe_load(open('.github/workflows/ci.yml'))"` (or any YAML validator) — expected: no parse error.
+
+- [ ] **Step 3: Push the branch and confirm both jobs run and pass** in the GitHub Actions tab for this repository (requires the branch to actually be pushed to GitHub — if this repo has no GitHub remote yet, note that in the report instead of skipping the task; the workflow file itself is still the deliverable).
+
+- [ ] **Step 4: Commit.**
+
+```bash
+git add .github/workflows/ci.yml
+git commit -m "feat: CI pipeline running backend pytest and frontend vitest on push/PR"
+```

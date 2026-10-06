@@ -198,9 +198,15 @@ The dashboard is a draggable, resizable widget grid, built on **Gridstack.js** (
 - Now: deployed to a VPS (~$6/mo), domain DNS pointed at it, Caddy handles TLS automatically.
 - Later: identical `docker-compose.yml` runs on the user's local server; migration is stop/start + DNS repoint, not a rewrite.
 
+### 11a. CI/CD
+
+- **CI now:** a GitHub Actions workflow runs the backend pytest suite (against a Postgres service container) and the frontend Vitest suite on every push/PR to `main`. This is built as part of Phase 1 (Task 19) since the test suites it runs already exist by the end of this plan.
+- **CD deferred:** automated deploy-on-merge to the VPS is explicitly *not* built in Phase 1. Rationale: automating a deploy process that hasn't yet been done manually and verified trustworthy is itself a risk. CD is a candidate for a short follow-up task once a few manual VPS deploys have gone smoothly.
+
 ## 12. Explicitly Out of Scope (Phase 1)
 
 - Job discovery feed (community internship-list feed + Greenhouse/Lever API polling) — future phase.
 - Interview prep assistant (context/info/prep suggestions per interview) — future phase.
 - Email sync (Gmail OAuth, auto-detect application-related emails) — future phase.
 - In-app Claude API-powered essay drafting/review — deferred; Phase 1 only links out to claude.ai with copyable prompts.
+- CD (automated deploy-on-merge to the VPS) — deferred until manual VPS deploys are proven reliable (see §11a). CI (automated tests on push/PR) is in scope and built in Task 19.
