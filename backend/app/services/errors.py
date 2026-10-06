@@ -8,3 +8,7 @@ class TotpAlreadyConfirmedError(Exception):
 
 class InvalidTotpCodeError(Exception):
     """A TOTP code did not match the pending secret."""
+
+
+class ApplicationNotFoundError(Exception):
+    """No application exists with the requested id."""
