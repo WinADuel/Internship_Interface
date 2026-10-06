@@ -50,8 +50,8 @@ def totp_provisioning_uri(secret: str, username: str, issuer: str = "InternHelpe
 
 
 def verify_totp_code(secret: str, code: str) -> bool:
-    """Check a 6-digit TOTP code against the secret, allowing normal clock drift."""
-    return pyotp.TOTP(secret).verify(code)
+    """Check a 6-digit TOTP code against the secret, accepting codes from one 30-second step either side to tolerate clock drift."""
+    return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 
 # -- Generic symmetric encryption (Fernet) ------------------------------------
