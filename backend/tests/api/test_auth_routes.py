@@ -196,3 +196,16 @@ def test_session_cookies_are_httponly_secure_lax(client, seeded_credential, monk
         assert "Secure" in header
         assert "HttpOnly" in header
         assert "samesite=lax" in header.lower()
+
+
+def test_me_returns_username_only(logged_in_client):
+    response = logged_in_client.get("/api/auth/me")
+    assert response.status_code == 200
+    assert response.json() == {"username": "dxwu"}
+    assert set(response.json().keys()) == {"username"}
+
+
+def test_me_requires_auth(client):
+    response = client.get("/api/auth/me")
+    assert response.status_code == 401
+    assert response.json() == {"detail": "not authenticated"}

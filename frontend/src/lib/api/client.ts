@@ -10,6 +10,12 @@ export class ApiError extends Error {
   }
 }
 
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...options, credentials: "include" });
   if (!response.ok) {
@@ -20,6 +26,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     } catch {
       // non-JSON error body; keep fallback detail
     }
+    if (response.status === 401 && !path.startsWith("/api/auth/")) onUnauthorized?.();
     throw new ApiError(response.status, detail);
   }
   if (response.status === 204) return undefined as T;
