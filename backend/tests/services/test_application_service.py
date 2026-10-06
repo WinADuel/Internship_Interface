@@ -38,14 +38,29 @@ def test_change_status_writes_history_row(db_session):
     app = create_application(db_session, ApplicationCreate(company="A", role_title="R"))
     change_status(db_session, app.id, ApplicationStatus.APPLIED)
     history = get_status_history(db_session, app.id)
+    assert len(history) == 2
+    assert history[-1].old_status == ApplicationStatus.WISHLIST
+    assert history[-1].new_status == ApplicationStatus.APPLIED
+
+
+def test_create_application_writes_initial_history_row(db_session):
+    app = create_application(
+        db_session,
+        ApplicationCreate(company="A", role_title="R", status=ApplicationStatus.APPLIED),
+    )
+    history = get_status_history(db_session, app.id)
     assert len(history) == 1
+    assert history[0].old_status is None
     assert history[0].new_status == ApplicationStatus.APPLIED
 
 
 def test_change_status_to_same_status_is_a_noop(db_session):
     app = create_application(db_session, ApplicationCreate(company="A", role_title="R"))
     change_status(db_session, app.id, ApplicationStatus.WISHLIST)  # already wishlist
-    assert get_status_history(db_session, app.id) == []
+    history = get_status_history(db_session, app.id)
+    assert len(history) == 1  # only the creation row
+    assert history[0].old_status is None
+    assert history[0].new_status == ApplicationStatus.WISHLIST
 
 
 def test_get_recent_activity_orders_newest_first(db_session):

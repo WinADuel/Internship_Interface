@@ -9,9 +9,24 @@ from app.schemas.application import ApplicationCreate, ApplicationUpdate
 from app.services.errors import ApplicationNotFoundError
 
 
+def _now() -> datetime:
+    # Explicit timestamp: the column's now() default is constant within a
+    # transaction, which would make same-transaction changes unorderable.
+    return datetime.now(timezone.utc)
+
+
 def create_application(db: Session, data: ApplicationCreate) -> Application:
     application = Application(**data.model_dump())
     db.add(application)
+    db.flush()  # assign application.id for the history row
+    db.add(
+        StatusHistory(
+            application_id=application.id,
+            old_status=None,
+            new_status=application.status,
+            changed_at=_now(),
+        )
+    )
     db.commit()
     return application
 
@@ -57,9 +72,7 @@ def change_status(db: Session, application_id: int, new_status: ApplicationStatu
             application_id=application.id,
             old_status=application.status,
             new_status=new_status,
-            # Explicit timestamp: the column's now() default is constant within a
-            # transaction, which would make same-transaction changes unorderable.
-            changed_at=datetime.now(timezone.utc),
+            changed_at=_now(),
         )
     )
     application.status = new_status
