@@ -204,6 +204,22 @@ The dashboard is a draggable, resizable widget grid, built on **Gridstack.js** (
 - **CI now:** a GitHub Actions workflow runs the backend pytest suite (against a Postgres service container) and the frontend Vitest suite on every push/PR to `main`. This is built as part of Phase 1 (Task 19) since the test suites it runs already exist by the end of this plan.
 - **CD deferred:** automated deploy-on-merge to the VPS is explicitly *not* built in Phase 1. Rationale: automating a deploy process that hasn't yet been done manually and verified trustworthy is itself a risk. CD is a candidate for a short follow-up task once a few manual VPS deploys have gone smoothly.
 
+### 11b. Development Workflow & Phase Documentation (added 2026-10-06; binds every phase)
+
+- **Branch per phase.** Each phase is built on its own feature branch, never directly on `main`.
+- **Commit and push at every task completion.** When a plan task passes its review (including any fix rounds), its commits are pushed to the phase's feature branch on GitHub (`origin`) right away, before the next task starts. Pushes contain only reviewed work; in-progress fixes are never pushed mid-review. Commit history is never rewritten or backdated.
+- **Secret check before every push.** No `.env`, private keys, OAuth client secrets, or real tokens may be in the commits being pushed. Only the placeholder values in `.env.example` files are allowed.
+- **Merge at phase end.** After the phase's final whole-branch review is clean, the branch is merged into `main` and `main` is pushed so every device can sync (`git pull`).
+- **One report per phase.** Each phase ends with a report at `docs/phases/phase-<id>-report.md`, committed with the merge and indexed in `docs/phases/README.md`. A report covers:
+  - what was delivered;
+  - the task log with commit SHAs;
+  - review outcomes;
+  - work added beyond the plan;
+  - quality and security;
+  - key decisions with their trade-offs;
+  - known limitations and deferred items;
+  - what's next.
+
 ## 12. Explicitly Out of Scope (Phase 1)
 
 - Job discovery feed (community internship-list feed + Greenhouse/Lever API polling) — future phase.

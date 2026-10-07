@@ -22,6 +22,10 @@
 - Claude-delivered content is untrusted: every field length-capped, batch sizes capped, non-`http`/`https` URLs dropped. The frontend renders contact content as plain text and never uses `{@html}` for it (§13.5).
 - Claude never changes a contact's `status`, date fields, `priority`, `notes`, or `archived`, and never overwrites a draft whose `*_edited` flag is true (§13.2).
 - Sheet sync is one-way (app → sheet). A sync failure never fails or rolls back the user's write (§13.7).
+- Workflow (spec §11b):
+  - Build on a Phase 1b feature branch.
+  - After each task passes review, push its commits to that branch on GitHub before the next task starts. Run a secret check first, and never rewrite history.
+  - When the final review is clean, merge into `main`, push `main`, and write `docs/phases/phase-1b-report.md`.
 - Nudge defaults: `nudge_unsent_days=5`, `nudge_followup_days=10`, `nudge_gone_quiet_days=10`, `nudge_replied_stale_days=14`. Snoozes: "Not yet" 3 days, "Wait longer" and "Still talking" 7 days. Undo window: 60 seconds. `claude_job_max_items=8`. Company contacts `target_count=3` (§13.2–13.4).
 
 ## Review Focus
