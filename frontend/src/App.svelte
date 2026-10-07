@@ -38,6 +38,13 @@
 <Toast />
 
 <style>
+  :global(body) { margin: 0; }
   .layout { display: flex; min-height: 100vh; }
-  main { flex: 1; padding: 1rem; }
+  main { flex: 1; min-width: 0; padding: 1rem; }
+
+  /* Phones: the navigation becomes a top bar above the content, which then uses the full width. */
+  @media (max-width: 700px) {
+    .layout { flex-direction: column; }
+    main { flex: 1 1 auto; width: 100%; box-sizing: border-box; padding: 0.75rem; }
+  }
 </style>

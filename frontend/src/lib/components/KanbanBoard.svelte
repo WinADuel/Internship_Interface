@@ -46,4 +46,10 @@
   .board { display: flex; gap: 0.75rem; overflow-x: auto; align-items: flex-start; }
   .column { flex: 1 0 14rem; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem; background: #f4f4f6; border-radius: 8px; min-height: 8rem; }
   h2 { font-size: 0.95rem; margin: 0; }
+
+  /* Phones: columns keep a readable width and the board scrolls sideways, snapping to each column. */
+  @media (max-width: 700px) {
+    .board { scroll-snap-type: x proximity; padding-bottom: 0.5rem; -webkit-overflow-scrolling: touch; }
+    .column { flex: 0 0 min(80vw, 16rem); scroll-snap-align: start; }
+  }
 </style>

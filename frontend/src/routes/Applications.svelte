@@ -64,7 +64,7 @@
 
 <style>
   .header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-  .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(28rem, 100%); overflow-y: auto; padding: 1rem; background: #fff; border-left: 1px solid #ddd; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1); z-index: 10; }
+  .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(28rem, 100%); box-sizing: border-box; overflow-y: auto; padding: 1rem; background: #fff; border-left: 1px solid #ddd; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1); z-index: 10; }
   .close { float: right; }
 
   /* Phones: the panel takes the whole screen so nothing sits half-hidden behind it. */
