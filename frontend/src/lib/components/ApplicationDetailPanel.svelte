@@ -25,7 +25,7 @@
   }
 
   async function archive() {
-    if (archiving || !window.confirm(`Archive ${application.company} — ${application.roleTitle}?`)) return;
+    if (archiving || !window.confirm(`Archive ${application.company} â€” ${application.roleTitle}?`)) return;
     archiving = true;
     try {
       await archiveAndRemoveApplication(application.id);
