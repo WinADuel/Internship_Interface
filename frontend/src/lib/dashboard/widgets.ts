@@ -57,6 +57,21 @@ export function upcomingReminders(apps: Application[], withinDays: number, now: 
     .map((x) => x.a);
 }
 
+/**
+ * Follow-ups whose date (a local calendar day) is before today, oldest first.
+ * Archived applications and those already at offer or rejected are skipped:
+ * there is nothing left to follow up on.
+ */
+export function overdueFollowUps(apps: Application[], now: Date): Application[] {
+  const todayStart = startOfLocalDay(now).getTime();
+  return apps
+    .filter((a) => !a.archived && a.status !== "offer" && a.status !== "rejected")
+    .map((a) => ({ a, t: a.followUpDate ? parseLocalDate(a.followUpDate)?.getTime() ?? null : null }))
+    .filter((x): x is { a: Application; t: number } => x.t !== null && x.t < todayStart)
+    .sort((x, y) => x.t - y.t)
+    .map((x) => x.a);
+}
+
 export function bucketApplications(apps: Application[]): Record<Bucket, Application[]> {
   const out: Record<Bucket, Application[]> = { undone: [], workingOn: [], completed: [] };
   for (const a of apps) if (!a.archived) out[BUCKET_OF[a.status]].push(a);
