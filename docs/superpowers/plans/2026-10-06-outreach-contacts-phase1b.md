@@ -12,6 +12,18 @@
 
 **Prerequisite:** Phase 1 plan (`docs/superpowers/plans/2026-10-05-internship-tracker-phase1.md`) Tasks 1–18 complete. Interfaces referenced below as "P1 Task N" come from that plan.
 
+**Phase 1 as-built: corrections that override this plan's text** (added 2026-10-07 from the Phase 1 report, `docs/phases/phase-1-report.md`):
+- **Migrations.** The latest Phase 1 migration is `0003` (`last_totp_step`), so this plan's migration is `0004_outreach_contacts`.
+- **Priority enum.** `contacts.priority` reuses the existing PG enum type `application_priority` (`create_type=False`). Do not create a second priority enum.
+- **Authenticator setup.** `/api/auth/totp/setup` and `/totp/confirm` were deleted, and login requires `totp_confirmed=True`. Accounts are created only with `python -m app.cli create-user`. Any test that needs a logged-in user uses the existing `logged_in_client` fixture.
+- **Login tests.** Login has a global in-memory throttle (429 "too many attempts") and a TOTP replay guard. Tests rely on the `FakeClock` and the throttle-reset autouse fixture in `backend/tests/conftest.py`. Never log in twice with the same TOTP code inside one 30 s step.
+- **Config at import.** `jwt_secret` must be at least 32 bytes and not a placeholder. `token_encryption_key` must be a valid Fernet key. Any new test or CI environment must satisfy both. See `.github/workflows/ci.yml` for valid test values.
+- **Dependencies.** `backend/requirements.txt` holds pinned (`==`) production dependencies only. Test dependencies go in `backend/requirements-dev.txt`. This plan adds no new Python dependencies.
+- **Routing.** The frontend uses svelte-spa-router 5.x (runes API) with hash routes (`/#/contacts`). Any backend redirect to a page must target `/#/...`. `apiFetch` (`lib/api/client.ts`) refreshes the session silently, retries once on 401, and already formats 422 `detail` arrays.
+- **Dashboard.** `DashboardGrid` takes a `widget` Snippet and exports `updateSettings`. `reconcileLayout` (`lib/dashboard/layout.ts`) already appends missing default widgets on load, so Task 13 only adds `"needs-attention"` to `defaultLayout`. No extra append logic is needed. Each widget reports settings through `onsettingschange`.
+- **Applications.** `create_application` writes an initial `status_history` row (old_status null). Task 4 must also enqueue `company_contacts` when an application is **created** with status `applied`, not only on `change_status`.
+- **Deferred Phase 1 fix to fold into Task 13.** Add `breakpointForWindow: true` to DashboardGrid's `columnOpts`. Without it, windows narrower than about 950 px drop to one column and stop saving drag changes.
+
 ## Global Constraints
 
 - All Phase 1 Global Constraints apply unchanged (Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic-only schema changes, PostgreSQL 16, Svelte 5 + TS, structured `{"detail": ...}` errors, thin routers, one responsibility per file).
@@ -43,7 +55,7 @@
 **Files:**
 - Create: `backend/app/models/contact.py`, `backend/app/models/contact_status_history.py`, `backend/app/models/research_queue.py`, `backend/app/models/app_settings.py`, `backend/app/models/claude_token.py`
 - Modify: `backend/app/models/__init__.py` (import the new models so Alembic sees them)
-- Create: `backend/alembic/versions/0003_outreach_contacts.py` (via `alembic revision --autogenerate`, then reviewed)
+- Create: `backend/alembic/versions/0004_outreach_contacts.py` (via `alembic revision --autogenerate`, then reviewed)
 - Test: `backend/tests/models/test_outreach_models.py`
 
 **Interfaces:**
@@ -86,7 +98,7 @@ def test_queue_item_and_settings_defaults(db_session):
 - [ ] **Step 2: Run** `pytest backend/tests/models/test_outreach_models.py -v` — expected FAIL (import error).
 - [ ] **Step 3: Implement the five model files** and register them in `models/__init__.py`.
 - [ ] **Step 4: Run the tests** — expected PASS.
-- [ ] **Step 5: Generate migration `0003_outreach_contacts`**, review it (enum types created and dropped, FKs with the `ondelete` rules, `token_hash` unique index, JSONB `sources` with server default `'[]'`), and apply it to the test and dev DBs: `alembic upgrade head`, then `alembic downgrade -1 && alembic upgrade head`. Expected: both succeed.
+- [ ] **Step 5: Generate migration `0004_outreach_contacts`**, review it (enum types created and dropped, FKs with the `ondelete` rules, `token_hash` unique index, JSONB `sources` with server default `'[]'`), and apply it to the test and dev DBs: `alembic upgrade head`, then `alembic downgrade -1 && alembic upgrade head`. Expected: both succeed.
 - [ ] **Step 6: Run the full backend suite** — expected all PASS.
 - [ ] **Step 7: Commit** — `feat: outreach data models (contacts, history, research queue, settings, claude tokens) + migration`.
 
@@ -245,7 +257,7 @@ def test_needs_followup_draft_one_day_early(): ...       # sent 9 days ago, no f
     - `list_queue(db, state: QueueState | None = None) -> list[ResearchQueueItem]` (newest first)
     - `pending_items(db, limit: int) -> list[ResearchQueueItem]` (oldest first, so leftovers roll forward fairly)
     - `complete_item(db, item_id, note: str, now=None)` / `fail_item(db, item_id, note: str, now=None)` — raise `QueueItemNotFoundError` / `QueueItemNotPendingError`; set `state`, `result_note`, `completed_at`.
-  - `application_service.change_status`: after it writes a history row with `new_status == APPLIED`, call `enqueue_company_contacts` and swallow only `AlreadyQueuedError`.
+  - `application_service.change_status`: after it writes a history row with `new_status == APPLIED`, call `enqueue_company_contacts` and swallow only `AlreadyQueuedError`. `create_application` does the same when the new application's initial status is `applied`. Add a test that creating an application directly as `applied` enqueues exactly one item.
 
 - [ ] **Step 1: Write the failing tests:**
 
@@ -610,7 +622,7 @@ def test_safe_sync_handles_google_not_connected(db_session): ...      # client_f
       - `replied_stale` → `ContactStatusButtons`;
       - `meeting_outcome` → [Accepted] [Declined] [Still talking] (snooze 7);
     - refreshes the list after each action;
-    - widget id `"needs-attention"`, added to Dashboard's `defaultLayout`. Existing saved layouts that lack this id still render it: `loadLayout` returns saved entries, so Dashboard appends any `defaultLayout` entry whose id is missing from the loaded layout.
+    - widget id `"needs-attention"`, added to Dashboard's `defaultLayout`. Existing saved layouts that lack this id still render it, because Phase 1's `reconcileLayout` already appends missing default entries. Also set `breakpointForWindow: true` in DashboardGrid's `columnOpts` (deferred Phase 1 fix).
   - **`ApplicationDetailPanel.svelte` Contacts section:**
     - `listContacts({kind: "company", applicationId})` rendered as compact `ContactCard`s;
     - a **Find contacts** button calling `findContacts(application.id)`; a 409 shows the toast "Contacts already queued for this application.";
