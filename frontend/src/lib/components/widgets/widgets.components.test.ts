@@ -80,4 +80,46 @@ describe("store-backed widgets", () => {
     await fireEvent.change(screen.getByLabelText("Days ahead"), { target: { value: "30" } });
     expect(onsettingschange).toHaveBeenCalledWith({ withinDays: 30 });
   });
+
+  describe("RemindersList overdue group", () => {
+    const FUTURE = new Date(Date.now() + 3 * 86_400_000);
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const PAST = new Date(Date.now() - 3 * 86_400_000);
+
+    it("lists overdue follow-ups under an Overdue heading above Upcoming", () => {
+      applications.set([
+        fakeApplication({ id: 1, company: "Late Co", followUpDate: iso(PAST), status: "applied" }),
+        fakeApplication({ id: 2, company: "Soon Co", followUpDate: iso(FUTURE), status: "applied" }),
+      ]);
+      render(RemindersList);
+      const overdue = screen.getByRole("heading", { name: "Overdue" });
+      const upcoming = screen.getByRole("heading", { name: "Upcoming" });
+      expect(overdue.compareDocumentPosition(upcoming) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const late = screen.getByText(/Late Co/);
+      const soon = screen.getByText(/Soon Co/);
+      expect(overdue.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(upcoming.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+      expect(upcoming.compareDocumentPosition(soon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("shows overdue items even when nothing is upcoming, and keeps the empty message for Upcoming", () => {
+      applications.set([fakeApplication({ id: 1, company: "Late Co", followUpDate: iso(PAST) })]);
+      render(RemindersList);
+      expect(screen.getByText(/Late Co/)).toBeTruthy();
+      expect(screen.getByText("No upcoming reminders.")).toBeTruthy();
+    });
+
+    it("has no Overdue heading when nothing is overdue", () => {
+      applications.set([fakeApplication({ id: 2, company: "Soon Co", followUpDate: iso(FUTURE) })]);
+      render(RemindersList);
+      expect(screen.queryByRole("heading", { name: "Overdue" })).toBeNull();
+    });
+
+    it("does not list overdue follow-ups of offers or rejections", () => {
+      applications.set([fakeApplication({ id: 1, company: "Done Co", followUpDate: iso(PAST), status: "rejected" })]);
+      render(RemindersList);
+      expect(screen.queryByText(/Done Co/)).toBeNull();
+    });
+  });
 });

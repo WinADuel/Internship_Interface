@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fakeApplication } from "../testing/fixtures";
-import { bucketApplications, countByStatus, upcomingReminders } from "./widgets";
+import { bucketApplications, countByStatus, overdueFollowUps, upcomingReminders } from "./widgets";
 
 describe("widgets", () => {
   it("upcomingReminders includes only dates within the window and excludes archived", () => {
@@ -63,5 +63,50 @@ describe("widgets", () => {
     const counts = countByStatus(apps);
     expect(counts.applied).toBe(2);
     expect(counts.wishlist).toBe(0);
+  });
+
+  describe("overdueFollowUps", () => {
+    const now = new Date(2026, 9, 5, 15, 30);
+
+    it("returns follow-ups before today's local day, oldest first", () => {
+      const apps = [
+        fakeApplication({ id: 1, followUpDate: "2026-10-04" }),
+        fakeApplication({ id: 2, followUpDate: "2026-09-01" }),
+        fakeApplication({ id: 3, followUpDate: "2026-10-02" }),
+      ];
+      expect(overdueFollowUps(apps, now).map((a) => a.id)).toEqual([2, 3, 1]);
+    });
+
+    it("excludes today, the future, and applications without a follow-up date", () => {
+      const apps = [
+        fakeApplication({ id: 1, followUpDate: "2026-10-05" }),
+        fakeApplication({ id: 2, followUpDate: "2026-10-06" }),
+        fakeApplication({ id: 3, followUpDate: null }),
+      ];
+      expect(overdueFollowUps(apps, now)).toEqual([]);
+    });
+
+    it("excludes today even just after local midnight", () => {
+      const justAfterMidnight = new Date(2026, 9, 5, 0, 0, 1);
+      const apps = [fakeApplication({ id: 1, followUpDate: "2026-10-05" })];
+      expect(overdueFollowUps(apps, justAfterMidnight)).toEqual([]);
+    });
+
+    it("excludes archived applications and those already at offer or rejected", () => {
+      const apps = [
+        fakeApplication({ id: 1, followUpDate: "2026-10-01", archived: true }),
+        fakeApplication({ id: 2, followUpDate: "2026-10-01", status: "offer" }),
+        fakeApplication({ id: 3, followUpDate: "2026-10-01", status: "rejected" }),
+        fakeApplication({ id: 4, followUpDate: "2026-10-01", status: "applied" }),
+        fakeApplication({ id: 5, followUpDate: "2026-10-01", status: "wishlist" }),
+      ];
+      expect(overdueFollowUps(apps, now).map((a) => a.id)).toEqual([4, 5]);
+    });
+
+    it("does not change what upcomingReminders returns (yesterday still excluded there)", () => {
+      const apps = [fakeApplication({ id: 1, followUpDate: "2026-10-04" })];
+      expect(upcomingReminders(apps, 7, now)).toEqual([]);
+      expect(overdueFollowUps(apps, now).map((a) => a.id)).toEqual([1]);
+    });
   });
 });
