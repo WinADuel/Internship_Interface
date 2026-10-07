@@ -1,3 +1,4 @@
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -14,6 +15,8 @@ from app.services.errors import (
     GoogleNotConnectedError,
     InvalidDocRefError,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/docs",
@@ -51,7 +54,10 @@ def google_callback(
     try:
         token_response = google_docs_service.exchange_code_for_token(code)
         google_docs_service.store_token(db, token_response, scopes=google_docs_service.GOOGLE_SCOPE)
-    except GoogleAuthError:
+    except GoogleAuthError as exc:
+        # The service scrubs its messages (status codes and exception types only,
+        # never tokens or response bodies), so they are safe to log.
+        logger.warning("google oauth callback failed: %s", exc)
         raise HTTPException(status_code=502, detail="google authorization failed")
     response = RedirectResponse("/#/essays?connected=1", status_code=302)
     response.delete_cookie(STATE_COOKIE, path=STATE_COOKIE_PATH)
@@ -64,5 +70,6 @@ def doc_content(doc_ref: str, db: Session = Depends(get_db)) -> dict[str, str]:
         return {"content": google_docs_service.fetch_doc_text(db, doc_ref)}
     except InvalidDocRefError:
         raise HTTPException(status_code=422, detail="invalid doc reference")
-    except (GoogleDocsFetchError, GoogleNotConnectedError, GoogleAuthError):
+    except (GoogleDocsFetchError, GoogleNotConnectedError, GoogleAuthError) as exc:
+        logger.warning("google doc fetch failed: %s", exc)
         raise HTTPException(status_code=502, detail="couldn't load doc")

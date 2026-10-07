@@ -95,3 +95,51 @@ def test_content_422_on_invalid_ref(logged_in_client, ref):
     response = _call(logged_in_client, ref)
     assert response.status_code == 422
     assert response.json() == {"detail": "invalid doc reference"}
+
+
+# -- every 502 path logs a scrubbed warning -----------------------------------
+
+
+def _warnings(caplog):
+    return [r for r in caplog.records if r.name == "app.api.docs" and r.levelname == "WARNING"]
+
+
+def test_content_logs_status_when_export_rejected(logged_in_client, connected_token, monkeypatch, caplog):
+    monkeypatch.setattr(httpx, "post", fake_post())
+    monkeypatch.setattr(httpx, "get", fake_get(403, "secret-body-from-google"))
+    with caplog.at_level("WARNING", logger="app.api.docs"):
+        assert _call(logged_in_client).status_code == 502
+    messages = [r.getMessage() for r in _warnings(caplog)]
+    assert len(messages) == 1
+    assert "403" in messages[0]
+    assert "secret-body-from-google" not in messages[0]
+
+
+def test_content_logs_when_not_connected(logged_in_client, caplog):
+    with caplog.at_level("WARNING", logger="app.api.docs"):
+        assert _call(logged_in_client).status_code == 502
+    assert "not connected" in " ".join(r.getMessage() for r in _warnings(caplog))
+
+
+def test_content_logs_when_refresh_rejected_without_leaking_tokens(
+    logged_in_client, connected_token, monkeypatch, caplog
+):
+    monkeypatch.setattr(httpx, "post", fake_post(400, {"error": "invalid_grant"}))
+    with caplog.at_level("WARNING", logger="app.api.docs"):
+        assert _call(logged_in_client).status_code == 502
+    text = " ".join(r.getMessage() for r in _warnings(caplog))
+    assert "400" in text
+    assert "invalid_grant" not in text
+    assert "rt" not in text.split()
+
+
+def test_content_logs_network_error_type(logged_in_client, connected_token, monkeypatch, caplog):
+    monkeypatch.setattr(httpx, "post", fake_post())
+
+    def _get(url, **kw):
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(httpx, "get", _get)
+    with caplog.at_level("WARNING", logger="app.api.docs"):
+        assert _call(logged_in_client).status_code == 502
+    assert "ReadTimeout" in " ".join(r.getMessage() for r in _warnings(caplog))

@@ -91,3 +91,20 @@ def test_callback_google_failure_maps_to_502(logged_in_client, monkeypatch):
     )
     assert response.status_code == 502
     assert response.json() == {"detail": "google authorization failed"}
+
+
+def test_callback_google_failure_logs_scrubbed_warning(logged_in_client, monkeypatch, caplog):
+    _authorize(logged_in_client)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    monkeypatch.setattr(httpx, "post", fake_post_returning({"error": "invalid_grant"}, 400))
+    with caplog.at_level("WARNING", logger="app.api.docs"):
+        response = logged_in_client.get(
+            f"/api/docs/google/callback?code=abc-secret-code&state={state}", follow_redirects=False
+        )
+    assert response.status_code == 502
+    records = [r for r in caplog.records if r.name == "app.api.docs" and r.levelname == "WARNING"]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "400" in message
+    assert "invalid_grant" not in message
+    assert "abc-secret-code" not in message
