@@ -695,6 +695,7 @@ git commit -m "feat: frontend scaffolding, router, api client, nav sidebar, toas
 - Create: `frontend/src/lib/types/application.ts`
 - Create: `frontend/src/lib/api/applications.ts`
 - Create: `frontend/src/lib/stores/applications.ts`
+- Create: `frontend/src/lib/testing/fixtures.ts`
 - Test: `frontend/src/lib/api/applications.test.ts`
 - Test: `frontend/src/lib/stores/applications.test.ts`
 
@@ -702,6 +703,7 @@ git commit -m "feat: frontend scaffolding, router, api client, nav sidebar, toas
 - Consumes: `apiFetch` (Task 9).
 - Produces:
   - `types/application.ts`: `ApplicationStatus = "wishlist" | "applied" | "phone_screen" | "interview" | "offer" | "rejected"`; `Priority = "low" | "medium" | "high"`; `Application` interface (camelCase: `id`, `company`, `roleTitle`, `dateApplied`, `status`, `jobLink`, `notes`, `resumeVersion`, `contactPerson`, `salaryRange`, `location`, `source`, `priority`, `followUpDate`, `interviewDatetime`, `googleDocLink`, `archived`, `createdAt`, `updatedAt`); `ApplicationInput` (same minus `id`/`archived`/`createdAt`/`updatedAt`); `StatusHistoryEntry`; `ActivityEntry`.
+  - `lib/testing/fixtures.ts`: `export function fakeApplication(overrides?: Partial<Application>): Application` — returns a complete `Application` with sensible defaults (`status: "wishlist"`, `priority: "medium"`, `archived: false`, all nullable fields `null`), merged with `overrides`. **This is the single shared source of test fixture data for the frontend — Tasks 11 and 15 import it from here rather than redefining it.**
   - `api/applications.ts`: `mapApplicationFromApi(raw: Record<string, unknown>): Application` (snake_case → camelCase); `listApplications(includeArchived?: boolean): Promise<Application[]>`; `getApplication(id: number): Promise<Application>`; `createApplication(data: ApplicationInput): Promise<Application>`; `updateApplication(id: number, data: Partial<ApplicationInput>): Promise<Application>`; `changeStatus(id: number, newStatus: ApplicationStatus): Promise<Application>`; `archiveApplication(id: number): Promise<Application>`; `getStatusHistory(id: number): Promise<StatusHistoryEntry[]>`; `getRecentActivity(limit?: number): Promise<ActivityEntry[]>`.
   - `stores/applications.ts`: `export const applications = writable<Application[]>([])`; `export async function loadApplications(): Promise<void>` (calls `listApplications(false)`, excluding archived by default); `export async function moveApplicationStatus(id: number, newStatus: ApplicationStatus): Promise<void>` (optimistic update of the store, then calls `changeStatus`, reverting on failure).
 
@@ -770,7 +772,7 @@ git commit -m "feat: applications api client, types, and store"
 - Test: `frontend/src/lib/kanban/grouping.test.ts`
 
 **Interfaces:**
-- Consumes: `applications` store, `moveApplicationStatus` (Task 10), `Application`/`ApplicationStatus` types, `showToast` (Task 9).
+- Consumes: `applications` store, `moveApplicationStatus` (Task 10), `Application`/`ApplicationStatus` types, `showToast` (Task 9), `fakeApplication` from `lib/testing/fixtures.ts` (Task 10 — import it in `grouping.test.ts` rather than redefining it).
 - Produces:
   - `kanban/grouping.ts`: `const KANBAN_COLUMNS: ApplicationStatus[]` in spec order (`wishlist`, `applied`, `phone_screen`, `interview`, `offer`, `rejected`); `groupByStatus(apps: Application[]): Record<ApplicationStatus, Application[]>` — ignores archived applications even if present in the input array.
   - `KanbanBoard.svelte` — renders one column per `KANBAN_COLUMNS` entry using `groupByStatus($applications)`; each column is an HTML5 drop target; on drop, calls `moveApplicationStatus(draggedId, columnStatus)`, catching any `ApiError` and calling `showToast("Couldn't move application — try again.")` (Task 9's toast store) rather than failing silently.
@@ -967,7 +969,7 @@ git commit -m "feat: dashboard grid with per-device localStorage layout persiste
 - Test: `frontend/src/lib/dashboard/widgets.test.ts`
 
 **Interfaces:**
-- Consumes: `applications` store (Task 10), `getRecentActivity` (Task 10), `ApplicationStatus` (Task 10).
+- Consumes: `applications` store (Task 10), `getRecentActivity` (Task 10), `ApplicationStatus` (Task 10), `fakeApplication` from `lib/testing/fixtures.ts` (Task 10 — import it in `widgets.test.ts` rather than redefining it).
 - Produces, all in `dashboard/widgets.ts` (pure functions, each excluding archived applications):
   - `upcomingReminders(apps: Application[], withinDays: number, now: Date): Application[]` — includes applications where `followUpDate` or `interviewDatetime` falls within `[now, now + withinDays]`, sorted ascending by whichever date qualified.
   - `type Bucket = "undone" | "workingOn" | "completed"`; `bucketApplications(apps: Application[]): Record<Bucket, Application[]>` — `undone` = `wishlist`; `workingOn` = `applied`/`phone_screen`/`interview`; `completed` = `offer`/`rejected`.
@@ -1129,4 +1131,29 @@ git commit -m "feat: essays page with prompt library and linked google doc viewe
 ```bash
 git add backend/Dockerfile frontend/Dockerfile docker-compose.yml Caddyfile .env.example
 git commit -m "feat: docker compose deployment with caddy reverse proxy and automatic https"
+```
+
+---
+
+## Task 19: CI Pipeline (GitHub Actions)
+
+**Files:**
+- Create: `.github/workflows/ci.yml`
+
+**Interfaces:**
+- Consumes: the backend pytest suite (Tasks 1–8) and the frontend Vitest suite (Tasks 9–17) — this task runs them, it does not add new tests of its own.
+
+- [ ] **Step 1: Write `.github/workflows/ci.yml`** with two jobs, triggered `on: push: branches: [main]` and `on: pull_request`:
+  - `backend-tests`: `runs-on: ubuntu-latest`; a `services.postgres` block (`image: postgres:16`, env `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` set to fixed test values, port 5432 mapped, a healthcheck); steps: checkout, `actions/setup-python@v5` with `python-version: "3.12"`, `pip install -r backend/requirements.txt`, `alembic -c backend/alembic.ini upgrade head` with `TEST_DATABASE_URL`/`DATABASE_URL` env pointing at the service container (`postgresql+psycopg://<user>:<password>@localhost:5432/<db>`), then `pytest backend/tests -v`.
+  - `frontend-tests`: `runs-on: ubuntu-latest`; steps: checkout, `actions/setup-node@v4` with `node-version: "20"`, `npm ci` in `frontend/`, `npm run test -- --run` in `frontend/`.
+
+- [ ] **Step 2: Verify the workflow syntax** — `python -c "import yaml, sys; yaml.safe_load(open('.github/workflows/ci.yml'))"` (or any YAML validator) — expected: no parse error.
+
+- [ ] **Step 3: Push the branch and confirm both jobs run and pass** in the GitHub Actions tab for this repository (requires the branch to actually be pushed to GitHub — if this repo has no GitHub remote yet, note that in the report instead of skipping the task; the workflow file itself is still the deliverable).
+
+- [ ] **Step 4: Commit.**
+
+```bash
+git add .github/workflows/ci.yml
+git commit -m "feat: CI pipeline running backend pytest and frontend vitest on push/PR"
 ```
