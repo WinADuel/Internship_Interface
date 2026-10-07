@@ -7,6 +7,7 @@
   import KanbanSnapshot from "../lib/components/widgets/KanbanSnapshot.svelte";
   import { loadLayout, type WidgetLayoutEntry } from "../lib/dashboard/layout";
   import { loadApplications } from "../lib/stores/applications";
+  import { showToast } from "../lib/stores/toast";
 
   const defaultLayout: WidgetLayoutEntry[] = [
     { id: "activity", x: 0, y: 0, w: 6, h: 4, settings: {} },
@@ -34,7 +35,7 @@
   }
 
   onMount(() => {
-    void loadApplications();
+    loadApplications().catch(() => showToast("Couldn't load applications."));
   });
 </script>
 

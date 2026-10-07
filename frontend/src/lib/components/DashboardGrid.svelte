@@ -26,9 +26,19 @@
   });
 
   onMount(() => {
-    const grid = GridStack.init({ cellHeight: 80, margin: 8 }, container);
+    const grid = GridStack.init(
+      {
+        cellHeight: 80,
+        margin: 8,
+        // Phones: stack every widget in one full-width column.
+        columnOpts: { breakpoints: [{ w: 700, c: 1 }] },
+      },
+      container,
+    );
     if (!grid) return;
     grid.on("change", () => {
+      // The one-column phone layout is derived; never let it overwrite the saved desktop positions.
+      if (grid.getColumn() === 1) return;
       const saved = grid.save(false) as { id?: string | number; x?: number; y?: number; w?: number; h?: number }[];
       const byId = new Map(saved.map((n) => [String(n.id), n]));
       layout = layout.map((entry) => {
