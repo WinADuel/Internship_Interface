@@ -1,19 +1,22 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-psycopg[binary]
-alembic
-pydantic
-pydantic-settings
-python-dotenv
-passlib[bcrypt]
+# Production dependencies, pinned to the versions the test suite runs against.
+# Transitive dependencies are left to the resolver except starlette and pillow,
+# pinned because fastapi's TestClient behaviour and QR rendering depend on them.
+fastapi==0.142.2
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.3
+psycopg[binary]==3.3.6
+alembic==1.20.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.4
+passlib[bcrypt]==1.7.4
 # passlib 1.7.4's bcrypt backend probes a `bcrypt.__about__` attribute that
-# was removed in bcrypt 4.1+, raising on import; pin below that line.
-bcrypt<4.1
-pyotp
-qrcode[pil]
-pyjwt
-cryptography
-httpx
-pytest
-pytest-cov
+# was removed in bcrypt 4.1+, raising on import; stay below that line.
+bcrypt==4.0.1
+pyotp==2.10.0
+qrcode[pil]==8.2
+pillow==12.3.0
+pyjwt==2.15.1
+cryptography==50.0.2
+httpx==0.28.1
