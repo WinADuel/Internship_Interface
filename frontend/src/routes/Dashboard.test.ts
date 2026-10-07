@@ -11,12 +11,15 @@ vi.mock("gridstack", () => ({
 }));
 vi.mock("gridstack/dist/gridstack.min.css", () => ({}));
 
+import { get } from "svelte/store";
 import Dashboard from "./Dashboard.svelte";
 import { LAYOUT_STORAGE_KEY } from "../lib/dashboard/layout";
+import { toasts } from "../lib/stores/toast";
 
 beforeEach(() => {
   load.mockReset().mockResolvedValue(undefined);
   localStorage.clear();
+  toasts.set([]);
 });
 
 describe("Dashboard route", () => {
@@ -45,5 +48,11 @@ describe("Dashboard route", () => {
     );
     const { container } = render(Dashboard);
     expect(container.querySelectorAll("[data-widget]")).toHaveLength(4);
+  });
+
+  it("toasts when loading applications fails", async () => {
+    load.mockRejectedValue(new Error("down"));
+    render(Dashboard);
+    await vi.waitFor(() => expect(get(toasts).map((t) => t.text)).toContain("Couldn't load applications."));
   });
 });
