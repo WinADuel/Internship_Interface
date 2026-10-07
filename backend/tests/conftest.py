@@ -71,3 +71,29 @@ def client(db_session):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_db, None)
+
+
+class FakeClock:
+    """Deterministic stand-in for the login throttle's monotonic clock."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture(autouse=True)
+def login_throttle_clock(monkeypatch):
+    """Reset the in-process login throttle around every test and drive it with
+    a fake clock, so lockout state never leaks between tests."""
+    from app.services.auth_service import login_throttle
+
+    clock = FakeClock()
+    monkeypatch.setattr(login_throttle, "clock", clock)
+    login_throttle.reset()
+    yield clock
+    login_throttle.reset()

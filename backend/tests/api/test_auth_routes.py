@@ -52,31 +52,10 @@ def test_refresh_rejects_access_token_in_refresh_cookie(client, seeded_credentia
     assert client.post("/api/auth/refresh").status_code == 401
 
 
-def test_totp_setup_returns_uri_for_unconfirmed(client, seeded_credential_unconfirmed):
-    response = client.post("/api/auth/totp/setup")
-    assert response.status_code == 200
-    assert response.json()["provisioning_uri"].startswith("otpauth://")
-
-
-def test_totp_setup_conflicts_when_confirmed(client, seeded_credential):
-    response = client.post("/api/auth/totp/setup")
-    assert response.status_code == 409
-    assert response.json() == {"detail": "totp already confirmed"}
-
-
-def test_totp_confirm_bad_code(client, seeded_credential_unconfirmed):
-    response = client.post("/api/auth/totp/confirm", json={"code": "000000"})
-    assert response.status_code == 400
-    assert response.json() == {"detail": "invalid code"}
-
-
-def test_totp_confirm_ok(client, seeded_credential_unconfirmed):
-    response = client.post(
-        "/api/auth/totp/confirm",
-        json={"code": seeded_credential_unconfirmed.current_totp_code()},
-    )
-    assert response.status_code == 200
-    assert response.json() == {"detail": "confirmed"}
+def test_totp_setup_and_confirm_endpoints_are_gone(client, seeded_credential_unconfirmed):
+    """Enrollment happens only through the create-user CLI; no unauthenticated API."""
+    assert client.post("/api/auth/totp/setup").status_code == 404
+    assert client.post("/api/auth/totp/confirm", json={"code": "000000"}).status_code == 404
 
 
 def test_get_current_user_dependency(client, seeded_credential):
@@ -175,10 +154,55 @@ def test_login_rejects_correct_password_with_wrong_totp(client, seeded_credentia
     assert "access_token" not in response.cookies
 
 
-def test_login_with_unconfirmed_totp_needs_password_only(client, seeded_credential_unconfirmed):
-    """Deliberate: TOTP is only enforced once confirmed (so first-run setup is possible)."""
+def test_login_rejects_unconfirmed_account_even_with_correct_password(
+    client, seeded_credential_unconfirmed
+):
+    """Fail closed: no password-only login for an account that never confirmed TOTP."""
+    for code in ("", seeded_credential_unconfirmed.current_totp_code()):
+        response = client.post("/api/auth/login", json={
+            "username": "dxwu", "password": "correct-horse", "totp_code": code,
+        })
+        assert response.status_code == 401
+        assert response.json() == {"detail": "invalid credentials"}
+        assert "access_token" not in response.cookies
+
+
+def test_login_rejects_replayed_totp_code(client, seeded_credential):
+    body = {
+        "username": "dxwu", "password": "correct-horse",
+        "totp_code": seeded_credential.current_totp_code(),
+    }
+    assert client.post("/api/auth/login", json=body).status_code == 200
+    client.cookies.clear()
+    response = client.post("/api/auth/login", json=body)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "invalid credentials"}
+    assert "access_token" not in response.cookies
+
+
+def test_login_locks_out_after_five_failures(client, seeded_credential):
+    bad = {"username": "dxwu", "password": "wrong", "totp_code": "000000"}
+    for _ in range(5):
+        assert client.post("/api/auth/login", json=bad).status_code == 401
+    good = {
+        "username": "dxwu", "password": "correct-horse",
+        "totp_code": seeded_credential.current_totp_code(),
+    }
+    response = client.post("/api/auth/login", json=good)
+    assert response.status_code == 429
+    assert response.json() == {"detail": "too many attempts"}
+    assert response.headers["retry-after"] == "1"
+    assert "access_token" not in response.cookies
+
+
+def test_login_works_again_once_the_backoff_expires(client, seeded_credential, login_throttle_clock):
+    bad = {"username": "dxwu", "password": "wrong", "totp_code": "000000"}
+    for _ in range(5):
+        client.post("/api/auth/login", json=bad)
+    login_throttle_clock.advance(2)
     response = client.post("/api/auth/login", json={
-        "username": "dxwu", "password": "correct-horse", "totp_code": "",
+        "username": "dxwu", "password": "correct-horse",
+        "totp_code": seeded_credential.current_totp_code(),
     })
     assert response.status_code == 200
 
