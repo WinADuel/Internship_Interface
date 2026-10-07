@@ -13,6 +13,7 @@ from app.core.security import (
     encrypt_value,
     generate_totp_secret,
     hash_password,
+    match_totp_step,
     totp_provisioning_uri,
     verify_password,
     verify_totp_code,
@@ -117,3 +118,45 @@ def test_verify_totp_code_rejects_code_two_steps_old():
     two_steps_old_code = pyotp.TOTP(secret).at(now - timedelta(seconds=90))
     # Verify it's rejected
     assert not verify_totp_code(secret, two_steps_old_code)
+
+
+# -- match_totp_step (replay-guard support) ---------------------------------
+
+
+def _step_of(timestamp: float) -> int:
+    return int(timestamp) // 30
+
+
+def test_match_totp_step_returns_current_step():
+    secret = generate_totp_secret()
+    now = 1_800_000_000
+    code = pyotp.TOTP(secret).at(now)
+    assert match_totp_step(secret, code, now=now) == _step_of(now)
+
+
+def test_match_totp_step_accepts_adjacent_steps_and_reports_them():
+    secret = generate_totp_secret()
+    now = 1_800_000_000
+    totp = pyotp.TOTP(secret)
+    assert match_totp_step(secret, totp.at(now - 30), now=now) == _step_of(now) - 1
+    assert match_totp_step(secret, totp.at(now + 30), now=now) == _step_of(now) + 1
+
+
+def test_match_totp_step_rejects_codes_two_steps_away():
+    secret = generate_totp_secret()
+    now = 1_800_000_000
+    totp = pyotp.TOTP(secret)
+    assert match_totp_step(secret, totp.at(now - 60), now=now) is None
+    assert match_totp_step(secret, totp.at(now + 60), now=now) is None
+
+
+def test_match_totp_step_rejects_wrong_or_empty_code():
+    secret = generate_totp_secret()
+    assert match_totp_step(secret, "", now=1_800_000_000) is None
+    assert match_totp_step(secret, "abcdef", now=1_800_000_000) is None
+    assert match_totp_step(secret, "12345é", now=1_800_000_000) is None
+
+
+def test_match_totp_step_defaults_to_the_real_clock():
+    secret = generate_totp_secret()
+    assert match_totp_step(secret, pyotp.TOTP(secret).now()) is not None

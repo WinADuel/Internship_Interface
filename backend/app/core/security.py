@@ -8,6 +8,8 @@ any crypto logic of its own:
 - PyJWT (HS256) for access/refresh token issuance and verification.
 """
 
+import hmac
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -52,6 +54,21 @@ def totp_provisioning_uri(secret: str, username: str, issuer: str = "InternHelpe
 def verify_totp_code(secret: str, code: str) -> bool:
     """Check a 6-digit TOTP code against the secret, accepting codes from one 30-second step either side to tolerate clock drift."""
     return pyotp.TOTP(secret).verify(code, valid_window=1)
+
+
+def match_totp_step(secret: str, code: str, *, now: float | None = None) -> int | None:
+    """Return the time-step number `code` is valid for, or None if it matches none.
+
+    Checks the steps one before, equal to, and one after the current step (the
+    same clock-drift tolerance as `verify_totp_code`) and reports which one
+    matched, so callers can refuse to accept the same step twice (replay guard).
+    """
+    totp = pyotp.TOTP(secret)
+    current = int(time.time() if now is None else now) // totp.interval
+    for step in (current - 1, current, current + 1):
+        if hmac.compare_digest(totp.at(step * totp.interval).encode(), code.encode()):
+            return step
+    return None
 
 
 # -- Generic symmetric encryption (Fernet) ------------------------------------

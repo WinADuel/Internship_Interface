@@ -2,12 +2,12 @@ class InvalidCredentialsError(Exception):
     """Login failed: wrong username, password, or TOTP code."""
 
 
-class TotpAlreadyConfirmedError(Exception):
-    """TOTP setup was requested but a confirmed secret already exists."""
+class TooManyAttemptsError(Exception):
+    """Login is temporarily locked out after repeated failures."""
 
-
-class InvalidTotpCodeError(Exception):
-    """A TOTP code did not match the pending secret."""
+    def __init__(self, retry_after: float):
+        super().__init__("too many attempts")
+        self.retry_after = retry_after
 
 
 class ApplicationNotFoundError(Exception):

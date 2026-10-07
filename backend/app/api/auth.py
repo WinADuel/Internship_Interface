@@ -1,3 +1,5 @@
+import math
+
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -15,11 +17,7 @@ from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.auth_credential import AuthCredential
 from app.services import auth_service
-from app.services.errors import (
-    InvalidCredentialsError,
-    InvalidTotpCodeError,
-    TotpAlreadyConfirmedError,
-)
+from app.services.errors import InvalidCredentialsError, TooManyAttemptsError
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -31,10 +29,6 @@ class LoginRequest(BaseModel):
     username: str
     password: str
     totp_code: str
-
-
-class TotpConfirmRequest(BaseModel):
-    code: str
 
 
 def _set_access_cookie(response: Response, username: str) -> None:
@@ -63,33 +57,17 @@ def _set_refresh_cookie(response: Response, username: str) -> None:
 def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)) -> dict[str, str]:
     try:
         auth_service.authenticate(db, body.username, body.password, body.totp_code)
+    except TooManyAttemptsError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="too many attempts",
+            headers={"Retry-After": str(max(1, math.ceil(exc.retry_after)))},
+        )
     except InvalidCredentialsError:
         raise HTTPException(status_code=401, detail="invalid credentials")
     _set_access_cookie(response, body.username)
     _set_refresh_cookie(response, body.username)
     return {"detail": "ok"}
-
-
-@router.post("/totp/setup")
-def totp_setup(db: Session = Depends(get_db)) -> dict[str, str]:
-    try:
-        _, provisioning_uri = auth_service.begin_totp_setup(db)
-    except TotpAlreadyConfirmedError:
-        raise HTTPException(status_code=409, detail="totp already confirmed")
-    except InvalidCredentialsError:
-        raise HTTPException(status_code=401, detail="invalid credentials")
-    return {"provisioning_uri": provisioning_uri}
-
-
-@router.post("/totp/confirm")
-def totp_confirm(body: TotpConfirmRequest, db: Session = Depends(get_db)) -> dict[str, str]:
-    try:
-        auth_service.confirm_totp_setup(db, body.code)
-    except InvalidTotpCodeError:
-        raise HTTPException(status_code=400, detail="invalid code")
-    except InvalidCredentialsError:
-        raise HTTPException(status_code=401, detail="invalid credentials")
-    return {"detail": "confirmed"}
 
 
 @router.post("/refresh")

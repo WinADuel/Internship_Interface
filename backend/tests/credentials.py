@@ -1,5 +1,7 @@
 """Shared helpers for seeding an `AuthCredential` row in tests."""
 
+import time
+
 import pyotp
 
 from app.core.security import encrypt_value, generate_totp_secret, hash_password
@@ -18,6 +20,10 @@ class SeededCredential:
 
     def current_totp_code(self) -> str:
         return pyotp.TOTP(self.secret).now()
+
+    def totp_code_at_offset(self, steps: int) -> str:
+        """A code for `steps` 30-second steps from now (-1, 0, +1 are all accepted by login)."""
+        return pyotp.TOTP(self.secret).at(time.time() + 30 * steps)
 
 
 def seed_credential(db_session, *, with_totp: bool, confirmed: bool) -> SeededCredential:
