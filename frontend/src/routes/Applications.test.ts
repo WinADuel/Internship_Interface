@@ -6,7 +6,13 @@ const { store, load } = vi.hoisted(() => ({ store: { current: null as any }, loa
 vi.mock("../lib/stores/applications", async () => {
   const { writable } = await import("svelte/store");
   store.current = writable([]);
-  return { applications: store.current, loadApplications: load, moveApplicationStatus: vi.fn() };
+  return {
+    applications: store.current,
+    loadApplications: load,
+    moveApplicationStatus: vi.fn(),
+    upsertApplication: vi.fn(),
+    archiveAndRemoveApplication: vi.fn(),
+  };
 });
 vi.mock("../lib/api/applications", () => ({ getStatusHistory: vi.fn().mockResolvedValue([]) }));
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));

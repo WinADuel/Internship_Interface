@@ -1,11 +1,26 @@
 import { writable } from "svelte/store";
-import { changeStatus, listApplications } from "../api/applications";
+import { archiveApplication, changeStatus, listApplications } from "../api/applications";
 import type { Application, ApplicationStatus } from "../types/application";
 
 export const applications = writable<Application[]>([]);
 
 export async function loadApplications(): Promise<void> {
   applications.set(await listApplications(false));
+}
+
+/** Replaces the application with the same id, or appends it when it is new. */
+export function upsertApplication(application: Application): void {
+  applications.update((all) =>
+    all.some((a) => a.id === application.id)
+      ? all.map((a) => (a.id === application.id ? application : a))
+      : [...all, application],
+  );
+}
+
+/** Archives on the server, then drops the application from the active list (the store holds active ones only). */
+export async function archiveAndRemoveApplication(id: number): Promise<void> {
+  await archiveApplication(id);
+  applications.update((all) => all.filter((a) => a.id !== id));
 }
 
 /**

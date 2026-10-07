@@ -1,7 +1,13 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import * as apiModule from "../api/applications";
-import { applications, loadApplications, moveApplicationStatus } from "./applications";
+import {
+  applications,
+  archiveAndRemoveApplication,
+  loadApplications,
+  moveApplicationStatus,
+  upsertApplication,
+} from "./applications";
 import { fakeApplication } from "../testing/fixtures";
 import type { Application } from "../types/application";
 
@@ -63,5 +69,30 @@ describe("applications store", () => {
     fail1(new Error("boom"));
     await expect(p1).rejects.toThrow("boom");
     expect(get(applications)[0].status).toBe("interview");
+  });
+
+  it("upsertApplication appends a new application and replaces an existing one", () => {
+    applications.set([fakeApplication({ id: 1, company: "Old" })]);
+    upsertApplication(fakeApplication({ id: 2, company: "New" }));
+    expect(get(applications).map((a) => a.id)).toEqual([1, 2]);
+    upsertApplication(fakeApplication({ id: 1, company: "Renamed" }));
+    expect(get(applications).map((a) => a.company)).toEqual(["Renamed", "New"]);
+  });
+
+  it("archiveAndRemoveApplication archives on the server then removes it from the store", async () => {
+    applications.set([fakeApplication({ id: 1 }), fakeApplication({ id: 2 })]);
+    const archive = vi
+      .spyOn(apiModule, "archiveApplication")
+      .mockResolvedValue(fakeApplication({ id: 1, archived: true }));
+    await archiveAndRemoveApplication(1);
+    expect(archive).toHaveBeenCalledWith(1);
+    expect(get(applications).map((a) => a.id)).toEqual([2]);
+  });
+
+  it("archiveAndRemoveApplication keeps the application when the server call fails", async () => {
+    applications.set([fakeApplication({ id: 1 })]);
+    vi.spyOn(apiModule, "archiveApplication").mockRejectedValue(new Error("boom"));
+    await expect(archiveAndRemoveApplication(1)).rejects.toThrow("boom");
+    expect(get(applications)).toHaveLength(1);
   });
 });
