@@ -1,2 +1,5 @@
 .env
 *.log
+
+# Local git worktrees (never commit)
+.claude/worktrees/
