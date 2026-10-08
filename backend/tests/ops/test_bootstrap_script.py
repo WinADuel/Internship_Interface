@@ -2,7 +2,8 @@
 outside a fresh Ubuntu 24.04 VM, so these check the refusals and that
 --dry-run prints every step and changes nothing. Every command it could run
 is a logging fake (conftest.py), so even a dry-run bug could not touch this
-machine."""
+machine, and the files it checks (SSH keys, swap file, fstab, ...) are a
+FakeHost under tmp_path, so the result never depends on this machine."""
 
 from pathlib import Path
 
@@ -48,8 +49,9 @@ def _bootstrap(fakes, *args, **env):
     return fakes.run(["bash", BOOTSTRAP, *args], cwd=fakes.home, **env)
 
 
-def test_dry_run_prints_every_step_and_changes_nothing(bootstrap_fakes):
+def test_dry_run_prints_every_step_and_changes_nothing(bootstrap_fakes, fake_host):
     before = _snapshot()
+    swapfile, fstab, docker_key = fake_host.swapfile, fake_host.fstab, fake_host.docker_key
     result = _bootstrap(bootstrap_fakes, "--dry-run")
     assert result.returncode == 0, result.stderr
     out = result.stdout
@@ -80,43 +82,92 @@ def test_dry_run_prints_every_step_and_changes_nothing(bootstrap_fakes):
         "[dry-run] ufw allow 443/udp",
         "[dry-run] ufw default deny incoming",
         "[dry-run] ufw --force enable",
-        "| deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable",
+        f"[dry-run] curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o {docker_key}",
+        f"| deb [arch=amd64 signed-by={docker_key}] https://download.docker.com/linux/ubuntu noble stable",
         "[dry-run] apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
         "[dry-run] usermod --append --groups docker deploy",
         '| APT::Periodic::Unattended-Upgrade "1";',
         '| Unattended-Upgrade::Automatic-Reboot "true";',
         '| Unattended-Upgrade::Automatic-Reboot-Time "04:30";',
-        "[dry-run] chmod 600 /swapfile",
-        "[dry-run] mkswap /swapfile",
-        "[dry-run] swapon /swapfile",
-        "[dry-run] append to /etc/fstab: /swapfile none swap sw 0 0",
+        f"[dry-run] fallocate -l 2G {swapfile}",
+        f"[dry-run] chmod 600 {swapfile}",
+        f"[dry-run] mkswap {swapfile}",
+        f"[dry-run] swapon {swapfile}",
+        f"[dry-run] append to {fstab}: {swapfile} none swap sw 0 0",
         "| vm.swappiness=10",
         "[dry-run] timedatectl set-timezone America/Chicago",
     ]:
         assert action in out, action
-    # (These depend on what this machine already has.)
-    assert (
-        "[dry-run] curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc" in out
-        or "/etc/apt/keyrings/docker.asc already present" in out
-    )
-    assert "[dry-run] fallocate -l 2G /swapfile" in out or "/swapfile exists; turning it on" in out
     # SSH is allowed before the firewall goes on, so the root session survives.
     assert out.index("ufw allow OpenSSH") < out.index("ufw --force enable")
-    # Without a key for deploy, root and password login are left alone.
-    # (Which branch runs depends on whether this machine's root has a key.)
-    if "SSH key copied from root" in out or "kept its existing SSH key" in out:
-        assert "ssh deploy@203.0.113.10" in out
-        assert "| PasswordAuthentication no" in out
-        assert "| KbdInteractiveAuthentication no" in out
-        assert out.index("| PermitRootLogin no") < out.index("[dry-run] sshd -t")
-        assert out.index("[dry-run] sshd -t") < out.index("[dry-run] systemctl reload ssh")
-    else:
-        assert "root and password login stay ON" in result.stderr
-        assert "10-tracker.conf" not in out
-        assert "then run this script again to turn off password login" in out
+    # Root's key (a new droplet's) goes to deploy before SSH is locked down.
+    assert f"[dry-run] install -m 600 -o deploy -g deploy {fake_host.root_keys} {fake_host.deploy_keys}" in out
+    assert "SSH key copied from root" in out
+    assert "ssh deploy@203.0.113.10" in out
+    assert "| PasswordAuthentication no" in out
+    assert "| KbdInteractiveAuthentication no" in out
+    assert out.index("| PermitRootLogin no") < out.index("[dry-run] sshd -t")
+    assert out.index("[dry-run] sshd -t") < out.index("[dry-run] systemctl reload ssh")
+    assert "docs/deploy/server-setup.md, step 5" in out
 
     assert set(bootstrap_fakes.commands()) <= QUERIES
     assert _snapshot() == before
+
+
+def test_without_any_ssh_key_root_and_password_login_stay_on(bootstrap_fakes, fake_host):
+    fake_host.root_keys.unlink()
+    result = _bootstrap(bootstrap_fakes, "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert "root and password login stay ON" in result.stderr
+    assert "NO SSH KEY (root has none to copy)" in result.stdout
+    assert "10-tracker.conf" not in result.stdout
+    assert "sshd -t" not in result.stdout
+    assert "then run this script again to turn off password login" in result.stdout
+
+
+def test_existing_deploy_keys_are_kept(bootstrap_fakes, fake_host):
+    fake_host.deploy_keys.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherFakeKey laptop\n")
+    result = _bootstrap(bootstrap_fakes, "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert "already has keys; leaving it as it is" in result.stdout
+    assert "kept its existing SSH key(s)" in result.stdout
+    assert f"{fake_host.root_keys} {fake_host.deploy_keys}" not in result.stdout
+    assert "| PermitRootLogin no" in result.stdout
+
+
+def test_existing_docker_key_is_not_downloaded_again(bootstrap_fakes, fake_host):
+    fake_host.docker_key.write_text("-----BEGIN PGP PUBLIC KEY BLOCK-----\n")
+    result = _bootstrap(bootstrap_fakes, "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert f"{fake_host.docker_key} already present" in result.stdout
+    assert "download.docker.com/linux/ubuntu/gpg" not in result.stdout
+
+
+def test_existing_swapfile_that_is_off_is_turned_on(bootstrap_fakes, fake_host):
+    # As on a GitHub runner: /swapfile and its fstab line exist, swap is off.
+    swap_line = f"{fake_host.swapfile} none swap sw 0 0"
+    fake_host.swapfile.write_bytes(b"")
+    fake_host.fstab.write_text(f"LABEL=root / ext4 defaults 0 1\n{swap_line}\n")
+    result = _bootstrap(bootstrap_fakes, "--dry-run")
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert f"{fake_host.swapfile} exists; turning it on" in out
+    assert "fallocate" not in out
+    assert f"[dry-run] mkswap {fake_host.swapfile}" in out
+    assert f"[dry-run] swapon {fake_host.swapfile}" in out
+    assert f"{fake_host.fstab} already has: {swap_line}" in out
+    assert "append to" not in out
+
+
+def test_swap_on_from_our_swapfile_without_fstab_line_adds_it(bootstrap_fakes, fake_host):
+    # A run that stopped right after swapon: swap is on, fstab has no line yet.
+    result = _bootstrap(
+        bootstrap_fakes, "--dry-run", FAKE_SWAP=str(fake_host.swapfile)
+    )
+    assert result.returncode == 0, result.stderr
+    assert "swap is already on" in result.stdout
+    assert f"[dry-run] append to {fake_host.fstab}: {fake_host.swapfile} none swap sw 0 0" in result.stdout
+    assert "mkswap" not in result.stdout
 
 
 def test_existing_swap_is_left_alone(bootstrap_fakes):
