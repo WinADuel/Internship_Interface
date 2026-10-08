@@ -4,7 +4,8 @@
 # Usage: ops/checks/check-caddyfile.sh
 #   Runs Caddy from the caddy:2 image (the same image the frontend Dockerfile builds on).
 #   Set CADDY_BIN=/path/to/caddy to use a local Caddy binary instead of Docker.
-#   Without Docker or CADDY_BIN the check is skipped (exit 0) with a message.
+#   Without Docker or CADDY_BIN the check is skipped (exit 0) with a message,
+#   except when CI is set: there it fails, so a skip can't hide a broken Caddyfile.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -18,6 +19,9 @@ elif command -v docker >/dev/null 2>&1; then
 		-v "$caddyfile:/etc/caddy/Caddyfile:ro" \
 		caddy:2 \
 		caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+elif [[ -n "${CI:-}" ]]; then
+	echo "check-caddyfile: FAILED: CI is set, but there is no docker and no CADDY_BIN to run caddy validate" >&2
+	exit 1
 else
 	echo "check-caddyfile: skipped (no docker and no CADDY_BIN)" >&2
 	exit 0

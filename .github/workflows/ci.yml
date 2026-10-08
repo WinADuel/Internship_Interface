@@ -82,3 +82,37 @@ jobs:
         run: npm run test -- --run
       - name: Build
         run: npm run build
+
+  # Server deploy config (Phase 3): the shell scripts, the Compose file, the Caddyfile and the
+  # backend image's PostgreSQL client. Nothing here needs a secret: .env is the example file.
+  deploy-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        # Run from the repo root so .shellcheckrc applies (it follows `source lib.sh`).
+        run: |
+          shellcheck --version
+          shellcheck ops/server/*.sh ops/checks/*.sh
+      - name: Compose file
+        run: |
+          cp .env.example .env
+          docker compose config -q
+      - name: Caddyfile
+        # With CI set, the check fails instead of skipping when it can't run Caddy.
+        run: CI=true ops/checks/check-caddyfile.sh
+      - name: Build the backend image
+        run: docker build -t tracker-backend:ci backend
+      - name: PostgreSQL 16 client in the image
+        # pg_dump must match the postgres:16 server, or backups fail (Phase 3 spec §4.4).
+        run: |
+          dump_version="$(docker run --rm tracker-backend:ci pg_dump --version)"
+          restore_version="$(docker run --rm tracker-backend:ci pg_restore --version)"
+          echo "$dump_version"
+          echo "$restore_version"
+          grep -q ' 16\.' <<<"$dump_version"
+          grep -q ' 16\.' <<<"$restore_version"
