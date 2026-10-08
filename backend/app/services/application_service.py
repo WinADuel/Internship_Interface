@@ -7,7 +7,7 @@ from app.models.application import Application, ApplicationStatus
 from app.models.status_history import StatusHistory
 from app.schemas.application import ApplicationCreate, ApplicationUpdate
 from app.services.errors import AlreadyQueuedError, ApplicationNotFoundError
-from app.services.research_queue_service import enqueue_company_contacts
+from app.services.research_queue_service import add_company_contacts_item
 
 
 def _now() -> datetime:
@@ -17,11 +17,13 @@ def _now() -> datetime:
 
 
 def _enqueue_contacts_if_applied(db: Session, application: Application) -> None:
-    """Spec §13.2: entering `applied` queues a find-contacts request, once."""
+    """Spec §13.2: entering `applied` queues a find-contacts request, once.
+    Runs before the caller's commit, so the status change and the queue
+    item are saved together."""
     if application.status != ApplicationStatus.APPLIED:
         return
     try:
-        enqueue_company_contacts(db, application)
+        add_company_contacts_item(db, application)
     except AlreadyQueuedError:
         pass
 
@@ -38,8 +40,8 @@ def create_application(db: Session, data: ApplicationCreate) -> Application:
             changed_at=_now(),
         )
     )
-    db.commit()
     _enqueue_contacts_if_applied(db, application)
+    db.commit()
     return application
 
 
@@ -88,8 +90,8 @@ def change_status(db: Session, application_id: int, new_status: ApplicationStatu
         )
     )
     application.status = new_status
-    db.commit()
     _enqueue_contacts_if_applied(db, application)
+    db.commit()
     return application
 
 
