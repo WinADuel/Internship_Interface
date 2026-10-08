@@ -30,6 +30,14 @@ def enqueue_professor(db: Session, data: QueueItemCreate) -> ResearchQueueItem:
 
 def enqueue_company_contacts(db: Session, application: Application) -> ResearchQueueItem:
     """Queue a find-contacts request; at most one per application, ever."""
+    item = add_company_contacts_item(db, application)
+    db.commit()
+    return item
+
+
+def add_company_contacts_item(db: Session, application: Application) -> ResearchQueueItem:
+    """`enqueue_company_contacts` without the commit, so the application
+    service can save a status change and its queue item atomically."""
     existing = db.scalars(
         select(ResearchQueueItem.id).where(ResearchQueueItem.application_id == application.id).limit(1)
     ).first()
@@ -46,7 +54,7 @@ def enqueue_company_contacts(db: Session, application: Application) -> ResearchQ
         created_at=_now(),
     )
     db.add(item)
-    db.commit()
+    db.flush()
     return item
 
 
