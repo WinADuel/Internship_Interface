@@ -272,6 +272,16 @@ def test_fetch_list_empty_list_is_a_complete_empty_result():
     assert result.error is None
     assert result.complete is True
     assert result.postings == []
+    # An empty complete result still names its source, so ingest can close.
+    assert result.source is PostingSource.SIMPLIFY
+
+
+def test_fetch_list_custom_complete_result_names_its_source():
+    http = FakeDiscoveryHttp({("GET", CUSTOM_URL): json_result([])})
+    result = fetch_list(http, CUSTOM_URL, None)
+    assert result.complete is True
+    assert result.source is PostingSource.LIST
+    assert result.key_prefix == list_key_prefix(CUSTOM_URL)
 
 
 def test_fetch_list_names():
@@ -389,6 +399,7 @@ def test_fetch_board_empty_board_is_complete(ats, api_url, data):
     assert result.error is None
     assert result.complete is True
     assert result.postings == []
+    assert result.source is PostingSource(ats.value)
 
 
 def test_fetch_board_ashby_with_only_unlisted_jobs_is_complete_and_empty():

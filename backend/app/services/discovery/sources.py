@@ -90,6 +90,9 @@ class SourceResult:
     # Custom (LIST) sources only: every source_key starts with "<prefix>:",
     # so closing can be scoped to this one list.
     key_prefix: str | None = None
+    # The source the postings belong to. Set on complete results, so ingest
+    # can close a source's postings even when the result is empty.
+    source: PostingSource | None = None
 
 
 # --- helpers -----------------------------------------------------------------
@@ -192,7 +195,12 @@ def fetch_list(http: DiscoveryHttp, url: str, etag: str | None) -> SourceResult:
         # as a failure, or every posting from this list would be closed.
         return _failed(name, _BAD_SHAPE, prefix)
     return SourceResult(
-        name, postings, complete=True, etag=result.etag, key_prefix=prefix
+        name,
+        postings,
+        complete=True,
+        etag=result.etag,
+        key_prefix=prefix,
+        source=source,
     )
 
 
@@ -227,7 +235,9 @@ def _fetch_single_request_board(
         ]
     if expected and not postings:
         return _failed(name, _BAD_SHAPE)
-    return SourceResult(name, postings, complete=True)
+    return SourceResult(
+        name, postings, complete=True, source=PostingSource(company.ats.value)
+    )
 
 
 def _fetch_workday(
