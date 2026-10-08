@@ -1,5 +1,3 @@
-from datetime import date
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -23,6 +21,7 @@ from app.services.errors import (
     InvalidTransitionError,
     UndoExpiredError,
 )
+from app.services.nudges import utc_today
 from app.services.sheet_sync_service import CONTACT_TABS, SheetSyncScheduler
 
 router = APIRouter(
@@ -36,7 +35,7 @@ _BAD_APPLICATION = HTTPException(status_code=422, detail="application not found"
 
 
 def _out(db: Session, contacts: list[Contact]) -> list[ContactOut]:
-    nudges = contact_service.contact_nudges(db, contacts, today=date.today())
+    nudges = contact_service.contact_nudges(db, contacts, today=utc_today())
     return [ContactOut.model_validate(c).model_copy(update={"nudge": nudges[c.id]}) for c in contacts]
 
 
@@ -87,7 +86,7 @@ def recent_activity(limit: int = Query(10, ge=1, le=100), db: Session = Depends(
 
 @router.get("/needs-attention", response_model=list[ContactOut])
 def needs_attention(db: Session = Depends(get_db)):
-    items = contact_service.list_needs_attention(db, today=date.today())
+    items = contact_service.list_needs_attention(db, today=utc_today())
     return [ContactOut.model_validate(c).model_copy(update={"nudge": n}) for c, n in items]
 
 
@@ -177,7 +176,7 @@ def snooze(
     sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
 ):
     try:
-        contact = contact_service.snooze_contact(db, contact_id, body.days, today=date.today())
+        contact = contact_service.snooze_contact(db, contact_id, body.days, today=utc_today())
     except ContactNotFoundError:
         raise _NOT_FOUND
     return _synced(db, contact, background_tasks, sync)

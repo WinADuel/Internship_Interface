@@ -1,8 +1,6 @@
 """The scheduled Claude job's only way in (spec §13.5). Every route is
 behind `get_claude_token`; nothing here accepts a session cookie."""
 
-from datetime import date
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -12,6 +10,7 @@ from app.schemas.claude import ContactsBatchIn, FollowupsBatchIn, IngestResultOu
 from app.schemas.research_queue import QueueItemOut
 from app.services import claude_ingest_service
 from app.services.errors import QueueItemNotFoundError, QueueItemNotPendingError
+from app.services.nudges import utc_today
 from app.services.sheet_sync_service import CONTACT_TABS, SheetSyncScheduler
 
 router = APIRouter(prefix="/api/claude", tags=["claude"], dependencies=[Depends(get_claude_token)])
@@ -19,7 +18,7 @@ router = APIRouter(prefix="/api/claude", tags=["claude"], dependencies=[Depends(
 
 @router.get("/work", response_model=WorkOut)
 def work(db: Session = Depends(get_db)):
-    return claude_ingest_service.get_work(db, today=date.today())
+    return claude_ingest_service.get_work(db, today=utc_today())
 
 
 @router.post("/contacts", response_model=IngestResultOut)

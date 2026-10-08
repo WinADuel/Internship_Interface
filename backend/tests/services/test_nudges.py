@@ -76,3 +76,18 @@ def test_needs_followup_draft_one_day_early():
     assert needs_followup_draft(_contact("sent", sent_at=_days_ago(8)), S, TODAY) is False
     assert needs_followup_draft(_contact("sent", sent_at=_days_ago(9), archived=True), S, TODAY) is False
     assert needs_followup_draft(_contact("followed_up", sent_at=_days_ago(20)), S, TODAY) is False
+
+
+def test_utc_today_matches_the_utc_date_of_stored_timestamps(monkeypatch):
+    # The server's TZ (America/Chicago in compose) must not shift "today" off the UTC dates nudges compare.
+    import time
+
+    from app.services.nudges import utc_today
+
+    monkeypatch.setenv("TZ", "Etc/GMT+12")
+    time.tzset()
+    try:
+        assert utc_today() == datetime.now(UTC).date()
+    finally:
+        monkeypatch.undo()
+        time.tzset()

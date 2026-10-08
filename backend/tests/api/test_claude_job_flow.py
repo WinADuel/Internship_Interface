@@ -68,9 +68,10 @@ def test_claude_job_flow(logged_in_client, db_session):
     assert r.status_code == 200 and r.json() == {"created": 2, "updated": 0, "skipped": 0}
 
     # 4. It completes both items with a note on found vs. target.
-    for item_id in (prof_item_id, company_item.id):
-        r = client.post(f"/api/claude/queue/{item_id}/complete", headers=bearer, json={"result_note": "found 1 of 1"})
-        assert r.status_code == 200 and r.json()["state"] == "done"
+    notes = {prof_item_id: "found 1 of 1", company_item.id: "found 1 of 3; the team page lists one manager"}
+    for item_id, note in notes.items():
+        r = client.post(f"/api/claude/queue/{item_id}/complete", headers=bearer, json={"result_note": note})
+        assert r.status_code == 200 and r.json()["state"] == "done" and r.json()["result_note"] == note
     assert client.get("/api/claude/work", headers=bearer).json()["queue"] == []
 
     # 5. The user sent the professor's email 9 days ago.
