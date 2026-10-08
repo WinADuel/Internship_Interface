@@ -8,12 +8,16 @@
   import Login from "./routes/Login.svelte";
   import Applications from "./routes/Applications.svelte";
   import Essays from "./routes/Essays.svelte";
+  import Contacts from "./routes/Contacts.svelte";
+  import ResearchQueue from "./routes/ResearchQueue.svelte";
 
   const routes = {
     "/": Dashboard,
     "/login": Login,
     "/applications": Applications,
     "/essays": Essays,
+    "/contacts": Contacts,
+    "/research-queue": ResearchQueue,
   };
 
   onMount(() => {
