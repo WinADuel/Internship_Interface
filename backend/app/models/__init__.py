@@ -6,3 +6,8 @@ from app.models.auth_credential import AuthCredential  # noqa: F401
 from app.models.application import Application  # noqa: F401
 from app.models.oauth_token import OAuthToken  # noqa: F401
 from app.models.status_history import StatusHistory  # noqa: F401
+from app.models.contact import Contact  # noqa: F401
+from app.models.contact_status_history import ContactStatusHistory  # noqa: F401
+from app.models.research_queue import ResearchQueueItem  # noqa: F401
+from app.models.app_settings import AppSettings  # noqa: F401
+from app.models.claude_token import ClaudeToken  # noqa: F401
