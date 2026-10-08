@@ -85,7 +85,7 @@ Pasted postings skip the filters and go straight to **Saved**. Because the serve
 
 **De-duplication.** A new posting is skipped if its `url_key` matches an existing row, or if the same company and title (case-insensitive) arrived from another source in the last 14 days. So the same role on Simplify, vanshb03 and a Greenhouse board appears once.
 
-**Housekeeping.** Postings that are `new` or `dismissed` and either closed or older than 90 days are deleted by the scan. Saved and applied postings are never deleted automatically.
+**Housekeeping.** Postings that are `new` or `dismissed` and either closed or not seen by any scan for 90 days (`last_seen_at`) are deleted by the scan. Postings still listed by their source are never deleted, so a dismissed posting cannot come back to the Inbox as new. Saved and applied postings are never deleted automatically.
 
 ### `watch_companies`
 `id`, `name`, `ats` (`greenhouse`/`lever`/`ashby`/`workday`), `board_token` (unique with `ats`; for Workday, `<host>/<tenant>/<site>`), `careers_url`, `added_at`, `last_checked_at`, `last_error` (one line, never a response body).
