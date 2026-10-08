@@ -132,6 +132,10 @@ class DismissAllIn(BaseModel):
     ids: list[int] = Field(max_length=MAX_DISMISS_IDS)
 
 
+class DismissAllOut(BaseModel):
+    dismissed: int
+
+
 # --- paste a link ------------------------------------------------------------
 
 
@@ -186,6 +190,10 @@ class WatchCompanyOut(BaseModel):
 
 
 # --- scan status and match count ---------------------------------------------
+
+
+class ScanStartedOut(BaseModel):
+    started: bool = True
 
 
 class ScanStatusOut(BaseModel):

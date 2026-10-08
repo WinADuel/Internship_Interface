@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.claude_token_service import create_token, revoke_token
+from tests.api.test_discovery_routes import ROUTES as DISCOVERY_ROUTES
 
 
 def test_claude_route_accepts_valid_bearer(client, db_session):
@@ -29,6 +30,15 @@ def test_claude_token_rejected_on_cookie_routes(client, db_session):
         assert r.status_code == 401, path
     client.cookies.set("access_token", raw)
     assert client.get("/api/contacts").status_code == 401
+
+
+@pytest.mark.parametrize(("method", "path"), DISCOVERY_ROUTES)
+def test_claude_token_rejected_on_discovery_routes(client, db_session, method, path):
+    _, raw = create_token(db_session)
+    r = client.request(method, path, headers={"Authorization": f"Bearer {raw}"}, json={})
+    assert r.status_code == 401, (method, path)
+    client.cookies.set("access_token", raw)
+    assert client.request(method, path, json={}).status_code == 401, (method, path)
 
 
 def test_revoked_token_rejected(client, db_session):
