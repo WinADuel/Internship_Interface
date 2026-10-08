@@ -5,6 +5,7 @@ drafts are ever written on an existing contact; status, dates, priority,
 notes, archived, origin, kind and application_id are user/app-owned.
 Each ingest call commits once at the end, so a failure writes nothing."""
 
+import re
 from datetime import date, datetime, timezone
 from urllib.parse import urlsplit
 
@@ -29,6 +30,15 @@ _RESEARCH_TEXT_FIELDS = (
     "research_summary",
     "recent_work",
 )
+
+
+# One plain address. Anything else (a list, a display name, URL query
+# characters) could add recipients to a Gmail compose link, so it is dropped.
+_SINGLE_EMAIL_RE = re.compile(r"^[A-Za-z0-9.!#$*+/^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$")
+
+
+def is_single_email(value: str | None) -> bool:
+    return bool(value) and _SINGLE_EMAIL_RE.fullmatch(value) is not None
 
 
 def _now() -> datetime:
@@ -74,10 +84,10 @@ def get_work(db: Session, today: date) -> dict:
     }
 
 
-def _find_match(db: Session, item: ContactIn) -> Contact | None:
-    if item.email:
+def _find_match(db: Session, item: ContactIn, email: str | None) -> Contact | None:
+    if email:
         match = db.scalars(
-            select(Contact).where(func.lower(Contact.email) == item.email.lower()).order_by(Contact.id)
+            select(Contact).where(func.lower(Contact.email) == email.lower()).order_by(Contact.id)
         ).first()
         if match is not None:
             return match
@@ -95,14 +105,15 @@ def _sanitized(item: ContactIn) -> dict:
     """Research fields with unsafe URLs dropped and an unsupported "found"
     email downgraded to a guess."""
     sources = [s.model_dump() for s in item.sources if is_safe_url(s.url)]
-    confidence = item.email_confidence
+    email = item.email if is_single_email(item.email) else None
+    confidence = item.email_confidence if email else EmailConfidence.NOT_FOUND
     if confidence == EmailConfidence.FOUND and not sources:
         confidence = EmailConfidence.PATTERN_GUESS
     fields = {name: getattr(item, name) or None for name in _RESEARCH_TEXT_FIELDS}
     for url_field in ("website_url", "profile_url"):
         if not is_safe_url(fields[url_field]):
             fields[url_field] = None
-    fields["email"] = item.email or None
+    fields["email"] = email
     fields["email_confidence"] = confidence
     fields["sources"] = sources
     return fields
@@ -118,8 +129,11 @@ def _update_existing(contact: Contact, item: ContactIn, fields: dict, now: datet
         contact.email_confidence = fields["email_confidence"]
     if fields["sources"]:
         contact.sources = fields["sources"]
-    if not contact.draft_edited and item.draft_body:
-        contact.draft_subject = item.draft_subject or None
+    # Once sent, the draft is the record of what went out (and the basis for
+    # the follow-up), so it is refreshed only before sending.
+    if not contact.draft_edited and contact.status == ContactStatus.TO_CONTACT and item.draft_body:
+        if item.draft_subject:
+            contact.draft_subject = item.draft_subject
         contact.draft_body = item.draft_body
         if contact.draft_ready_at is None:
             contact.draft_ready_at = now
@@ -134,7 +148,7 @@ def upsert_contacts(db: Session, batch: ContactsBatchIn, now: datetime | None = 
             skipped += 1
             continue
         fields = _sanitized(item)
-        contact = _find_match(db, item)
+        contact = _find_match(db, item, fields["email"])
         if contact is not None:
             _update_existing(contact, item, fields, now)
             updated += 1
@@ -164,7 +178,13 @@ def apply_followups(db: Session, batch: FollowupsBatchIn) -> IngestResultOut:
     updated = skipped = 0
     for item in batch.followups:
         contact = db.get(Contact, item.contact_id)
-        if contact is None or contact.followup_edited:
+        # Only active contacts awaiting a reply to the first email take a follow-up.
+        if (
+            contact is None
+            or contact.followup_edited
+            or contact.archived
+            or contact.status != ContactStatus.SENT
+        ):
             skipped += 1
             continue
         contact.followup_subject = item.followup_subject
