@@ -67,3 +67,27 @@ def test_validation_errors_do_not_echo_the_secret_value():
     with pytest.raises(ValidationError) as excinfo:
         _make(jwt_secret="hunter2-too-short")
     assert "hunter2-too-short" not in str(excinfo.value)
+
+
+def test_backup_settings_are_optional_with_defaults():
+    s = _make()
+    assert s.backup_dir == "/backups"
+    assert s.backup_encryption_key is None
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_backup_encryption_key_means_unset(blank):
+    assert _make(backup_encryption_key=blank).backup_encryption_key is None
+
+
+def test_valid_backup_encryption_key_is_accepted():
+    key = Fernet.generate_key().decode()
+    assert _make(backup_encryption_key=key).backup_encryption_key == key
+
+
+@pytest.mark.parametrize("key", ["change-me", "not-base64!!", "dG9vLXNob3J0"])
+def test_invalid_backup_encryption_key_is_rejected_without_echoing_it(key):
+    with pytest.raises(ValidationError, match="BACKUP_ENCRYPTION_KEY") as excinfo:
+        _make(backup_encryption_key=key)
+    assert "Fernet.generate_key" in str(excinfo.value)
+    assert key not in str(excinfo.value)

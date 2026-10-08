@@ -64,6 +64,7 @@ def test_backend_serves_on_the_port_the_healthcheck_probes():
         ("backend", "db", "service_healthy"),
         ("sheet-sync", "db", "service_healthy"),
         ("job-scan", "db", "service_healthy"),
+        ("db-backup", "db", "service_healthy"),
         ("caddy", "backend", "service_healthy"),
     ],
 )
@@ -105,3 +106,19 @@ def test_caddy_mounts_the_repo_caddyfile_read_only(services):
 def test_env_example_lists_contact_email():
     env_example = (COMPOSE_PATH.parent / ".env.example").read_text()
     assert "\nCONTACT_EMAIL=" in env_example
+
+
+def test_db_backup_service_runs_the_backup_job(services):
+    service = services["db-backup"]
+    assert service["build"] == "./backend"
+    assert service["restart"] == "unless-stopped"
+    assert service["env_file"] == ".env"
+    assert service["command"] == "python -m app.jobs.db_backup"
+    # TZ decides when 02:30 is; BACKUP_DIR is the bind-mounted folder on the host.
+    assert service["environment"] == {"TZ": "${TZ:-UTC}", "BACKUP_DIR": "/backups"}
+    assert service["volumes"] == ["./backups:/backups"]
+
+
+def test_backups_folder_is_git_ignored():
+    gitignore = (COMPOSE_PATH.parent / ".gitignore").read_text().splitlines()
+    assert "/backups/" in gitignore
