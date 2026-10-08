@@ -62,3 +62,25 @@ export function showsSponsorship(sponsorship: string | null): boolean {
   const note = sponsorship?.trim() ?? "";
   return note !== "" && note.toLowerCase() !== "other";
 }
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * How long ago an instant was: "just now" under a minute (or in the future),
+ * then whole minutes, hours and days; from a week on, the local date.
+ * Unparseable input gives "".
+ */
+export function timeAgo(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  const minutes = Math.floor((now.getTime() - then.getTime()) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return plural(minutes, "minute");
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return plural(hours, "hour");
+  const days = Math.floor(hours / 24);
+  if (days < 7) return plural(days, "day");
+  return then.toLocaleDateString();
+}

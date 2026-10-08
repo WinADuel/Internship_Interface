@@ -7,6 +7,7 @@ import {
   showsSponsorship,
   SOURCE_LABELS,
   sourceLabel,
+  timeAgo,
 } from "./format";
 import { fakePosting } from "../testing/fixtures";
 
@@ -104,5 +105,29 @@ describe("showsSponsorship", () => {
     expect(showsSponsorship("Other")).toBe(false);
     expect(showsSponsorship(" other ")).toBe(false);
     expect(showsSponsorship("Does Not Offer Sponsorship")).toBe(true);
+  });
+});
+
+describe("timeAgo", () => {
+  const now = new Date("2026-10-08T12:00:00Z");
+
+  it("says how long ago, in the largest whole unit up to days", () => {
+    expect(timeAgo("2026-10-08T11:59:30Z", now)).toBe("just now");
+    expect(timeAgo("2026-10-08T11:59:00Z", now)).toBe("1 minute ago");
+    expect(timeAgo("2026-10-08T11:15:00Z", now)).toBe("45 minutes ago");
+    expect(timeAgo("2026-10-08T11:00:00Z", now)).toBe("1 hour ago");
+    expect(timeAgo("2026-10-08T00:30:00Z", now)).toBe("11 hours ago");
+    expect(timeAgo("2026-10-07T12:00:00Z", now)).toBe("1 day ago");
+    expect(timeAgo("2026-10-02T12:00:00Z", now)).toBe("6 days ago");
+  });
+
+  it("gives the date from a week on", () => {
+    const iso = "2026-09-30T12:00:00Z";
+    expect(timeAgo(iso, now)).toBe(new Date(iso).toLocaleDateString());
+  });
+
+  it("reads a time slightly in the future as just now, and bad input as empty", () => {
+    expect(timeAgo("2026-10-08T12:05:00Z", now)).toBe("just now");
+    expect(timeAgo("not a date", now)).toBe("");
   });
 });

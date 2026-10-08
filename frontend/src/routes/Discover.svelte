@@ -3,6 +3,7 @@
   import PasteLink from "../lib/components/discovery/PasteLink.svelte";
   import PostingList from "../lib/components/discovery/PostingList.svelte";
   import ScanHeader from "../lib/components/discovery/ScanHeader.svelte";
+  import Watchlist from "../lib/components/discovery/Watchlist.svelte";
   import type { PostingView } from "../lib/types/discovery";
 
   type Tab = PostingView | "watchlist";
@@ -69,7 +70,7 @@
 
 <div class="panel" role="tabpanel" id="discover-panel" aria-labelledby="discover-tab-{tab}">
   {#if tab === "watchlist"}
-    <p class="muted">The company watchlist is coming next.</p>
+    <Watchlist />
   {:else}
     {#key `${tab}:${reloads}`}
       <PostingList view={tab} />
@@ -82,5 +83,4 @@
   .tabs button { border: 1px solid transparent; border-bottom: 0; background: none; padding: 0.4rem 0.9rem; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; }
   .tabs button[aria-selected="true"] { border-color: #ddd; background: #fff; font-weight: 600; margin-bottom: -1px; }
   .tabs button:focus-visible { outline: 2px solid #1a5fb4; }
-  .muted { color: #555; }
 </style>
