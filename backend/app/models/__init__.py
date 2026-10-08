@@ -11,3 +11,5 @@ from app.models.contact_status_history import ContactStatusHistory  # noqa: F401
 from app.models.research_queue import ResearchQueueItem  # noqa: F401
 from app.models.app_settings import AppSettings  # noqa: F401
 from app.models.claude_token import ClaudeToken  # noqa: F401
+from app.models.watch_company import WatchCompany  # noqa: F401
+from app.models.posting import Posting  # noqa: F401
