@@ -36,7 +36,9 @@ BOARD_SOURCES = frozenset(
 # A new posting with the same company and title as another source's posting
 # first seen within this window is the same role (spec §3).
 DUPLICATE_WINDOW = timedelta(days=14)
-# New or dismissed postings older than this are deleted by housekeeping.
+# New or dismissed postings no scan has seen for this long are deleted by
+# housekeeping. Measured from last_seen_at, never first_seen_at: deleting a
+# still-listed posting would bring it back to the Inbox as new.
 HOUSEKEEPING_AGE = timedelta(days=90)
 
 # Bound on bind parameters per IN (...) list.
@@ -263,14 +265,16 @@ def ingest(
 
 
 def housekeep(db: Session, now: datetime) -> int:
-    """Delete new or dismissed postings that are closed or older than 90 days.
-    Saved and applied postings are never deleted. Returns the number deleted."""
+    """Delete new or dismissed postings that are closed or that no scan has
+    seen for 90 days (`last_seen_at`). Postings still listed by an open source
+    are kept however old they are; saved and applied postings are never
+    deleted. Returns the number deleted."""
     deleted = db.execute(
         delete(Posting).where(
             Posting.state.in_([PostingState.NEW, PostingState.DISMISSED]),
             or_(
                 Posting.closed.is_(True),
-                Posting.first_seen_at < now - HOUSEKEEPING_AGE,
+                Posting.last_seen_at < now - HOUSEKEEPING_AGE,
             ),
         )
     )

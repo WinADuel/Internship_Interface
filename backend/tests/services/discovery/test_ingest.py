@@ -573,24 +573,37 @@ def test_five_thousand_rows_ingest_in_one_call(db_session):
 # --- housekeeping -----------------------------------------------------------------
 
 
-def test_housekeep_deletes_closed_or_stale_new_and_dismissed_only(db_session):
+def test_housekeep_deletes_closed_or_unseen_new_and_dismissed_only(db_session):
     def days(n: int) -> datetime:
         return NOW - timedelta(days=n)
 
     keep = {
-        "new-89": {"first_seen_at": days(89)},
-        "dismissed-89": {"first_seen_at": days(89), "state": PostingState.DISMISSED},
+        "new-unseen-89": {"first_seen_at": days(120), "last_seen_at": days(89)},
+        "dismissed-unseen-89": {
+            "first_seen_at": days(120),
+            "last_seen_at": days(89),
+            "state": PostingState.DISMISSED,
+        },
         "saved-closed": {"closed": True, "state": PostingState.SAVED},
-        "saved-91": {"first_seen_at": days(91), "state": PostingState.SAVED},
-        "applied-closed-91": {
+        "saved-unseen-91": {
+            "first_seen_at": days(120),
+            "last_seen_at": days(91),
+            "state": PostingState.SAVED,
+        },
+        "applied-closed-unseen-91": {
             "closed": True,
-            "first_seen_at": days(91),
+            "first_seen_at": days(120),
+            "last_seen_at": days(91),
             "state": PostingState.APPLIED,
         },
     }
     drop = {
-        "new-91": {"first_seen_at": days(91)},
-        "dismissed-91": {"first_seen_at": days(91), "state": PostingState.DISMISSED},
+        "new-unseen-91": {"first_seen_at": days(120), "last_seen_at": days(91)},
+        "dismissed-unseen-91": {
+            "first_seen_at": days(120),
+            "last_seen_at": days(91),
+            "state": PostingState.DISMISSED,
+        },
         "new-closed": {"closed": True},
         "dismissed-closed": {"closed": True, "state": PostingState.DISMISSED},
     }
@@ -599,6 +612,20 @@ def test_housekeep_deletes_closed_or_stale_new_and_dismissed_only(db_session):
 
     assert housekeep(db_session, NOW) == len(drop)
     assert sorted(r.source_key for r in all_postings(db_session)) == sorted(keep)
+
+
+def test_housekeep_keeps_old_postings_that_are_still_listed(db_session):
+    # Deleting a still-listed dismissed posting would bring it back to the
+    # Inbox as new on the next scan.
+    old = NOW - timedelta(days=120)
+    stored(db_session, "dismissed", first_seen_at=old, state=PostingState.DISMISSED)
+    stored(db_session, "new", first_seen_at=old)
+    ingest(db_session, result([pin("dismissed"), pin("new")]), NOW)
+
+    assert housekeep(db_session, NOW) == 0
+    dismissed = by_key(db_session, PostingSource.SIMPLIFY, "dismissed")
+    assert dismissed.state is PostingState.DISMISSED
+    assert dismissed.first_seen_at == old
 
 
 def test_housekeep_with_nothing_to_delete_returns_zero(db_session):
