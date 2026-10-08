@@ -5,16 +5,26 @@ the network. `HttpxDiscoveryHttp` is the real implementation.
 
 SSRF guard for pasted pages (`get_page`, spec §2c): only http/https; every
 hop's host must resolve only to public addresses; the request is then sent
-to the address that passed the check (Host header and TLS SNI carry the
+to an address that passed the check (Host header and TLS SNI carry the
 original name, and certificates are verified against it), so a second DNS
 answer cannot swap in a private address between check and connect.
 Redirects are followed by hand, at most five, each re-checked the same way.
+
+Deadline: `timeout` bounds the whole call (DNS, connect, headers, body, every
+redirect hop). httpx's own timeouts apply per read, so a server trickling one
+byte at a time could otherwise hold a call (and a scan's advisory lock) for
+hours. Each call therefore runs on its own event loop (`asyncio.run`) inside
+`asyncio.timeout`, which really cancels a blocked read. The public methods
+stay synchronous: FastAPI runs sync routes in a worker thread and the
+job-scan loop is plain sync code; calling from inside a running event loop
+is refused with a clear RuntimeError.
 """
 
+import asyncio
 import ipaddress
 import json
 import socket
-import time
+import threading
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -33,6 +43,8 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _PAGE_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 _WHERE_MAX = 200
 
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+
 
 @dataclass
 class FetchResult:
@@ -45,7 +57,7 @@ class FetchResult:
 
 class DiscoveryFetchError(Exception):
     """One-line, user-safe failure: never a response body, never a query
-    string (host + path only). `status` is set for an HTTP error status."""
+    string (host + raw path only). `status` is set for an HTTP error status."""
 
     def __init__(self, message: str, *, status: int | None = None) -> None:
         super().__init__(message)
@@ -54,9 +66,10 @@ class DiscoveryFetchError(Exception):
 
 class DiscoveryHttp(Protocol):
     """Implementations raise `DiscoveryFetchError` for transport failures,
-    timeouts, any status other than 2xx/304, oversize bodies, invalid JSON
-    and (get_page) refused addresses or non-HTML pages. A returned
-    `FetchResult` therefore always has status 2xx or 304."""
+    timeouts, any status other than 2xx (or 304 from get_json), oversize
+    bodies, invalid JSON and (get_page) refused addresses or non-HTML pages.
+    A returned `FetchResult` therefore always has status 2xx, or 304 from
+    get_json called with an etag."""
 
     def get_json(
         self, url: str, *, etag: str | None = None, max_bytes: int, timeout: float
@@ -67,17 +80,25 @@ class DiscoveryHttp(Protocol):
     def get_page(self, url: str, *, max_bytes: int, timeout: float) -> FetchResult: ...
 
 
+def _clean(text: str) -> str:
+    """Printable ASCII only, so a message is one line and safe to log."""
+    return "".join(ch if 0x20 < ord(ch) < 0x7F else "?" for ch in text)
+
+
 def _where(url: httpx.URL | str) -> str:
-    """host + path for messages and logs: never the query string."""
+    """host + raw (still percent-encoded) path for messages and logs: never
+    the query string, never a decoded CR/LF."""
     try:
         parsed = url if isinstance(url, httpx.URL) else httpx.URL(url)
-        where = f"{parsed.host}{parsed.path}"
+        host = parsed.raw_host.decode("ascii", "replace")
+        path = parsed.raw_path.split(b"?", 1)[0].decode("ascii", "replace")
+        where = host + path
     except (httpx.InvalidURL, TypeError, ValueError):
         where = "invalid url"
-    return where[:_WHERE_MAX]
+    return _clean(where)[:_WHERE_MAX]
 
 
-def _address_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+def _address_allowed(ip: IPAddress) -> bool:
     if (
         not ip.is_global
         or ip.is_private
@@ -86,6 +107,7 @@ def _address_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_multicast
         or ip.is_reserved
         or ip.is_unspecified
+        or getattr(ip, "is_site_local", False)  # IPv6 fec0::/10; Python calls it global
     ):
         return False
     if isinstance(ip, ipaddress.IPv6Address):
@@ -96,34 +118,67 @@ def _address_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return True
 
 
-def _resolve_public(host: str, port: int) -> tuple[str, bool]:
-    """(address to connect to, host was an IP literal). Every address the
+async def _getaddrinfo(host: str, port: int) -> list:
+    """socket.getaddrinfo in a daemon thread, awaitable and cancellable, so the
+    caller's deadline bounds DNS too. A lookup the caller gave up on finishes
+    in the background and is discarded; being a daemon thread, it never holds
+    up `asyncio.run` shutdown or interpreter exit (the default executor would)."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future = loop.create_future()
+
+    def settle(result: list | None, error: Exception | None) -> None:
+        if future.done():
+            return
+        if error is not None:
+            future.set_exception(error)
+        else:
+            future.set_result(result)
+
+    def work() -> None:
+        try:
+            result, error = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM), None
+        except Exception as exc:  # noqa: BLE001 — handed back to the awaiting coroutine
+            result, error = None, exc
+        try:
+            loop.call_soon_threadsafe(settle, result, error)
+        except RuntimeError:
+            pass  # the loop already closed: the caller timed out and left
+
+    threading.Thread(target=work, name="discovery-dns", daemon=True).start()
+    return await future
+
+
+async def _resolve_public(host: str, port: int) -> tuple[list[str], bool]:
+    """(addresses to try, in order; host was an IP literal). Every address the
     name resolves to must be public, else DiscoveryFetchError."""
+    label = _clean(host)[:_WHERE_MAX]
     try:
         literal = ipaddress.ip_address(host)
     except ValueError:
         literal = None
     if literal is not None:
         if not _address_allowed(literal):
-            raise DiscoveryFetchError(f"{host}: address not allowed")
-        return str(literal), True
+            raise DiscoveryFetchError(f"{label}: address not allowed")
+        return [str(literal)], True
     try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        infos = await _getaddrinfo(host, port)
     except (OSError, UnicodeError):
-        raise DiscoveryFetchError(f"{host}: could not resolve host") from None
-    addresses = []
+        raise DiscoveryFetchError(f"{label}: could not resolve host") from None
+    addresses: list[IPAddress] = []
     for family, _type, _proto, _canon, sockaddr in infos:
         if family not in (socket.AF_INET, socket.AF_INET6):
             continue
         try:
-            addresses.append(ipaddress.ip_address(sockaddr[0]))
+            address = ipaddress.ip_address(sockaddr[0])
         except ValueError:
-            raise DiscoveryFetchError(f"{host}: address not allowed") from None
+            raise DiscoveryFetchError(f"{label}: address not allowed") from None
+        if address not in addresses:
+            addresses.append(address)
     if not addresses:
-        raise DiscoveryFetchError(f"{host}: could not resolve host")
+        raise DiscoveryFetchError(f"{label}: could not resolve host")
     if not all(_address_allowed(a) for a in addresses):
-        raise DiscoveryFetchError(f"{host}: address not allowed")
-    return str(addresses[0]), False
+        raise DiscoveryFetchError(f"{label}: address not allowed")
+    return [str(a) for a in addresses], False
 
 
 def _check_url(url: str) -> httpx.URL:
@@ -141,31 +196,58 @@ def _check_url(url: str) -> httpx.URL:
     return parsed
 
 
-def _pinned_request(client: httpx.Client, url: httpx.URL) -> httpx.Request:
-    """A GET for `url` sent to an address that passed the public-address check."""
+def _request_failed(where: str, exc: BaseException) -> DiscoveryFetchError:
+    return DiscoveryFetchError(f"{where}: request failed ({type(exc).__name__})")
+
+
+async def _send(client: httpx.AsyncClient, request: httpx.Request, where: str) -> httpx.Response:
+    try:
+        return await client.send(request, stream=True)
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        # httpx pre-builds the redirect request even when not following it,
+        # so a malformed Location raises InvalidURL here.
+        raise _request_failed(where, exc) from None
+
+
+async def _send_pinned(
+    client: httpx.AsyncClient, url: httpx.URL, headers: dict[str, str], where: str
+) -> httpx.Response:
+    """GET `url` from an address that passed the public-address check, trying
+    the next checked address when one refuses the connection."""
     host = url.raw_host.decode("ascii")
     port = url.port or (443 if url.scheme == "https" else 80)
-    address, is_literal = _resolve_public(host, port)
+    addresses, is_literal = await _resolve_public(host, port)
     if is_literal:
-        return client.build_request("GET", url)
-    headers = {"Host": f"{host}:{url.port}" if url.port else host}
+        return await _send(client, client.build_request("GET", url, headers=headers), where)
+    pinned_headers = {**headers, "Host": f"{host}:{url.port}" if url.port else host}
     extensions = {"sni_hostname": host} if url.scheme == "https" else {}
-    return client.build_request(
-        "GET", url.copy_with(host=address), headers=headers, extensions=extensions
-    )
+    last_error: Exception | None = None
+    for address in addresses:
+        request = client.build_request(
+            "GET", url.copy_with(host=address), headers=pinned_headers, extensions=extensions
+        )
+        try:
+            return await client.send(request, stream=True)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            last_error = exc
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
+            raise _request_failed(where, exc) from None
+    assert last_error is not None
+    raise _request_failed(where, last_error)
 
 
-def _read_capped(response: httpx.Response, max_bytes: int, deadline: float, where: str) -> bytes:
+async def _read_capped(response: httpx.Response, max_bytes: int, where: str) -> bytes:
     length = response.headers.get("content-length", "")
     if length.isdigit() and int(length) > max_bytes:
         raise DiscoveryFetchError(f"{where}: too large")
     buffer = bytearray()
-    for chunk in response.iter_bytes():
-        buffer += chunk
-        if len(buffer) > max_bytes:
-            raise DiscoveryFetchError(f"{where}: too large")
-        if time.monotonic() > deadline:
-            raise DiscoveryFetchError(f"{where}: timed out")
+    try:
+        async for chunk in response.aiter_bytes():
+            buffer += chunk
+            if len(buffer) > max_bytes:
+                raise DiscoveryFetchError(f"{where}: too large")
+    except httpx.HTTPError as exc:
+        raise _request_failed(where, exc) from None
     return bytes(buffer)
 
 
@@ -185,18 +267,18 @@ def _decode_page(raw: bytes, response: httpx.Response) -> str:
 
 
 class HttpxDiscoveryHttp:
-    """`DiscoveryHttp` over httpx: streaming with a running byte count, a
-    whole-request deadline, the project User-Agent, no cookies (the jar is
-    cleared before every hop), no credentials, and no environment proxies or
-    .netrc (`trust_env=False`). A fresh client per call keeps calls
-    independent; tests inject an `httpx.MockTransport` (which must tolerate
-    being closed after each call)."""
+    """`DiscoveryHttp` over httpx: streaming with a running byte count, one
+    deadline for the whole call, the project User-Agent, no cookies (the jar
+    is cleared before every hop), no credentials, and no environment proxies
+    or .netrc (`trust_env=False`). Each call gets a fresh client and event
+    loop; tests inject an `httpx.MockTransport` (async-capable, and it must
+    tolerate being closed after each call)."""
 
-    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
 
-    def _client(self, timeout: float) -> httpx.Client:
-        return httpx.Client(
+    def _client(self, timeout: float) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             transport=self._transport,
             timeout=timeout,
             follow_redirects=False,
@@ -204,38 +286,50 @@ class HttpxDiscoveryHttp:
             headers={"User-Agent": USER_AGENT},
         )
 
-    def _fetch(
+    def _run(self, url: str, timeout: float, **kwargs: Any) -> FetchResult:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError(
+                "HttpxDiscoveryHttp is synchronous: call it from a worker thread, "
+                "not from inside a running event loop"
+            )
+        return asyncio.run(self._fetch(url, timeout, **kwargs))
+
+    async def _fetch(self, url: str, timeout: float, **kwargs: Any) -> FetchResult:
+        progress = {"where": _where(url)}
+        try:
+            async with asyncio.timeout(timeout):
+                return await self._hops(url, timeout, progress, **kwargs)
+        except TimeoutError:
+            raise DiscoveryFetchError(f"{progress['where']}: timed out") from None
+
+    async def _hops(
         self,
-        method: str,
         url: str,
-        *,
-        max_bytes: int,
         timeout: float,
-        headers: dict[str, str] | None = None,
+        progress: dict[str, str],
+        *,
+        method: str,
+        max_bytes: int,
+        headers: dict[str, str],
         body: dict | None = None,
         follow_redirects: bool,
         guard: bool,
         page: bool,
     ) -> FetchResult:
-        deadline = time.monotonic() + timeout
         current = _check_url(url)
-        with self._client(timeout) as client:
+        async with self._client(timeout) as client:
             for _hop in range(MAX_REDIRECTS + 1):
-                where = _where(current)
+                where = progress["where"] = _where(current)
                 client.cookies.clear()
                 if guard:
-                    request = _pinned_request(client, current)
-                    request.headers.update(headers or {})
+                    response = await _send_pinned(client, current, headers, where)
                 else:
                     request = client.build_request(method, current, headers=headers, json=body)
-                try:
-                    response = client.send(request, stream=True)
-                except (httpx.HTTPError, httpx.InvalidURL) as exc:
-                    # httpx pre-builds the redirect request even when not
-                    # following it, so a malformed Location raises InvalidURL here.
-                    raise DiscoveryFetchError(
-                        f"{where}: request failed ({type(exc).__name__})"
-                    ) from None
+                    response = await _send(client, request, where)
                 try:
                     status = response.status_code
                     if follow_redirects and status in _REDIRECT_STATUSES:
@@ -247,11 +341,10 @@ class HttpxDiscoveryHttp:
                         except httpx.InvalidURL:
                             raise DiscoveryFetchError(f"{where}: invalid redirect") from None
                         current = _check_url(target)
-                        if time.monotonic() > deadline:
-                            raise DiscoveryFetchError(f"{where}: timed out")
                         continue
-                    if status == 304:
-                        etag = response.headers.get("etag") or (headers or {}).get("If-None-Match")
+                    # A 304 only answers a conditional request, which get_page never sends.
+                    if status == 304 and not page:
+                        etag = response.headers.get("etag") or headers.get("If-None-Match")
                         return FetchResult(304, None, None, etag, str(current))
                     if not 200 <= status < 300:
                         raise DiscoveryFetchError(f"{where}: status {status}", status=status)
@@ -259,20 +352,14 @@ class HttpxDiscoveryHttp:
                         content_type = response.headers.get("content-type", "")
                         if content_type.split(";", 1)[0].strip().lower() not in _PAGE_CONTENT_TYPES:
                             raise DiscoveryFetchError(f"{where}: not a web page")
-                    try:
-                        raw = _read_capped(response, max_bytes, deadline, where)
-                    except httpx.HTTPError as exc:
-                        raise DiscoveryFetchError(
-                            f"{where}: request failed ({type(exc).__name__})"
-                        ) from None
+                    raw = await _read_capped(response, max_bytes, where)
                     etag = response.headers.get("etag")
                     if page:
-                        return FetchResult(
-                            status, None, _decode_page(raw, response), etag, str(current)
-                        )
+                        text = _decode_page(raw, response)
+                        return FetchResult(status, None, text, etag, str(current))
                     return FetchResult(status, _parse_json(raw, where), None, etag, str(current))
                 finally:
-                    response.close()
+                    await response.aclose()
         raise DiscoveryFetchError(f"{_where(url)}: too many redirects")
 
     def get_json(
@@ -281,11 +368,11 @@ class HttpxDiscoveryHttp:
         headers = {"Accept": "application/json"}
         if etag:
             headers["If-None-Match"] = etag
-        return self._fetch(
-            "GET",
+        return self._run(
             url,
+            timeout,
+            method="GET",
             max_bytes=max_bytes,
-            timeout=timeout,
             headers=headers,
             follow_redirects=True,
             guard=False,
@@ -293,11 +380,11 @@ class HttpxDiscoveryHttp:
         )
 
     def post_json(self, url: str, body: dict, *, max_bytes: int, timeout: float) -> FetchResult:
-        return self._fetch(
-            "POST",
+        return self._run(
             url,
+            timeout,
+            method="POST",
             max_bytes=max_bytes,
-            timeout=timeout,
             headers={"Accept": "application/json"},
             body=body,
             follow_redirects=False,
@@ -306,11 +393,11 @@ class HttpxDiscoveryHttp:
         )
 
     def get_page(self, url: str, *, max_bytes: int, timeout: float) -> FetchResult:
-        return self._fetch(
-            "GET",
+        return self._run(
             url,
+            timeout,
+            method="GET",
             max_bytes=max_bytes,
-            timeout=timeout,
             headers={"Accept": "text/html,application/xhtml+xml"},
             follow_redirects=True,
             guard=True,

@@ -1,0 +1,24 @@
+{
+  "jobPostingInfo": {
+    "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    "title": "Software Engineering Intern - Summer 2027",
+    "jobDescription": "<p>Write software for robots.</p>",
+    "location": "US, CA, Santa Clara",
+    "additionalLocations": ["US, TX, Austin", "US, WA, Seattle"],
+    "postedOn": "Posted 3 Days Ago",
+    "startDate": "2026-10-01",
+    "timeType": "Full time",
+    "jobReqId": "JR2001001",
+    "jobPostingId": "Software-Engineering-Intern---Summer-2027_JR2001001",
+    "jobPostingSiteId": "AcmeCareers",
+    "country": {"descriptor": "United States of America", "id": "bc33aa3152ec42d4995f4791a106ed09"},
+    "canApply": true,
+    "posted": true,
+    "includeResumeParsing": true,
+    "externalUrl": "https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-CA-Santa-Clara/Software-Engineering-Intern---Summer-2027_JR2001001",
+    "questionnaireId": "f00dfeedf00dfeedf00dfeedf00dfeed"
+  },
+  "hiringOrganization": {"name": "Acme Robotics", "url": ""},
+  "similarJobs": [],
+  "userAuthenticated": false
+}

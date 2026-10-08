@@ -1,0 +1,34 @@
+{
+  "total": 0,
+  "jobPostings": [
+    {
+      "title": "Engineering Intern 21",
+      "externalPath": "/job/US-CA-Santa-Clara/Engineering-Intern-21_JR2001021",
+      "locationsText": "US, CA, Santa Clara",
+      "bulletFields": [
+        "JR2001021"
+      ],
+      "postedOn": "Posted 5 Days Ago"
+    },
+    {
+      "title": "Engineering Intern 22",
+      "externalPath": "/job/US-CA-Santa-Clara/Engineering-Intern-22_JR2001022",
+      "locationsText": "US, CA, Santa Clara",
+      "bulletFields": [
+        "JR2001022"
+      ],
+      "postedOn": "Posted 5 Days Ago"
+    },
+    {
+      "title": "Engineering Intern 23",
+      "externalPath": "/job/US-CA-Santa-Clara/Engineering-Intern-23_JR2001023",
+      "locationsText": "US, CA, Santa Clara",
+      "bulletFields": [
+        "JR2001023"
+      ],
+      "postedOn": "Posted 5 Days Ago"
+    }
+  ],
+  "facets": [],
+  "userAuthenticated": false
+}

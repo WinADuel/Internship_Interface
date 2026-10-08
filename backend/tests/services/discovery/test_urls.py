@@ -5,6 +5,7 @@ from app.services.discovery.urls import (
     KNOWN_CUSTOM_SITES,
     BoardRef,
     JobRef,
+    board_careers_url,
     known_custom_site,
     normalize_url,
     parse_board_url,
@@ -370,3 +371,79 @@ def test_known_custom_site(url, company):
 )
 def test_known_custom_site_rejects(url):
     assert known_custom_site(url) is None
+
+
+# --- backslash (browser/urlsplit disagreement) -------------------------------
+
+BACKSLASH_URLS = [
+    "https://evil.com\\@acme.wd5.myworkdayjobs.com/Site",
+    "https://evil.com\\@boards.greenhouse.io/stripe",
+    "https://boards.greenhouse.io\\stripe",
+    "https://example.com/a\\b",
+]
+
+
+@pytest.mark.parametrize("url", BACKSLASH_URLS)
+def test_backslash_urls_are_rejected_everywhere(url):
+    assert "\\" in url
+    assert safe_http_url(url) is None
+    assert normalize_url(url) is None
+    assert parse_board_url(url) is None
+    assert parse_job_url(url) is None
+    assert known_custom_site(url) is None
+
+
+# --- board_careers_url --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        (BoardRef(WatchAts.GREENHOUSE, "stripe"), "https://job-boards.greenhouse.io/stripe"),
+        (BoardRef(WatchAts.LEVER, "fullscript"), "https://jobs.lever.co/fullscript"),
+        (BoardRef(WatchAts.ASHBY, "open_ai"), "https://jobs.ashbyhq.com/open_ai"),
+        (
+            BoardRef(WatchAts.WORKDAY, f"{NVIDIA}/nvidia/NVIDIAExternalCareerSite"),
+            f"https://{NVIDIA}/NVIDIAExternalCareerSite",
+        ),
+        (
+            BoardRef(WatchAts.WORKDAY, "acme.wd1.myworkdayjobs.com/acme/IT"),
+            "https://acme.wd1.myworkdayjobs.com/en-US/IT",
+        ),
+    ],
+)
+def test_board_careers_url_round_trips(ref, expected):
+    assert board_careers_url(ref) == expected
+    assert parse_board_url(expected) == ref
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    [
+        "https://boards.greenhouse.io/embed/job_board?for=figma&utm_source=x",
+        "http://Boards.Greenhouse.io/stripe/jobs/123?gh_src=abc#apply",
+        f"https://jobs.lever.co/fullscript/{LEVER_ID}/apply",
+        f"https://{NVIDIA}/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Intern_JR1",
+    ],
+)
+def test_board_careers_url_from_any_recognized_paste(pasted):
+    ref = parse_board_url(pasted)
+    assert ref is not None
+    assert parse_board_url(board_careers_url(ref)) == ref
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        BoardRef(WatchAts.GREENHOUSE, "../x"),
+        BoardRef(WatchAts.LEVER, ""),
+        BoardRef(WatchAts.ASHBY, "a/b"),
+        BoardRef(WatchAts.WORKDAY, "evil.com/evil/Site"),
+        BoardRef(WatchAts.WORKDAY, "acme.wd1.myworkdayjobs.com/other/Site"),
+        BoardRef(WatchAts.WORKDAY, "acme.wd1.myworkdayjobs.com/acme"),
+        BoardRef(WatchAts.WORKDAY, "acme.wd1.myworkdayjobs.com/acme/../x"),
+    ],
+)
+def test_board_careers_url_rejects_malformed_refs(ref):
+    with pytest.raises(ValueError):
+        board_careers_url(ref)

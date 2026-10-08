@@ -67,7 +67,10 @@ class JobRef:
 
 
 def _has_unsafe_chars(value: str) -> bool:
-    return any(ord(ch) <= 0x20 or ord(ch) == 0x7F for ch in value)
+    # Backslash: browsers treat "\" as "/" in http(s) URLs but urlsplit does
+    # not, so "https://evil.com\@acme.wd5.myworkdayjobs.com/x" would be read
+    # here as an acme Workday URL while a browser goes to evil.com.
+    return any(ord(ch) <= 0x20 or ord(ch) == 0x7F or ch == "\\" for ch in value)
 
 
 def _split_http(url: object):
@@ -232,6 +235,36 @@ def parse_job_url(url: str) -> JobRef | None:
         ):
             return JobRef(WatchAts.WORKDAY, token, "/".join(rest))
     return None
+
+
+def board_careers_url(ref: BoardRef) -> str:
+    """The canonical public careers URL for a board, built only from the
+    validated token, so the watchlist stores this rather than the raw paste.
+    `parse_board_url(board_careers_url(ref)) == ref`. Raises ValueError for
+    a malformed ref."""
+    if ref.ats is WatchAts.WORKDAY:
+        parts = ref.token.split("/")
+        if (
+            len(parts) == 3
+            and WORKDAY_HOST_RE.match(parts[0])
+            and parts[1] == parts[0].split(".", 1)[0]
+            and BOARD_TOKEN_RE.match(parts[1])
+            and BOARD_TOKEN_RE.match(parts[2])
+        ):
+            # A site that looks like a locale ("IT") would read back as a
+            # bare locale, so give it an explicit one.
+            prefix = "en-US/" if _WORKDAY_LOCALE_RE.match(parts[2]) else ""
+            return f"https://{parts[0]}/{prefix}{parts[2]}"
+        raise ValueError("malformed Workday board token")
+    if not BOARD_TOKEN_RE.match(ref.token):
+        raise ValueError("malformed board token")
+    if ref.ats is WatchAts.GREENHOUSE:
+        return f"https://job-boards.greenhouse.io/{ref.token}"
+    if ref.ats is WatchAts.LEVER:
+        return f"https://{_LEVER_HOST}/{ref.token}"
+    if ref.ats is WatchAts.ASHBY:
+        return f"https://{_ASHBY_HOST}/{ref.token}"
+    raise ValueError("unknown board system")
 
 
 def known_custom_site(url: str) -> str | None:
