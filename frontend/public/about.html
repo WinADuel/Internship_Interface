@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>About - Internship Tracker</title>
+  <link rel="stylesheet" href="/static.css">
+</head>
+<body>
+  <header>
+    <span class="brand">Internship Tracker</span>
+    <a href="/privacy.html">Privacy policy</a>
+    <a href="/">Log in</a>
+  </header>
+  <main>
+    <h1>Internship Tracker</h1>
+    <p>
+      Internship Tracker is a personal, single-user web app for keeping track of internship
+      applications. It holds one person's application pipeline, deadlines and reminders,
+      research contacts, outreach email drafts and essay prompts, and shows essays written in
+      Google Docs alongside the applications they belong to.
+    </p>
+    <p>
+      It is not a public service and there is no sign-up: only the owner has an account.
+    </p>
+    <p>
+      Read the <a href="/privacy.html">privacy policy</a> to see what the app stores and how it
+      uses Google access.
+    </p>
+    <p><a class="login" href="/">Log in</a></p>
+  </main>
+  <footer>
+    Questions: contact {{with env "CONTACT_EMAIL"}}<a href="mailto:{{. | html}}">{{. | html}}</a>{{else}}the site owner{{end}}.
+    &middot; <a href="/privacy.html">Privacy policy</a>
+  </footer>
+</body>
+</html>

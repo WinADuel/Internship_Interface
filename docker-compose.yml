@@ -77,6 +77,8 @@ services:
     logging: *default-logging
     environment:
       DOMAIN: ${DOMAIN}
+      # Shown on /about.html and /privacy.html; empty shows "the site owner" (spec §4.5).
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-}
     depends_on:
       backend:
         condition: service_healthy

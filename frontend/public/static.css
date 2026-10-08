@@ -1,0 +1,70 @@
+/* Styles for the public pages (about.html, privacy.html). They live in this file
+   because the site's Content-Security-Policy blocks inline styles on plain pages. */
+body {
+  margin: 0;
+  color: #222;
+  background: #fff;
+  line-height: 1.5;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+header .brand {
+  font-weight: bold;
+  margin-right: auto;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+h1 {
+  margin-top: 0.5rem;
+}
+
+h2 {
+  margin-top: 1.75rem;
+  font-size: 1.15rem;
+}
+
+a {
+  color: #1a5fb4;
+}
+
+code {
+  font-size: 0.9em;
+  background: #f4f4f6;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+}
+
+.muted {
+  color: #666;
+}
+
+.login {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  background: #1a5fb4;
+  color: #fff;
+  text-decoration: none;
+}
+
+footer {
+  max-width: 40rem;
+  margin: 2rem auto 0;
+  padding: 1rem;
+  border-top: 1px solid #ddd;
+  color: #666;
+  font-size: 0.9rem;
+}

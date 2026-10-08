@@ -88,3 +88,20 @@ def test_backend_image_installs_postgres_16_client_from_pgdg():
     assert "postgresql-client-16" in dockerfile
     assert "--no-install-recommends" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
+
+
+def test_caddy_gets_domain_and_optional_contact_email(services):
+    # CONTACT_EMAIL fills in the public pages (spec §4.5); empty means "the site owner".
+    assert services["caddy"]["environment"] == {
+        "DOMAIN": "${DOMAIN}",
+        "CONTACT_EMAIL": "${CONTACT_EMAIL:-}",
+    }
+
+
+def test_caddy_mounts_the_repo_caddyfile_read_only(services):
+    assert "./Caddyfile:/etc/caddy/Caddyfile:ro" in services["caddy"]["volumes"]
+
+
+def test_env_example_lists_contact_email():
+    env_example = (COMPOSE_PATH.parent / ".env.example").read_text()
+    assert "\nCONTACT_EMAIL=" in env_example
