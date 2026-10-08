@@ -221,15 +221,52 @@ def server(tmp_path, deploy_fakes) -> Server:
     return Server(tmp_path, deploy_fakes)
 
 
+class FakeHost:
+    """The files bootstrap.sh reads to see what the server already has, under
+    tmp_path instead of the test machine's own (a CI runner has a real
+    /swapfile, for example). It starts as a new droplet: root has an SSH key,
+    nothing else exists yet."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        root.mkdir()
+        self.os_release = root / "os-release"
+        self.os_release.write_text('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n')
+        self.zoneinfo = root / "zoneinfo"
+        for zone in ("America/Chicago", "Europe/London"):
+            (self.zoneinfo / zone).parent.mkdir(parents=True, exist_ok=True)
+            (self.zoneinfo / zone).write_bytes(b"TZif")
+        self.root_keys = root / "root-authorized_keys"
+        self.root_keys.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyForTestsOnly tracker\n")
+        self.deploy_keys = root / "deploy-authorized_keys"
+        self.docker_key = root / "docker.asc"
+        self.swapfile = root / "swapfile"
+        self.fstab = root / "fstab"
+
+    def env(self) -> dict[str, str]:
+        return {
+            "TRACKER_BOOTSTRAP_OS_RELEASE": str(self.os_release),
+            "TRACKER_BOOTSTRAP_ZONEINFO": str(self.zoneinfo),
+            "TRACKER_BOOTSTRAP_ROOT_KEYS": str(self.root_keys),
+            "TRACKER_BOOTSTRAP_DEPLOY_KEYS": str(self.deploy_keys),
+            "TRACKER_BOOTSTRAP_DOCKER_KEY": str(self.docker_key),
+            "TRACKER_BOOTSTRAP_SWAPFILE": str(self.swapfile),
+            "TRACKER_BOOTSTRAP_FSTAB": str(self.fstab),
+        }
+
+
 @pytest.fixture()
-def bootstrap_fakes(tmp_path) -> Fakes:
+def fake_host(tmp_path) -> FakeHost:
+    return FakeHost(tmp_path / "host")
+
+
+@pytest.fixture()
+def bootstrap_fakes(tmp_path, fake_host) -> Fakes:
     fakes = Fakes(tmp_path, BOOTSTRAP_FAKES)
-    os_release = tmp_path / "os-release"
-    os_release.write_text('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n')
     fakes.env.update(
         {
             "TRACKER_BOOTSTRAP_EUID": "0",
-            "TRACKER_BOOTSTRAP_OS_RELEASE": str(os_release),
+            **fake_host.env(),
             "FAKE_GETENT_EXIT": "2",  # no deploy user yet
         }
     )

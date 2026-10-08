@@ -22,21 +22,31 @@
 # succeed, and the login page has its own throttle.
 #
 # Test hooks (for backend/tests/ops only; never set them on a server):
-#   TRACKER_BOOTSTRAP_EUID        pretend to run with this user id
-#   TRACKER_BOOTSTRAP_OS_RELEASE  read this file instead of /etc/os-release
+#   TRACKER_BOOTSTRAP_EUID         pretend to run with this user id
+#   TRACKER_BOOTSTRAP_OS_RELEASE   read this file instead of /etc/os-release
+#   TRACKER_BOOTSTRAP_ZONEINFO     time zone files (default /usr/share/zoneinfo)
+#   TRACKER_BOOTSTRAP_ROOT_KEYS    root's authorized_keys (default /root/.ssh/authorized_keys)
+#   TRACKER_BOOTSTRAP_DEPLOY_KEYS  deploy's authorized_keys (default /home/deploy/.ssh/authorized_keys)
+#   TRACKER_BOOTSTRAP_DOCKER_KEY   Docker's apt key (default /etc/apt/keyrings/docker.asc)
+#   TRACKER_BOOTSTRAP_SWAPFILE     the swap file (default /swapfile)
+#   TRACKER_BOOTSTRAP_FSTAB        the fstab (default /etc/fstab)
+# They let the tests choose what this "server" already has, instead of
+# reading whatever the test machine happens to have.
 set -euo pipefail
 
 DEPLOY_USER=deploy
 DEPLOY_HOME=/home/deploy
-DEPLOY_KEYS=/home/deploy/.ssh/authorized_keys
-ROOT_KEYS=/root/.ssh/authorized_keys
+DEPLOY_KEYS="${TRACKER_BOOTSTRAP_DEPLOY_KEYS:-/home/deploy/.ssh/authorized_keys}"
+ROOT_KEYS="${TRACKER_BOOTSTRAP_ROOT_KEYS:-/root/.ssh/authorized_keys}"
 SSHD_DROPIN=/etc/ssh/sshd_config.d/10-tracker.conf
 SUDOERS_FILE=/etc/sudoers.d/90-tracker-deploy
-DOCKER_KEY=/etc/apt/keyrings/docker.asc
+DOCKER_KEY="${TRACKER_BOOTSTRAP_DOCKER_KEY:-/etc/apt/keyrings/docker.asc}"
 DOCKER_LIST=/etc/apt/sources.list.d/docker.list
 AUTO_UPGRADES=/etc/apt/apt.conf.d/20auto-upgrades
 UNATTENDED_CONF=/etc/apt/apt.conf.d/52tracker-unattended
-SWAPFILE=/swapfile
+SWAPFILE="${TRACKER_BOOTSTRAP_SWAPFILE:-/swapfile}"
+FSTAB="${TRACKER_BOOTSTRAP_FSTAB:-/etc/fstab}"
+ZONEINFO="${TRACKER_BOOTSTRAP_ZONEINFO:-/usr/share/zoneinfo}"
 SWAPPINESS_CONF=/etc/sysctl.d/60-tracker-swappiness.conf
 
 DRY_RUN=0
@@ -96,7 +106,7 @@ write_file() {
 # append_line <path> <line>: adds the line unless the file already has it.
 append_line() {
 	local path="$1" line="$2"
-	if grep -qxF -- "$line" "$path"; then
+	if grep -qsxF -- "$line" "$path"; then
 		info "$path already has: $line"
 		return 0
 	fi
@@ -166,7 +176,7 @@ main() {
 		die "VERSION_CODENAME is missing from $os_release, so Docker's apt repository can't be chosen."
 	fi
 
-	if [[ ! "$timezone" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ || ! -f "/usr/share/zoneinfo/$timezone" ]]; then
+	if [[ ! "$timezone" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ || ! -f "$ZONEINFO/$timezone" ]]; then
 		die "unknown time zone: '$timezone'." \
 			"use a name like America/Chicago or Europe/London (list them with: timedatectl list-timezones)"
 	fi
@@ -290,7 +300,7 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:30";'
 		swap_note="already on"
 		# A run that stopped right after swapon left no fstab line yet.
 		if swapon --noheadings --show=NAME | grep -qxF "$SWAPFILE"; then
-			append_line /etc/fstab "$SWAPFILE none swap sw 0 0"
+			append_line "$FSTAB" "$SWAPFILE none swap sw 0 0"
 		fi
 	else
 		if [[ -e "$SWAPFILE" ]]; then
@@ -303,7 +313,7 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:30";'
 		# memory, so a failure here is a warning and the other steps go on.
 		if run mkswap "$SWAPFILE" && run swapon "$SWAPFILE"; then
 			# Turn it on again after every reboot.
-			append_line /etc/fstab "$SWAPFILE none swap sw 0 0"
+			append_line "$FSTAB" "$SWAPFILE none swap sw 0 0"
 			swap_note="2 GB at $SWAPFILE"
 		else
 			warn "could not turn on swap (see the error above); builds may run out of memory."
@@ -339,7 +349,7 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:30";'
 		info "1. Keep this root window open. In a NEW terminal on your Mac, check you can log in:"
 		info "     ssh $DEPLOY_USER@$ip"
 		info "2. As $DEPLOY_USER, add the GitHub deploy key and clone the repo"
-		info "   (docs/deploy/server-setup.md, step 4)."
+		info "   (docs/deploy/server-setup.md, step 5)."
 	else
 		info "1. Put your public SSH key in $DEPLOY_KEYS"
 		info "   (owner $DEPLOY_USER, mode 600), then run this script again to turn off password login."
