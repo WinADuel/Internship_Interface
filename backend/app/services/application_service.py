@@ -29,6 +29,16 @@ def _enqueue_contacts_if_applied(db: Session, application: Application) -> None:
 
 
 def create_application(db: Session, data: ApplicationCreate) -> Application:
+    application = add_application(db, data)
+    db.commit()
+    return application
+
+
+def add_application(db: Session, data: ApplicationCreate) -> Application:
+    """`create_application` without the commit, for callers that must save
+    other rows in the same transaction (Discover's Apply). Writes the
+    initial history row and the contacts queue item exactly as
+    `create_application` does; the caller commits."""
     application = Application(**data.model_dump())
     db.add(application)
     db.flush()  # assign application.id for the history row
@@ -41,7 +51,6 @@ def create_application(db: Session, data: ApplicationCreate) -> Application:
         )
     )
     _enqueue_contacts_if_applied(db, application)
-    db.commit()
     return application
 
 
