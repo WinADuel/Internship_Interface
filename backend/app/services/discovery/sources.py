@@ -124,7 +124,13 @@ def _list_name(url: str, source: PostingSource) -> str:
     return clean_text(f"List {where}", _NAME_MAX)
 
 
-def _company_name(company: WatchCompany) -> str:
+def list_name(url: str) -> str:
+    """How a list is named in errors (the prefix of `SourceResult.error`)."""
+    return _list_name(url, list_source(url))
+
+
+def company_name(company: WatchCompany) -> str:
+    """How a watched company is named in errors."""
     return clean_text(company.name, _NAME_MAX) or "Watched company"
 
 
@@ -291,7 +297,7 @@ def fetch_board(
     """One watched company's board (spec §2b). Greenhouse, Lever and Ashby:
     one GET of the whole board (`complete=True`). Workday: a search per
     keyword (`complete=False`). `now` dates Workday's "Posted N Days Ago"."""
-    name = _company_name(company)
+    name = company_name(company)
     try:
         if company.ats is WatchAts.WORKDAY:
             return _fetch_workday(http, company, name, keywords, now)
