@@ -28,3 +28,19 @@ class GoogleDocsFetchError(Exception):
 
 class InvalidDocRefError(Exception):
     """The doc reference is not a valid Drive file id or docs.google.com URL."""
+
+
+class ContactNotFoundError(Exception):
+    """No contact exists with the requested id."""
+
+
+class InvalidTransitionError(Exception):
+    """The requested contact status action is not valid from the current status."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class UndoExpiredError(Exception):
+    """There is no status change to undo, or the undo window has passed."""
