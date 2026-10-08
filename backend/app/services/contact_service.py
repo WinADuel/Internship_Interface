@@ -225,3 +225,18 @@ def list_needs_attention(db: Session, today: date) -> list[tuple[Contact, NudgeK
         if nudge is not None:
             result.append((contact, nudge))
     return result
+
+
+def contact_nudges(db: Session, contacts: list[Contact], today: date) -> dict[int, NudgeKind | None]:
+    """Nudge per contact id, for filling `ContactOut.nudge` on reads."""
+    settings = nudge_settings(get_settings(db))
+    if len(contacts) == 1:
+        last = db.scalar(
+            select(func.max(ContactStatusHistory.changed_at)).where(
+                ContactStatusHistory.contact_id == contacts[0].id
+            )
+        )
+        last_changes = {contacts[0].id: last}
+    else:
+        last_changes = last_status_changes(db)
+    return {c.id: compute_nudge(c, last_changes.get(c.id), settings, today) for c in contacts}
