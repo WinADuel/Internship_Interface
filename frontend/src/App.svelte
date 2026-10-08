@@ -7,6 +7,7 @@
   import Dashboard from "./routes/Dashboard.svelte";
   import Login from "./routes/Login.svelte";
   import Applications from "./routes/Applications.svelte";
+  import Discover from "./routes/Discover.svelte";
   import Essays from "./routes/Essays.svelte";
   import Contacts from "./routes/Contacts.svelte";
   import ResearchQueue from "./routes/ResearchQueue.svelte";
@@ -16,6 +17,7 @@
     "/": Dashboard,
     "/login": Login,
     "/applications": Applications,
+    "/discover": Discover,
     "/essays": Essays,
     "/contacts": Contacts,
     "/research-queue": ResearchQueue,
