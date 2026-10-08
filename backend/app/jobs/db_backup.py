@@ -4,7 +4,14 @@ local time (the container's TZ). `python -m app.jobs.db_backup --once --label
 pre-deploy` takes one backup and exits 0 on success, 1 on failure; deploy.sh
 uses it before every deploy.
 
-Dumps go to `<BACKUP_DIR>/<label>/`; see app/services/backup."""
+Dumps go to `<BACKUP_DIR>/<label>/`; see app/services/backup. Each nightly
+dump is then encrypted and copied to Google Drive (app/services/backup/offsite).
+
+One backup runs at a time: the job shares an advisory lock with Back up now
+(app/services/backup/lock). A manual backup is quick, so the job waits up to
+LOCK_WAIT seconds for it rather than skipping; if the lock is still held
+after that, this run fails (exit 1 for --once) and records nothing, since the
+other backup records its own outcome."""
 
 import argparse
 import logging
@@ -14,18 +21,23 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from app.core.config import settings
-from app.db.session import SessionLocal
-from app.services.backup.dump import LABELS
+from app.db.session import SessionLocal, engine
+from app.services.backup.dump import DUMP_TIMEOUT, LABELS
+from app.services.backup.lock import backup_lock
+from app.services.backup.offsite import after_nightly_backup
 from app.services.backup.service import AfterBackup, BackupResult, run_backup
 
 logger = logging.getLogger(__name__)
 
 RUN_HOUR = 2  # local time (the container's TZ)
 RUN_MINUTE = 30
+# Longer than any one dump can take, so a running backup always finishes first.
+LOCK_WAIT = DUMP_TIMEOUT + 5 * 60
+LOCK_BUSY = "another backup is still running"
 
-# Steps run after a successful backup, by label. The off-site copy hooks in
-# here for "nightly" (spec §4.4 part 2); pre-deploy and manual dumps stay local.
-AFTER_BACKUP: dict[str, AfterBackup] = {}
+# Steps run after a successful backup, by label: the off-site copy for
+# "nightly" (spec §4.4 part 2); pre-deploy and manual dumps stay local.
+AFTER_BACKUP: dict[str, AfterBackup] = {"nightly": after_nightly_backup}
 
 
 def seconds_until_next_run(now: datetime, hour: int = RUN_HOUR, minute: int = RUN_MINUTE) -> float:
@@ -36,17 +48,21 @@ def seconds_until_next_run(now: datetime, hour: int = RUN_HOUR, minute: int = RU
 
 
 def run_once(label: str) -> BackupResult:
-    db = SessionLocal()
-    try:
-        result = run_backup(
-            db,
-            label,
-            database_url=settings.database_url,
-            backup_dir=settings.backup_dir,
-            after=AFTER_BACKUP.get(label),
-        )
-    finally:
-        db.close()
+    with backup_lock(engine, wait=LOCK_WAIT) as locked:
+        if not locked:
+            logger.error("%s backup skipped: %s", label, LOCK_BUSY)
+            return BackupResult(label=label, error=LOCK_BUSY)
+        db = SessionLocal()
+        try:
+            result = run_backup(
+                db,
+                label,
+                database_url=settings.database_url,
+                backup_dir=settings.backup_dir,
+                after=AFTER_BACKUP.get(label),
+            )
+        finally:
+            db.close()
     if not result.status_recorded:
         outcome = "succeeded" if result.ok else "failed"
         logger.warning("%s backup %s, but Settings could not be updated", label, outcome)

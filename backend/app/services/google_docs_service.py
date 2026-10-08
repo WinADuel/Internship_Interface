@@ -93,6 +93,11 @@ def store_token(db: Session, token_response: dict, scopes: str) -> None:
     db.commit()
 
 
+def is_google_connected(db: Session) -> bool:
+    """Whether a Google connection is stored (it may still have been revoked)."""
+    return _get_token_row(db) is not None
+
+
 def get_valid_access_token(db: Session) -> str:
     row = _get_token_row(db)
     if row is None:

@@ -1,4 +1,5 @@
 import logging
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -6,6 +7,8 @@ import pytest
 
 from app.jobs import db_backup
 from app.jobs.db_backup import seconds_until_next_run
+from app.services.backup.dump import DUMP_TIMEOUT
+from app.services.backup.offsite import after_nightly_backup
 from app.services.backup.service import BackupResult
 
 
@@ -14,6 +17,26 @@ def test_seconds_until_next_run_is_0230_local():
     assert seconds_until_next_run(datetime(2026, 10, 6, 2, 30)) == 86400
     assert seconds_until_next_run(datetime(2026, 10, 6, 2, 30, 1)) == 86399
     assert seconds_until_next_run(datetime(2026, 10, 6, 23, 30)) == 3 * 3600
+
+
+class FakeLock:
+    """Stands in for backup_lock (tests/services/backup/test_lock.py covers the real one)."""
+
+    def __init__(self):
+        self.free = True
+        self.calls = []
+
+    @contextmanager
+    def __call__(self, engine, *, wait=0.0):
+        self.calls.append((engine, wait))
+        yield self.free
+
+
+@pytest.fixture(autouse=True)
+def lock(monkeypatch):
+    fake = FakeLock()
+    monkeypatch.setattr(db_backup, "backup_lock", fake)
+    return fake
 
 
 class FakeSession:
@@ -54,6 +77,31 @@ def test_run_once_passes_the_after_step_for_its_label(job, monkeypatch):
     db_backup.run_once("pre-deploy")
     assert log[0][4] is step
     assert log[2][4] is None
+
+
+def test_nightly_backups_are_copied_off_site_and_others_are_not():
+    assert db_backup.AFTER_BACKUP == {"nightly": after_nightly_backup}
+
+
+def test_run_once_waits_for_the_backup_lock(job, lock):
+    log, _ = job
+    db_backup.run_once("pre-deploy")
+    assert lock.calls == [(db_backup.engine, db_backup.LOCK_WAIT)]
+    # Longer than a dump can take, so a running manual backup always finishes first.
+    assert db_backup.LOCK_WAIT > DUMP_TIMEOUT
+    assert log[0][0] == "run_backup"
+
+
+def test_run_once_gives_up_when_another_backup_keeps_the_lock(job, lock, caplog):
+    log, _ = job
+    lock.free = False
+    with caplog.at_level(logging.WARNING):
+        result = db_backup.run_once("nightly")
+    assert not result.ok and result.error == "another backup is still running"
+    assert log == []  # no session opened, no dump, nothing recorded
+    assert "nightly backup skipped: another backup is still running" in caplog.text
+    assert "Settings could not be updated" not in caplog.text
+    assert db_backup.main(["--once", "--label", "pre-deploy"]) == 1
 
 
 def test_once_exit_codes(job):
