@@ -37,3 +37,24 @@ export async function runContactAction(
     throw err;
   }
 }
+
+/** Undo window for a status button, matching the backend's 60 s (spec §13.3). */
+export const UNDO_WINDOW_MS = 60_000;
+
+/**
+ * When each contact's last button press stops being undoable (epoch ms).
+ * Kept outside the card so the Undo button survives the card moving to a
+ * new board column.
+ */
+export const undoDeadlines = writable<Record<number, number>>({});
+
+export function markUndoable(id: number, now = Date.now()): void {
+  undoDeadlines.update((all) => ({ ...all, [id]: now + UNDO_WINDOW_MS }));
+}
+
+export function clearUndoable(id: number): void {
+  undoDeadlines.update((all) => {
+    const { [id]: _removed, ...rest } = all;
+    return rest;
+  });
+}
