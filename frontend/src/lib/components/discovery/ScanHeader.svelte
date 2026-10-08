@@ -20,10 +20,17 @@
       .filter(Boolean),
   );
 
-  let mounted = true;
   onMount(() => {
+    // Report the end of every scan seen running, whoever refreshed the shared
+    // status (this header's poll, the sidebar badge, another page).
+    let wasScanning = false;
+    const unsubscribe = discoveryStatus.subscribe((status) => {
+      if (!status) return;
+      if (wasScanning && !status.scanning) onfinished?.();
+      wasScanning = status.scanning;
+    });
     void refreshDiscoveryStatus();
-    return () => (mounted = false);
+    return unsubscribe;
   });
 
   function markScanning() {
@@ -39,8 +46,7 @@
     if (polling) return; // a slow request is still out; don't stack another
     polling = true;
     try {
-      const status = await refreshDiscoveryStatus();
-      if (mounted && status && !status.scanning) onfinished?.();
+      await refreshDiscoveryStatus(); // the store subscription reports a finished scan
     } finally {
       polling = false;
     }

@@ -4,10 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../api/discovery", () => ({ getMatchCount: vi.fn() }));
 vi.mock("../../api/settings", () => ({ updateSettings: vi.fn() }));
 vi.mock("../../stores/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../stores/discovery", () => ({ refreshDiscoveryStatus: vi.fn() }));
 
 import { ApiError } from "../../api/client";
 import { getMatchCount } from "../../api/discovery";
 import { updateSettings } from "../../api/settings";
+import { refreshDiscoveryStatus } from "../../stores/discovery";
 import { showToast } from "../../stores/toast";
 import type { AppSettings } from "../../types/contact";
 import DiscoverySettings from "./DiscoverySettings.svelte";
@@ -67,6 +69,7 @@ beforeEach(() => {
   vi.mocked(getMatchCount).mockReset().mockResolvedValue(12);
   vi.mocked(updateSettings).mockReset();
   vi.mocked(showToast).mockReset();
+  vi.mocked(refreshDiscoveryStatus).mockReset().mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -131,6 +134,48 @@ describe("DiscoverySettings", () => {
     });
     await vi.waitFor(() => expect(onsaved).toHaveBeenCalledWith(saved));
     expect(showToast).toHaveBeenCalledWith("Job discovery settings saved.", "info");
+    // New filters change the Inbox count: refresh the sidebar badge.
+    expect(refreshDiscoveryStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves text typed into a chip field but not yet added", async () => {
+    vi.mocked(updateSettings).mockResolvedValue({ ...settings, discoveryLocations: ["Remote"] });
+    render(DiscoverySettings, { settings });
+    await fireEvent.input(screen.getByLabelText("Locations"), { target: { value: " Remote " } });
+    await fireEvent.input(screen.getByLabelText("Terms"), { target: { value: "Fall 2027" } });
+    await fireEvent.submit(form());
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ discoveryLocations: ["Remote"], discoveryTerms: ["Summer 2027", "Fall 2027"] }),
+    );
+  });
+
+  it("does not save while typed text is refused, and shows why", async () => {
+    render(DiscoverySettings, { settings });
+    await fireEvent.input(screen.getByLabelText("List URLs"), { target: { value: "http://example.com/listings.json" } });
+    await fireEvent.submit(form());
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(screen.getByText("List URLs must start with https://.")).toBeInTheDocument();
+    expect(screen.getByText("Advanced: community list URLs").closest("details")!.open).toBe(true);
+    expect(screen.getByRole("alert")).toHaveTextContent("Some settings weren't saved. Fix the fields marked below.");
+    expect(refreshDiscoveryStatus).not.toHaveBeenCalled();
+  });
+
+  it("opens the list URLs for their error and keeps them open after the next save", async () => {
+    vi.mocked(updateSettings)
+      .mockRejectedValueOnce(
+        new ApiError(422, [{ loc: ["body", "discovery_list_urls"], msg: "Value error, at most 10 items", type: "value_error" }]),
+      )
+      .mockResolvedValueOnce(settings);
+    render(DiscoverySettings, { settings });
+    const details = screen.getByText("Advanced: community list URLs").closest("details")!;
+    expect(details.open).toBe(false);
+    await fireEvent.submit(form());
+    expect(await screen.findByText("at most 10 items")).toBeInTheDocument();
+    expect(details.open).toBe(true);
+    await fireEvent.submit(form());
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Job discovery settings saved.", "info"));
+    expect(screen.queryByText("at most 10 items")).toBeNull();
+    expect(details.open).toBe(true);
   });
 
   it("shows 422 field errors next to their fields", async () => {

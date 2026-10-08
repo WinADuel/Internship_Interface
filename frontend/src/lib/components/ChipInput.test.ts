@@ -98,6 +98,42 @@ describe("ChipInput", () => {
     expect(screen.getByLabelText("Terms")).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("commitDraft() adds text typed but not yet added", async () => {
+    const { component, onchange } = setup({ items: ["Summer 2027"] });
+    await fireEvent.input(screen.getByLabelText("Terms"), { target: { value: " Fall 2027 " } });
+    expect(component.commitDraft()).toBe(true);
+    expect(onchange).toHaveBeenLastCalledWith(["Summer 2027", "Fall 2027"]);
+    await tick();
+    expect(screen.getByText("Fall 2027")).toBeInTheDocument();
+    expect((screen.getByLabelText("Terms") as HTMLInputElement).value).toBe("");
+  });
+
+  it("commitDraft() with nothing typed changes nothing", () => {
+    const { component, onchange } = setup({ items: ["Summer 2027"] });
+    expect(component.commitDraft()).toBe(true);
+    expect(onchange).not.toHaveBeenCalled();
+  });
+
+  it("commitDraft() refuses an invalid draft, keeps it and says why", async () => {
+    const validate = (v: string) => (v.startsWith("https://") ? null : "Use an https:// link.");
+    const { component, onchange } = setup({ validate });
+    await fireEvent.input(screen.getByLabelText("Terms"), { target: { value: "http://example.com" } });
+    expect(component.commitDraft()).toBe(false);
+    await tick();
+    expect(onchange).not.toHaveBeenCalled();
+    expect(screen.getByText("Use an https:// link.")).toBeInTheDocument();
+    expect((screen.getByLabelText("Terms") as HTMLInputElement).value).toBe("http://example.com");
+  });
+
+  it("commitDraft() clears text that is already in the list", async () => {
+    const { component, onchange } = setup({ items: ["Summer 2027"] });
+    await fireEvent.input(screen.getByLabelText("Terms"), { target: { value: "summer 2027" } });
+    expect(component.commitDraft()).toBe(true);
+    await tick();
+    expect(onchange).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Terms") as HTMLInputElement).value).toBe("");
+  });
+
   it("renders items as plain text", () => {
     const { container } = setup({ items: ["<img src=x onerror=alert(1)>"] });
     expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();

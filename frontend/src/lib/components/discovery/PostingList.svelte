@@ -117,24 +117,54 @@
     if (items.length === 0 && total > 0) void load();
   }
 
+  /** The backend takes at most this many ids per dismiss-all request. */
+  const DISMISS_CHUNK = 500;
+  let dismissing = $state(0); // how many postings a dismiss-all is clearing; 0 when idle
+
   async function dismissAllShown() {
     const shown = items;
     if (!shown.length || !window.confirm(`Dismiss all ${shown.length} ${shown.length === 1 ? "posting" : "postings"} shown?`)) return;
     items = [];
+    dismissing = shown.length;
     try {
-      await dismissAllPostings(shown.map((p) => p.id));
-    } catch (err) {
-      items = shown;
-      const message = errorText(err);
-      showToast(message ? `Couldn't dismiss the postings: ${message}` : "Couldn't dismiss the postings.");
-      return;
+      // One request per chunk, in turn; a failed chunk's rows come back, the rest stay gone.
+      let dismissed = 0;
+      const failed: Posting[] = [];
+      let failure: unknown = null;
+      for (let at = 0; at < shown.length; at += DISMISS_CHUNK) {
+        const chunk = shown.slice(at, at + DISMISS_CHUNK);
+        try {
+          dismissed += await dismissAllPostings(chunk.map((p) => p.id));
+        } catch (err) {
+          failed.push(...chunk);
+          failure ??= err;
+        }
+      }
+      if (failed.length === shown.length) {
+        items = shown;
+        const message = errorText(failure);
+        showToast(message ? `Couldn't dismiss the postings: ${message}` : "Couldn't dismiss the postings.");
+        return;
+      }
+      void refreshDiscoveryStatus();
+      if (failed.length) {
+        items = failed;
+        total = Math.max(failed.length, total - (shown.length - failed.length));
+        const message = errorText(failure);
+        const lead = `Dismissed ${dismissed} of ${shown.length} postings. Couldn't dismiss the other ${failed.length}`;
+        showToast(message ? `${lead}: ${message}` : `${lead}.`);
+        return;
+      }
+      await load();
+    } finally {
+      dismissing = 0;
     }
-    void refreshDiscoveryStatus();
-    await load();
   }
 </script>
 
-{#if loading}
+{#if dismissing && items.length === 0}
+  <p class="muted" role="status">Dismissing {dismissing} {dismissing === 1 ? "posting" : "postings"}…</p>
+{:else if loading}
   <p class="muted">Loading…</p>
 {:else if loadError}
   <div class="error" role="alert">

@@ -3,10 +3,11 @@
   import { ApiError } from "../../api/client";
   import { getMatchCount } from "../../api/discovery";
   import { updateSettings } from "../../api/settings";
+  import { refreshDiscoveryStatus } from "../../stores/discovery";
   import { showToast } from "../../stores/toast";
   import type { AppSettings } from "../../types/contact";
   import type { DiscoveryFilters, DiscoverySettings } from "../../types/discovery";
-  import ChipInput from "./ChipInput.svelte";
+  import ChipInput from "../ChipInput.svelte";
 
   let { settings, onsaved }: { settings: AppSettings; onsaved?: (settings: AppSettings) => void } = $props();
 
@@ -138,20 +139,45 @@
     };
   }
 
+  // The chip fields, so a save can first add text typed but not yet added.
+  type Chips = ReturnType<typeof ChipInput>;
+  let chipInputs = $state<Partial<Record<FieldName, Chips>>>({});
+  // The list URLs live in a <details>: opened for an error, never closed for the user.
+  let advancedOpen = $state(false);
+
+  /** Adds each field's pending text; false if any was refused (each field says why). */
+  function commitDrafts(): boolean {
+    let ok = true;
+    for (const [field, input] of Object.entries(chipInputs)) {
+      if (input && !input.commitDraft()) {
+        ok = false;
+        if (field === "discovery_list_urls") advancedOpen = true;
+      }
+    }
+    return ok;
+  }
+
   async function save(event: SubmitEvent) {
     event.preventDefault();
-    saving = true;
     formError = null;
     fieldErrors = {};
+    if (!commitDrafts()) {
+      formError = "Some settings weren't saved. Fix the fields marked below.";
+      return;
+    }
+    saving = true;
     try {
       const saved = await updateSettings(payload());
       fill(saved);
       showToast("Job discovery settings saved.", "info");
+      // The filters decide the Inbox: refresh the sidebar badge.
+      void refreshDiscoveryStatus();
       onsaved?.(saved);
     } catch (err) {
       if (err instanceof ApiError && err.status === 422 && Array.isArray(err.detail)) {
         const { fields, other } = splitValidation(err.detail);
         fieldErrors = fields;
+        if (fields.discovery_list_urls) advancedOpen = true;
         const lead = Object.keys(fields).length ? ["Some settings weren't saved. Fix the fields marked below."] : [];
         formError = [...lead, ...other].join(" ") || err.message;
       } else {
@@ -182,6 +208,7 @@
       placeholder="e.g. Summer 2027"
       bind:items={terms}
       error={fieldErrors.discovery_terms}
+      bind:this={chipInputs.discovery_terms}
     />
     <ChipInput
       label="Categories"
@@ -189,30 +216,35 @@
       suggestions={CATEGORY_SUGGESTIONS}
       bind:items={categories}
       error={fieldErrors.discovery_categories}
+      bind:this={chipInputs.discovery_categories}
     />
     <ChipInput
       label="Include keywords"
       hint="Titles must contain one of these words. Leave empty for any title."
       bind:items={includeKeywords}
       error={fieldErrors.discovery_include_keywords}
+      bind:this={chipInputs.discovery_include_keywords}
     />
     <ChipInput
       label="Watchlist keywords"
       hint="Jobs from watched companies count only when the title contains one of these."
       bind:items={watchlistKeywords}
       error={fieldErrors.discovery_watchlist_keywords}
+      bind:this={chipInputs.discovery_watchlist_keywords}
     />
     <ChipInput
       label="Exclude keywords"
       hint="Hide titles containing any of these."
       bind:items={excludeKeywords}
       error={fieldErrors.discovery_exclude_keywords}
+      bind:this={chipInputs.discovery_exclude_keywords}
     />
     <ChipInput
       label="Locations"
       hint={'Show postings in any of these places ("Remote" works). Leave empty for anywhere.'}
       bind:items={locations}
       error={fieldErrors.discovery_locations}
+      bind:this={chipInputs.discovery_locations}
     />
 
     <div class="field">
@@ -248,7 +280,7 @@
       {/if}
     </div>
 
-    <details open={fieldErrors.discovery_list_urls ? true : undefined}>
+    <details bind:open={advancedOpen}>
       <summary>Advanced: community list URLs</summary>
       <ChipInput
         label="List URLs"
@@ -258,6 +290,7 @@
         validate={httpsOnly}
         bind:items={listUrls}
         error={fieldErrors.discovery_list_urls}
+        bind:this={chipInputs.discovery_list_urls}
       />
     </details>
 

@@ -2,16 +2,24 @@
   import { ApiError } from "../../api/client";
   import { confirmPaste, previewPaste } from "../../api/discovery";
   import { postingLabel, sourceLabel } from "../../discovery/format";
+  import { refreshDiscoveryStatus } from "../../stores/discovery";
   import { showToast } from "../../stores/toast";
   import type { PastePreview, Posting } from "../../types/discovery";
+  import ChipInput from "../ChipInput.svelte";
 
   let { onsaved }: { onsaved?: (posting: Posting) => void } = $props();
+
+  // Caps from backend `schemas/discovery.py` (PasteConfirmIn).
+  const MAX_LOCATIONS = 20;
+  const MAX_LOCATION_LENGTH = 200;
 
   let url = $state("");
   let preview = $state<PastePreview | null>(null);
   let company = $state("");
   let title = $state("");
-  let locations = $state("");
+  // One entry per location: a location such as "San Francisco, CA" has commas of its own.
+  let locations = $state<string[]>([]);
+  let locationsInput = $state<ReturnType<typeof ChipInput>>();
   let busy = $state(false);
   let error = $state<string | null>(null);
 
@@ -28,7 +36,7 @@
       preview = result;
       company = result.company;
       title = result.title;
-      locations = result.locations.join(", ");
+      locations = [...result.locations];
     } catch (err) {
       preview = null;
       error = errorText(err, "Couldn't read that link.");
@@ -45,6 +53,8 @@
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (!preview) return;
+    // Keep a location typed but not yet added; a refused one says why and blocks the save.
+    if (locationsInput && !locationsInput.commitDraft()) return;
     busy = true;
     error = null;
     try {
@@ -52,12 +62,14 @@
         url: preview.url,
         company: company.trim(),
         title: title.trim(),
-        locations: locations.split(",").map((l) => l.trim()).filter(Boolean),
+        locations: [...locations],
         datePosted: preview.datePosted,
       });
       preview = null;
       url = "";
       showToast(`Saved ${postingLabel(saved)}.`, "info");
+      // A pasted link may have been in the Inbox: refresh the sidebar badge.
+      void refreshDiscoveryStatus();
       onsaved?.(saved);
     } catch (err) {
       error = errorText(err, "Couldn't save the posting.");
@@ -83,7 +95,14 @@
       <p class="muted">Read from <span class="source">{sourceLabel(preview.source)}</span>. Check the details, then save.</p>
       <label>Company <input required maxlength="300" bind:value={company} /></label>
       <label>Title <input required maxlength="300" bind:value={title} /></label>
-      <label>Locations (comma-separated) <input bind:value={locations} /></label>
+      <ChipInput
+        bind:this={locationsInput}
+        label="Locations"
+        placeholder="e.g. San Francisco, CA"
+        maxItems={MAX_LOCATIONS}
+        maxLength={MAX_LOCATION_LENGTH}
+        bind:items={locations}
+      />
       <div class="buttons">
         <button type="submit" disabled={busy}>Save to Saved</button>
         <button type="button" disabled={busy} onclick={cancel}>Cancel</button>

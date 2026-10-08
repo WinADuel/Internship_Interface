@@ -107,6 +107,26 @@ describe("ScanHeader", () => {
     expect(onfinished).toHaveBeenCalledTimes(1);
   });
 
+  it("reports the end of a scan that another refresh of the status noticed first", async () => {
+    vi.mocked(getScanStatus).mockResolvedValue(fakeScanStatus({ scanning: true }));
+    const onfinished = vi.fn();
+    render(ScanHeader, { onfinished });
+    expect(await screen.findByText("Scanning…")).toBeInTheDocument();
+    // e.g. the sidebar badge refreshed the shared status before this header's poll ran
+    discoveryStatus.set(fakeScanStatus({ lastScanAt: LAST, inboxCount: 3 }));
+    await vi.waitFor(() => expect(onfinished).toHaveBeenCalledTimes(1));
+    discoveryStatus.set(fakeScanStatus({ lastScanAt: LAST, inboxCount: 3 }));
+    expect(onfinished).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a finish when no scan was seen running", async () => {
+    const onfinished = vi.fn();
+    render(ScanHeader, { onfinished });
+    await screen.findByText(/Last scan:/);
+    discoveryStatus.set(fakeScanStatus({ lastScanAt: LAST }));
+    expect(onfinished).not.toHaveBeenCalled();
+  });
+
   it("does not stack polls when a status request is slow", async () => {
     vi.useFakeTimers();
     let release!: () => void;
