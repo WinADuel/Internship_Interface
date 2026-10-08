@@ -76,6 +76,18 @@ def test_needs_followup_draft_one_day_early():
     assert needs_followup_draft(_contact("sent", sent_at=_days_ago(8)), S, TODAY) is False
     assert needs_followup_draft(_contact("sent", sent_at=_days_ago(9), archived=True), S, TODAY) is False
     assert needs_followup_draft(_contact("followed_up", sent_at=_days_ago(20)), S, TODAY) is False
+    # Cleared by the user: Claude's draft would only be skipped, so don't ask for one.
+    assert needs_followup_draft(_contact("sent", sent_at=_days_ago(9), followup_edited=True), S, TODAY) is False
+
+
+def test_nudge_dates_use_utc_whatever_zone_the_timestamp_carries():
+    from datetime import timezone
+
+    chicago = timezone(timedelta(hours=-5))
+    # 9 days ago at 21:00 Chicago is already the next UTC day: 8 UTC days ago.
+    late_evening = datetime.combine(TODAY - timedelta(days=9), datetime.min.time(), tzinfo=chicago).replace(hour=21)
+    assert needs_followup_draft(_contact("sent", sent_at=late_evening), S, TODAY) is False
+    assert needs_followup_draft(_contact("sent", sent_at=late_evening.astimezone(UTC)), S, TODAY) is False
 
 
 def test_utc_today_matches_the_utc_date_of_stored_timestamps(monkeypatch):

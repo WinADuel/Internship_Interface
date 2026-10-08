@@ -115,9 +115,10 @@ If both `queue` and `followups_needed` are empty, stop: there is nothing to do t
 - **Ordering:** set `queue_item_id` to the item you were researching, and post a contact **before** completing its item. Contacts for an item that is no longer pending are skipped.
 - **Response:** `{"created": n, "updated": n, "skipped": n}`.
 - **Matching:** a contact matches an existing one by email, or else by name plus organization, ignoring case.
-  - On a match, your research fields refresh the stored ones.
+  - On a match, your research fields refresh the stored ones. The email changes only until the user has sent the first email.
   - Fields you omit are left alone.
   - The draft is replaced only if the user hasn't edited it and hasn't sent it yet.
+  - A company contact who matches someone already tracked is linked to the application, unless already linked to another one.
   - Name, organization, status and notes are the user's and never change.
   - An archived contact can also be matched. It is refreshed and counted as `updated` but stays archived, so the user won't see it on the board.
 

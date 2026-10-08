@@ -51,6 +51,15 @@ def test_first_sync_creates_sheet_and_stores_id(db_session):
     assert set(fake.replaced) == set(ALL_TABS)
 
 
+def test_first_sync_fills_every_tab_even_when_one_changed(db_session):
+    fake = FakeSheetsClient()
+    sync_tabs(db_session, fake, [TAB_PROFESSORS])
+    assert set(fake.replaced) == set(ALL_TABS)
+    fake.replaced.clear()
+    sync_tabs(db_session, fake, [TAB_PROFESSORS])
+    assert set(fake.replaced) == {TAB_PROFESSORS}
+
+
 def test_second_sync_reuses_sheet(db_session):
     fake = FakeSheetsClient()
     sync_tabs(db_session, fake, [TAB_APPLICATIONS])

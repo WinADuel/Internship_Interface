@@ -32,7 +32,7 @@ def utc_today() -> date:
 
 
 def _older_than(moment: datetime | None, days: int, today: date) -> bool:
-    return moment is not None and (today - moment.date()).days >= days
+    return moment is not None and (today - moment.astimezone(UTC).date()).days >= days
 
 
 def compute_nudge(
@@ -55,7 +55,7 @@ def compute_nudge(
         last_status_change or contact.replied_at, settings.replied_stale_days, today
     ):
         return NudgeKind.REPLIED_STALE
-    if status == ContactStatus.MEETING and contact.meeting_at is not None and contact.meeting_at.date() < today:
+    if status == ContactStatus.MEETING and contact.meeting_at is not None and contact.meeting_at.astimezone(UTC).date() < today:
         return NudgeKind.MEETING_OUTCOME
     return None
 
@@ -66,6 +66,7 @@ def needs_followup_draft(contact: Contact, settings: NudgeSettings, today: date)
     return (
         contact.status == ContactStatus.SENT
         and contact.followup_body is None
+        and not contact.followup_edited  # the user cleared it on purpose; Claude's draft would be skipped
         and not contact.archived
         and _older_than(contact.sent_at, settings.followup_days - 1, today)
     )

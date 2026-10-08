@@ -101,6 +101,7 @@ def sync_tabs(db: Session, client: SheetsClient, tabs: Iterable[str], now: datet
         settings.backup_sheet_id = client.create_spreadsheet(SHEET_TITLE, list(ALL_TABS))
         # Committed at once, so a later tab failure can't orphan a new sheet.
         db.commit()
+        tabs = ALL_TABS  # a new sheet gets every tab, not just the one that changed
     for tab in tabs:
         client.replace_tab(settings.backup_sheet_id, tab, _tab_rows(db, tab))
 
