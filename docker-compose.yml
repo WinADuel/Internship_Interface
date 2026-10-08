@@ -34,6 +34,17 @@ services:
     depends_on:
       - db
 
+  # Job discovery scans (Phase 2 spec §5): every discovery_scan_hours hours.
+  job-scan:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+    command: python -m app.jobs.job_scan
+    depends_on:
+      - db
+
   caddy:
     build: ./frontend
     restart: unless-stopped
