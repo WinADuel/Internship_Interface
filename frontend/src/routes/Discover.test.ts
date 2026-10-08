@@ -13,12 +13,15 @@ vi.mock("../lib/api/discovery", () => ({
   confirmPaste: vi.fn(),
   startScan: vi.fn(),
   getScanStatus: vi.fn(),
+  listWatchlist: vi.fn(),
+  addWatchCompany: vi.fn(),
+  removeWatchCompany: vi.fn(),
 }));
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
 
-import { confirmPaste, getScanStatus, listPostings, previewPaste } from "../lib/api/discovery";
+import { confirmPaste, getScanStatus, listPostings, listWatchlist, previewPaste } from "../lib/api/discovery";
 import { discoveryStatus } from "../lib/stores/discovery";
-import { fakePosting, fakeScanStatus } from "../lib/testing/fixtures";
+import { fakePosting, fakeScanStatus, fakeWatchCompany } from "../lib/testing/fixtures";
 import type { PostingView } from "../lib/types/discovery";
 import Discover from "./Discover.svelte";
 
@@ -30,6 +33,7 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async (view = "inbox") => ({ items: [fakePosting({ company: BY_VIEW[view] })], total: 1 }));
   vi.mocked(getScanStatus).mockReset().mockResolvedValue(fakeScanStatus());
+  vi.mocked(listWatchlist).mockReset().mockResolvedValue([fakeWatchCompany({ name: "Anthropic" })]);
   vi.mocked(previewPaste).mockReset();
   vi.mocked(confirmPaste).mockReset();
 });
@@ -81,10 +85,14 @@ describe("Discover page", () => {
     expect(screen.getByRole("tab", { name: "Watchlist" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("has a Watchlist tab panel", async () => {
+  it("the Watchlist tab shows the watched companies and the add form", async () => {
     render(Discover);
     await fireEvent.click(screen.getByRole("tab", { name: "Watchlist" }));
-    expect(screen.getByRole("tabpanel", { name: "Watchlist" })).toBeInTheDocument();
+    const panel = screen.getByRole("tabpanel", { name: "Watchlist" });
+    expect(panel).toBeInTheDocument();
+    expect(await screen.findByText("Anthropic")).toBeInTheDocument();
+    expect(panel).toContainElement(screen.getByLabelText("Careers page URL"));
+    expect(listPostings).not.toHaveBeenCalledWith("watchlist", expect.anything());
   });
 
   it("a pasted posting opens the Saved tab, freshly loaded", async () => {
