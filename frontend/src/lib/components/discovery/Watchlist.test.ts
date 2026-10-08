@@ -168,7 +168,7 @@ describe("Watchlist", () => {
     vi.mocked(listWatchlist).mockRejectedValueOnce(new ApiError(500, "db down"));
     vi.mocked(listWatchlist).mockResolvedValueOnce([fakeWatchCompany({ id: 1, name: "Stripe" })]);
     render(Watchlist);
-    expect(await screen.findByText("Couldn't load the watchlist: db down")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load the watchlist: db down");
     await fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Stripe")).toBeInTheDocument();
   });

@@ -141,6 +141,44 @@ describe("PostingList — Inbox", () => {
     expect(rowNames()).toEqual(["Stripe", "Figma"]);
   });
 
+  it("Dismiss all shown sends more than 500 ids in chunks of 500, one after another", async () => {
+    const many = Array.from({ length: 550 }, (_, i) => fakePosting({ id: i + 1, company: `Co ${i + 1}` }));
+    const first = deferred<number>();
+    vi.mocked(dismissAllPostings).mockReturnValueOnce(first.promise).mockResolvedValueOnce(50);
+    vi.mocked(listPostings).mockResolvedValueOnce(page(many)).mockResolvedValue(page([]));
+    render(PostingList, { view: "inbox" });
+    await fireEvent.click(await screen.findByRole("button", { name: "Dismiss all shown" }));
+    expect(confirmSpy).toHaveBeenCalledWith("Dismiss all 550 postings shown?");
+    expect(dismissAllPostings).toHaveBeenCalledTimes(1);
+    expect(dismissAllPostings).toHaveBeenNthCalledWith(1, many.slice(0, 500).map((p) => p.id));
+    // While it runs: a busy note, not the empty state.
+    expect(screen.getByText("Dismissing 550 postings…")).toBeInTheDocument();
+    expect(screen.queryByText("No new postings match your filters.")).toBeNull();
+
+    first.resolve(500);
+    await vi.waitFor(() => expect(dismissAllPostings).toHaveBeenCalledTimes(2));
+    expect(dismissAllPostings).toHaveBeenNthCalledWith(2, many.slice(500).map((p) => p.id));
+    expect(await screen.findByText("No new postings match your filters.")).toBeInTheDocument();
+    expect(listPostings).toHaveBeenCalledTimes(2);
+    expect(refreshDiscoveryStatus).toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("Dismiss all shown puts back only the chunk that failed and says how many went", async () => {
+    const many = Array.from({ length: 550 }, (_, i) => fakePosting({ id: i + 1, company: `Co ${i + 1}` }));
+    vi.mocked(dismissAllPostings).mockResolvedValueOnce(500).mockRejectedValueOnce(new ApiError(500, "boom"));
+    vi.mocked(listPostings).mockResolvedValueOnce(page(many));
+    render(PostingList, { view: "inbox" });
+    await fireEvent.click(await screen.findByRole("button", { name: "Dismiss all shown" }));
+    await vi.waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith("Dismissed 500 of 550 postings. Couldn't dismiss the other 50: boom"),
+    );
+    expect(rowNames()).toEqual(many.slice(500).map((p) => p.company));
+    expect(screen.getByText("Showing 50 of 50")).toBeInTheDocument();
+    expect(refreshDiscoveryStatus).toHaveBeenCalled();
+    expect(listPostings).toHaveBeenCalledTimes(1);
+  });
+
   it("loads more 50 at a time while more remain", async () => {
     vi.mocked(listPostings).mockResolvedValueOnce(page([stripe], 2));
     render(PostingList, { view: "inbox" });

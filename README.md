@@ -61,8 +61,8 @@ Google, Microsoft, Apple, Meta and Amazon use their own careers sites, so they c
 **Workday** has no official public API. The app uses the endpoint Workday's own career pages call. If Workday changes it, only the scans of your Workday companies fail (the error shows on the Watchlist tab); everything else keeps working.
 
 - **Add a company:** Discover → Watchlist, paste its careers page URL (for example `https://job-boards.greenhouse.io/<company>` or `https://jobs.lever.co/<company>`), and press Add. Its postings arrive with the next scan.
-- **Filters** (terms, categories, keywords, locations, sponsorship, scan interval, list URLs) live in **Settings → Job discovery**. Changing them re-sorts existing postings straight away.
-- **Scanning:** `docker compose up -d --build` also starts the `job-scan` service, which scans every 6 hours by default. **Scan now** on the Discover page runs one immediately.
+- **Filters** (terms, categories, keywords, locations, sponsorship, scan interval, list URLs) live in **Settings → Job discovery**. Changing them re-filters the postings already found straight away.
+- **Scanning:** `docker compose up -d --build` also starts the `job-scan` service, which runs its first scan about a minute after it starts, then every 6 hours by default. **Scan now** on the Discover page runs one immediately.
 - Saved postings are also mirrored to a "Saved postings" tab in the backup sheet. Discovery needs no Google permissions or secrets of its own.
 
 The board formats were written from vendor documentation, because the build environment could not reach those sites. The first real scan is their live check: if a watched company shows an error, compare its response with [`backend/tests/fixtures/discovery/README.md`](backend/tests/fixtures/discovery/README.md).

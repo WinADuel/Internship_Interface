@@ -97,7 +97,7 @@
   </p>
 
   {#if loadError}
-    <p class="error">
+    <p class="error" role="alert">
       Couldn't load the watchlist: {loadError}
       <button type="button" onclick={load}>Retry</button>
     </p>

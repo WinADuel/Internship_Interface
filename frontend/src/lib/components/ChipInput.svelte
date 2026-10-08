@@ -58,6 +58,21 @@
     if (note === null) draft = "";
   }
 
+  /**
+   * Adds whatever is typed but not yet added, with the same checks as Add (a
+   * form calls this before saving). Text already in the list just clears, as
+   * nothing is lost. Returns false, showing why, if the text was refused.
+   */
+  export function commitDraft(): boolean {
+    if (draft.trim() && has(draft.trim())) {
+      draft = "";
+      note = null;
+      return true;
+    }
+    addDraft();
+    return note === null;
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== "Enter") return;
     event.preventDefault(); // never submit the surrounding form
