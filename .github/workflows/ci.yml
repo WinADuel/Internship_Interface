@@ -116,3 +116,21 @@ jobs:
           echo "$restore_version"
           grep -q ' 16\.' <<<"$dump_version"
           grep -q ' 16\.' <<<"$restore_version"
+
+  # The whole stack, built and run as on the server (Phase 3 Task 9): ops/checks/stack-smoke.sh
+  # deploys this commit with deploy.sh and DOMAIN=localhost, checks HTTPS, the security headers
+  # and the public pages, then a manual backup, restore.sh and a second deploy. Its .env is
+  # throwaway (generated secrets, placeholder Google values) and is deleted at the end.
+  stack-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A full clone, like the server's: deploy.sh runs `git fetch --tags origin`.
+          fetch-depth: 0
+      - name: Smoke test the stack
+        run: CI=true ops/checks/stack-smoke.sh
