@@ -1,4 +1,5 @@
 import type { Priority } from "./application";
+import type { DiscoverySettings } from "./discovery";
 
 // String unions mirror the backend enums exactly.
 export type ContactKind = "professor" | "company";
@@ -128,7 +129,7 @@ export interface QueueItemInput {
   targetCount: number;
 }
 
-export interface AppSettings {
+export interface AppSettings extends DiscoverySettings {
   outreachProfile: string;
   nudgeUnsentDays: number;
   nudgeFollowupDays: number;
@@ -138,6 +139,9 @@ export interface AppSettings {
   backupSheetId: string | null;
   lastSheetSyncAt: string | null;
   lastSheetSyncError: string | null;
+  /** Set by the scanner; read-only here. */
+  lastScanAt: string | null;
+  lastScanError: string | null;
 }
 
 export type AppSettingsUpdate = Partial<
@@ -149,7 +153,8 @@ export type AppSettingsUpdate = Partial<
     | "nudgeGoneQuietDays"
     | "nudgeRepliedStaleDays"
     | "claudeJobMaxItems"
-  >
+  > &
+    DiscoverySettings
 >;
 
 export interface ClaudeTokenInfo {

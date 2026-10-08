@@ -26,6 +26,17 @@ const settings: AppSettings = {
   backupSheetId: null,
   lastSheetSyncAt: null,
   lastSheetSyncError: null,
+  discoveryListUrls: [],
+  discoveryTerms: ["Summer 2027"],
+  discoveryCategories: ["Software"],
+  discoveryIncludeKeywords: [],
+  discoveryWatchlistKeywords: ["intern"],
+  discoveryExcludeKeywords: [],
+  discoveryLocations: [],
+  discoveryHideNoSponsorship: false,
+  discoveryScanHours: 6,
+  lastScanAt: null,
+  lastScanError: null,
 };
 
 beforeEach(() => {
