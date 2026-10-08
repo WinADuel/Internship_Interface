@@ -92,7 +92,7 @@
 
   <dl>
     <dt>Status</dt>
-    <dd>{statusLabel(contact.status, contact.kind)}{contact.closedReason ? ` (${contact.closedReason.replace("_", " ")})` : ""}</dd>
+    <dd>{statusLabel(contact.status, contact.kind)}{contact.closedReason ? ` (${contact.closedReason.replaceAll("_", " ")})` : ""}</dd>
     {#if contact.labName}<dt>Lab</dt><dd>{contact.labName}</dd>{/if}
     <dt>Email</dt>
     <dd>{contact.email ?? "—"} <span class="muted">({EMAIL_LABELS[contact.emailConfidence]})</span></dd>
@@ -156,7 +156,7 @@
     <p class="muted">No status changes yet.</p>
   {:else}
     <ol class="history">
-      {#each history as entry (entry.changedAt + entry.newStatus)}
+      {#each history as entry, i (i)}
         <li>
           {entry.oldStatus ? statusLabel(entry.oldStatus, contact.kind) : "New"} → {statusLabel(entry.newStatus, contact.kind)}
           <time>{formatDateTime(entry.changedAt)}</time>

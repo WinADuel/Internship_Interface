@@ -62,6 +62,23 @@ describe("DraftEditor", () => {
     expect(vi.mocked(applyContactAction).mock.calls[0][1]).toBe("followed_up");
   });
 
+  it("takes a newer server copy unless the user has unsaved edits", async () => {
+    const base = { email: "a@b.edu", status: "sent" as const };
+    const { rerender } = render(DraftEditor, { contact: fakeContact(base), which: "followup" });
+    expect(screen.getByLabelText("Body")).toHaveValue("");
+    await rerender({ contact: fakeContact({ ...base, followupSubject: "Re", followupBody: "From Claude" }), which: "followup" });
+    expect(screen.getByLabelText("Body")).toHaveValue("From Claude");
+    await fireEvent.input(screen.getByLabelText("Body"), { target: { value: "Mine" } });
+    await rerender({ contact: fakeContact({ ...base, followupSubject: "Re", followupBody: "Newer" }), which: "followup" });
+    expect(screen.getByLabelText("Body")).toHaveValue("Mine");
+  });
+
+  it("does not offer Sent once the draft's action no longer applies", async () => {
+    render(DraftEditor, { contact: fakeContact({ ...draft, status: "replied", emailConfidence: "found" }), which: "draft" });
+    await fireEvent.click(screen.getByRole("button", { name: "Open in Gmail" }));
+    expect(screen.queryByText(/Did you send it\?/)).toBeNull();
+  });
+
   it("replaces Open in Gmail with a Copy note for long drafts", () => {
     render(DraftEditor, { contact: fakeContact({ ...draft, draftBody: "x".repeat(3000) }), which: "draft" });
     expect(screen.queryByRole("button", { name: "Open in Gmail" })).toBeNull();

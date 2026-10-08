@@ -3,7 +3,8 @@
   import { updateContact } from "../../api/contacts";
   import { ACTIONS_BY_STATUS } from "../../contacts/actions";
   import { GUESS_WARNING, fitsInGmailUrl, gmailComposeUrl } from "../../contacts/gmail";
-  import { replaceContact, runContactAction } from "../../stores/contacts";
+  import { untrack } from "svelte";
+  import { markUndoable, replaceContact, runContactAction } from "../../stores/contacts";
   import { showToast } from "../../stores/toast";
   import type { Contact } from "../../types/contact";
 
@@ -14,18 +15,29 @@
 
   let subject = $state("");
   let body = $state("");
-  let loadedFor = $state<string | null>(null);
+  // What the fields were last loaded from, to tell server changes from user edits.
+  let loadedFor: string | null = null;
+  let loadedSubject = "";
+  let loadedBody = "";
   let saving = $state(false);
   let askSent = $state(false);
 
-  // Reload the fields when a different contact (or a fresh server copy) arrives.
+  // Load on a new contact; also take a newer server copy (e.g. a follow-up
+  // the Claude job just delivered) unless the user has unsaved edits.
   $effect(() => {
     const key = `${contact.id}:${which}`;
-    if (loadedFor === key) return;
-    loadedFor = key;
-    subject = (isDraft ? contact.draftSubject : contact.followupSubject) ?? "";
-    body = (isDraft ? contact.draftBody : contact.followupBody) ?? "";
-    askSent = false;
+    const serverSubject = (isDraft ? contact.draftSubject : contact.followupSubject) ?? "";
+    const serverBody = (isDraft ? contact.draftBody : contact.followupBody) ?? "";
+    untrack(() => {
+      const newContact = loadedFor !== key;
+      const serverChanged = serverSubject !== loadedSubject || serverBody !== loadedBody;
+      const dirty = subject !== loadedSubject || body !== loadedBody;
+      if (!newContact && (!serverChanged || dirty)) return;
+      loadedFor = key;
+      loadedSubject = subject = serverSubject;
+      loadedBody = body = serverBody;
+      if (newContact) askSent = false;
+    });
   });
 
   const url = $derived(gmailComposeUrl(contact.email ?? "", subject, body));
@@ -38,7 +50,10 @@
       const data = isDraft
         ? { draftSubject: subject, draftBody: body }
         : { followupSubject: subject, followupBody: body };
-      replaceContact(await updateContact(contact.id, data));
+      const updated = await updateContact(contact.id, data);
+      loadedSubject = subject;
+      loadedBody = body;
+      replaceContact(updated);
       showToast("Saved.", "info");
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Couldn't save the draft.");
@@ -63,7 +78,10 @@
   }
 
   async function markSent() {
-    if (await runContactAction(contact.id, sentAction)) askSent = false;
+    if (await runContactAction(contact.id, sentAction)) {
+      markUndoable(contact.id);
+      askSent = false;
+    }
   }
 </script>
 
