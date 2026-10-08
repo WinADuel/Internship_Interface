@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.models.application import Priority
 from app.models.contact import ContactKind, ContactOrigin, ContactStatus, EmailConfidence
@@ -108,8 +108,10 @@ class ContactOut(BaseModel):
 
 class ContactActionIn(BaseModel):
     action: ContactAction
-    on: datetime | None = None
-    meeting_at: datetime | None = None
+    # Aware only: stored timestamps are timezone-aware, and naive values
+    # could not be compared against them (undo window, nudges).
+    on: AwareDatetime | None = None
+    meeting_at: AwareDatetime | None = None
 
 
 class ContactStatusIn(BaseModel):
