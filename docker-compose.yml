@@ -29,6 +29,11 @@ services:
     restart: unless-stopped
     logging: *default-logging
     env_file: .env
+    environment:
+      # Back up now in Settings writes here, next to the db-backup service's dumps.
+      BACKUP_DIR: /backups
+    volumes:
+      - ./backups:/backups
     depends_on:
       db:
         condition: service_healthy

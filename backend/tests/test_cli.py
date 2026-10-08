@@ -1,5 +1,8 @@
+import stat
+
 import pyotp
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import func, select
 
 from app import cli
@@ -134,3 +137,46 @@ def test_restore_check_fails_on_an_unreadable_file(monkeypatch, capsys):
     monkeypatch.setattr(cli, "list_dump", fake_list_dump)
     assert cli.main(["restore-check", "broken.dump"]) == 1
     assert "not a readable dump" in capsys.readouterr().err
+
+
+BACKUP_KEY = Fernet.generate_key().decode()
+
+
+@pytest.fixture()
+def encrypted(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", BACKUP_KEY)
+    source = tmp_path / "tracker-20261008T023000Z.dump.enc"
+    source.write_bytes(Fernet(BACKUP_KEY).encrypt(b"PGDMP whole database"))
+    return source
+
+
+def test_decrypt_backup_writes_the_dump(encrypted, tmp_path, capsys):
+    out = tmp_path / "restored.dump"
+    assert cli.main(["decrypt-backup", str(encrypted), str(out)]) == 0
+    assert out.read_bytes() == b"PGDMP whole database"
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    assert f"restore-check {out}" in capsys.readouterr().out
+
+
+def test_decrypt_backup_with_the_wrong_key_fails_cleanly(encrypted, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", Fernet.generate_key().decode())
+    out = tmp_path / "restored.dump"
+    assert cli.main(["decrypt-backup", str(encrypted), str(out)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("Error: cannot decrypt: wrong BACKUP_ENCRYPTION_KEY")
+    assert "Traceback" not in err
+    assert not out.exists()
+
+
+def test_decrypt_backup_refuses_to_overwrite(encrypted, tmp_path, capsys):
+    out = tmp_path / "restored.dump"
+    out.write_bytes(b"precious")
+    assert cli.main(["decrypt-backup", str(encrypted), str(out)]) == 1
+    assert "already exists" in capsys.readouterr().err
+    assert out.read_bytes() == b"precious"
+
+
+def test_decrypt_backup_needs_the_key(encrypted, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", None)
+    assert cli.main(["decrypt-backup", str(encrypted), str(tmp_path / "out.dump")]) == 1
+    assert "BACKUP_ENCRYPTION_KEY is not set" in capsys.readouterr().err

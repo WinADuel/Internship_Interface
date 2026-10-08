@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from pathlib import Path
 
 import jwt
 from fastapi import Depends, HTTPException, Request
@@ -11,6 +12,7 @@ from app.db.session import SessionLocal, get_db
 from app.models.auth_credential import AuthCredential
 from app.models.claude_token import ClaudeToken
 from app.services import claude_token_service
+from app.services.backup.dump import run_dump
 from app.services.discovery.http import DiscoveryHttp, HttpxDiscoveryHttp
 from app.services.sheet_sync_service import SheetSyncScheduler, google_sheets_client
 from app.services.sheets_client import SheetsClient
@@ -68,3 +70,8 @@ def get_scan_session_factory() -> Callable[[], AbstractContextManager[Session]]:
     session is closed by then). `with factory() as db:` closes it on exit.
     Overridden in tests so the scan runs inside the test transaction."""
     return SessionLocal
+
+
+def get_backup_dump() -> Callable[..., Path]:
+    """Takes the dump for Back up now (pg_dump); overridden in tests."""
+    return run_dump

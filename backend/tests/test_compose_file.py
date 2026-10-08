@@ -119,6 +119,14 @@ def test_db_backup_service_runs_the_backup_job(services):
     assert service["volumes"] == ["./backups:/backups"]
 
 
+def test_backend_writes_manual_backups_to_the_same_folder(services):
+    # Back up now (POST /api/backups/run) runs pg_dump in the backend container.
+    service = services["backend"]
+    assert service["environment"] == {"BACKUP_DIR": "/backups"}
+    assert service["volumes"] == ["./backups:/backups"]
+    assert service["volumes"] == services["db-backup"]["volumes"]
+
+
 def test_backups_folder_is_git_ignored():
     gitignore = (COMPOSE_PATH.parent / ".gitignore").read_text().splitlines()
     assert "/backups/" in gitignore
