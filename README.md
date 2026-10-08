@@ -37,6 +37,21 @@ The Essays page reads Google Docs through a Google OAuth client you create yours
 
 If docs fail to load, `docker compose logs backend` shows why: every failure logs a one-line warning with an HTTP status or error type (never a token or a response body).
 
+## Outreach: backup sheet and the daily Claude job
+
+**Backup Google Sheet.** The app mirrors applications and contacts to a sheet called "Internship Tracker Backup" in your Drive. It needs the `drive.file` permission, which only covers files the app creates.
+
+1. In the same Google Cloud project, also enable the **Google Sheets API**.
+2. If you connected Google before this feature existed, reconnect it once. Use **Settings → Backup sheet → Connect Google**, or the Essays page. Until then, syncs fail with "reconnect Google to grant the drive.file permission".
+3. Press **Sync now** in Settings. After that, the sheet updates after every change, and the `sheet-sync` service in `docker-compose.yml` re-syncs everything nightly. Sync errors are shown in Settings and never block your edits.
+
+**Daily Claude research job.** A Claude Code scheduled routine, running on your Claude plan, researches the people in the Research Queue and writes email drafts. Its instructions are in [`ops/claude-routine/outreach-job.md`](ops/claude-routine/outreach-job.md). The appendix there covers setup:
+
+1. Create a token in **Settings → Claude tokens**.
+2. Schedule the routine daily with `APP_BASE_URL` and `CLAUDE_TOKEN` in its configuration.
+
+The routine runs in the cloud, so it only works once the app is reachable at its public HTTPS address. Revoking the token stops it.
+
 ## Backups
 
 The database lives in the `pgdata` Docker volume. Take a dump regularly (cron, or before every upgrade):

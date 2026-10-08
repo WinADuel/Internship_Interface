@@ -49,6 +49,8 @@ beforeEach(() => {
   }) as unknown as typeof fetch;
   routes["GET /api/applications?include_archived=false"] = () => ({ body: [raw()] });
   routes["GET /api/applications/1/history"] = () => ({ body: [] });
+  // The detail panel's Contacts section (Phase 1b).
+  for (const id of [1, 2]) routes[`GET /api/contacts?kind=company&application_id=${id}`] = () => ({ body: [] });
 });
 afterEach(() => vi.restoreAllMocks());
 

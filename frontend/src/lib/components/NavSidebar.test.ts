@@ -21,6 +21,9 @@ describe("NavSidebar", () => {
     expect(screen.getByRole("link", { name: "Dashboard" }).getAttribute("href")).toBe("#/");
     expect(screen.getByRole("link", { name: "Applications" }).getAttribute("href")).toBe("#/applications");
     expect(screen.getByRole("link", { name: "Essays" }).getAttribute("href")).toBe("#/essays");
+    expect(screen.getByRole("link", { name: "Contacts" }).getAttribute("href")).toBe("#/contacts");
+    expect(screen.getByRole("link", { name: "Research Queue" }).getAttribute("href")).toBe("#/research-queue");
+    expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("#/settings");
   });
 
   it("Logout calls the logout endpoint, clears the session and routes to /login", async () => {

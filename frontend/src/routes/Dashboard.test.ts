@@ -10,6 +10,14 @@ vi.mock("gridstack", () => ({
   GridStack: { init: vi.fn(() => ({ on: vi.fn(), save: vi.fn(() => []), destroy: vi.fn() })) },
 }));
 vi.mock("gridstack/dist/gridstack.min.css", () => ({}));
+vi.mock("../lib/api/contacts", () => ({
+  getNeedsAttention: vi.fn().mockResolvedValue([]),
+  getContactActivity: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("../lib/api/applications", async (orig) => ({
+  ...(await orig<typeof import("../lib/api/applications")>()),
+  getRecentActivity: vi.fn().mockResolvedValue([]),
+}));
 
 import { get } from "svelte/store";
 import Dashboard from "./Dashboard.svelte";
@@ -23,10 +31,10 @@ beforeEach(() => {
 });
 
 describe("Dashboard route", () => {
-  it("loads applications on mount and renders all four widgets", () => {
+  it("loads applications on mount and renders all five widgets", () => {
     const { container } = render(Dashboard);
     expect(load).toHaveBeenCalledTimes(1);
-    for (const id of ["activity", "reminders", "buckets", "snapshot"]) {
+    for (const id of ["activity", "reminders", "buckets", "snapshot", "needs-attention"]) {
       expect(container.querySelector(`[data-widget="${id}"]`)).not.toBeNull();
     }
   });
@@ -41,13 +49,14 @@ describe("Dashboard route", () => {
     expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("30");
   });
 
-  it("shows widgets added after an older layout was saved", () => {
+  it("shows widgets added after an older layout was saved, including Needs attention", () => {
     localStorage.setItem(
       LAYOUT_STORAGE_KEY,
       JSON.stringify([{ id: "activity", x: 0, y: 0, w: 6, h: 4, settings: {} }]),
     );
     const { container } = render(Dashboard);
-    expect(container.querySelectorAll("[data-widget]")).toHaveLength(4);
+    expect(container.querySelectorAll("[data-widget]")).toHaveLength(5);
+    expect(container.querySelector('[data-widget="needs-attention"]')).not.toBeNull();
   });
 
   it("toasts when loading applications fails", async () => {
