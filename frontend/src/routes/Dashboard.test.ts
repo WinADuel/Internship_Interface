@@ -14,6 +14,9 @@ vi.mock("../lib/api/contacts", () => ({
   getNeedsAttention: vi.fn().mockResolvedValue([]),
   getContactActivity: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("../lib/api/discovery", () => ({
+  listPostings: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+}));
 vi.mock("../lib/api/applications", async (orig) => ({
   ...(await orig<typeof import("../lib/api/applications")>()),
   getRecentActivity: vi.fn().mockResolvedValue([]),
@@ -31,10 +34,10 @@ beforeEach(() => {
 });
 
 describe("Dashboard route", () => {
-  it("loads applications on mount and renders all five widgets", () => {
+  it("loads applications on mount and renders all six widgets", () => {
     const { container } = render(Dashboard);
     expect(load).toHaveBeenCalledTimes(1);
-    for (const id of ["activity", "reminders", "buckets", "snapshot", "needs-attention"]) {
+    for (const id of ["activity", "reminders", "buckets", "snapshot", "needs-attention", "new-postings"]) {
       expect(container.querySelector(`[data-widget="${id}"]`)).not.toBeNull();
     }
   });
@@ -49,14 +52,31 @@ describe("Dashboard route", () => {
     expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("30");
   });
 
-  it("shows widgets added after an older layout was saved, including Needs attention", () => {
+  it("shows widgets added after an older layout was saved, including Needs attention and New postings", () => {
     localStorage.setItem(
       LAYOUT_STORAGE_KEY,
       JSON.stringify([{ id: "activity", x: 0, y: 0, w: 6, h: 4, settings: {} }]),
     );
     const { container } = render(Dashboard);
-    expect(container.querySelectorAll("[data-widget]")).toHaveLength(5);
+    expect(container.querySelectorAll("[data-widget]")).toHaveLength(6);
     expect(container.querySelector('[data-widget="needs-attention"]')).not.toBeNull();
+    expect(container.querySelector('[data-widget="new-postings"]')).not.toBeNull();
+  });
+
+  it("adds New postings to a full pre-Phase-2 layout and keeps the saved positions", async () => {
+    const old = [
+      { id: "activity", x: 6, y: 0, w: 6, h: 4, settings: {} },
+      { id: "reminders", x: 0, y: 0, w: 6, h: 4, settings: { withinDays: 7 } },
+      { id: "buckets", x: 0, y: 4, w: 6, h: 4, settings: {} },
+      { id: "snapshot", x: 6, y: 4, w: 6, h: 4, settings: {} },
+      { id: "needs-attention", x: 0, y: 8, w: 12, h: 4, settings: {} },
+    ];
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(old));
+    const { container } = render(Dashboard);
+    const card = container.querySelector('[data-widget="new-postings"]');
+    expect(card?.querySelector("h2")?.textContent).toBe("New postings");
+    expect(await screen.findByText(/No new matches/)).toBeInTheDocument();
+    expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("7");
   });
 
   it("toasts when loading applications fails", async () => {

@@ -1,5 +1,6 @@
 import type { Application } from "../types/application";
 import type { Contact } from "../types/contact";
+import type { Posting, ScanStatus, WatchCompany } from "../types/discovery";
 
 export function fakeApplication(overrides: Partial<Application> = {}): Application {
   return {
@@ -67,4 +68,48 @@ export function fakeContact(overrides: Partial<Contact> = {}): Contact {
     nudge: null,
     ...overrides,
   };
+}
+
+export function fakePosting(overrides: Partial<Posting> = {}): Posting {
+  return {
+    id: 1,
+    source: "simplify",
+    company: "Stripe",
+    title: "SWE Intern",
+    locations: ["NYC", "Remote"],
+    url: "https://stripe.com/jobs/1",
+    terms: ["Summer 2027"],
+    category: "Software",
+    sponsorship: null,
+    datePosted: "2026-10-01T00:00:00Z",
+    firstSeenAt: "2026-10-02T00:00:00Z",
+    lastSeenAt: "2026-10-03T00:00:00Z",
+    closed: false,
+    state: "new",
+    stateChangedAt: "2026-10-02T00:00:00Z",
+    applicationId: null,
+    watchCompanyId: null,
+    claudeScore: null,
+    claudeNote: null,
+    ...overrides,
+  };
+}
+
+export function fakeWatchCompany(overrides: Partial<WatchCompany> = {}): WatchCompany {
+  return {
+    id: 4,
+    name: "Stripe",
+    ats: "greenhouse",
+    boardToken: "stripe",
+    careersUrl: "https://boards.greenhouse.io/stripe",
+    addedAt: "2026-10-01T00:00:00Z",
+    lastCheckedAt: null,
+    lastError: null,
+    openMatches: 0,
+    ...overrides,
+  };
+}
+
+export function fakeScanStatus(overrides: Partial<ScanStatus> = {}): ScanStatus {
+  return { lastScanAt: null, lastScanError: null, scanning: false, inboxCount: 0, ...overrides };
 }

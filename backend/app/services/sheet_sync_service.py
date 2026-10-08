@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.application import Application
 from app.models.contact import Contact, ContactKind
+from app.models.posting import Posting, PostingState
 from app.services.contact_service import last_status_changes
 from app.services.errors import GoogleAuthError
 from app.services.google_docs_service import get_valid_access_token
@@ -29,7 +30,10 @@ SHEET_TITLE = "Internship Tracker Backup"
 TAB_APPLICATIONS = "Applications"
 TAB_PROFESSORS = "Professors"
 TAB_COMPANY = "Company Contacts"
-ALL_TABS = (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY)
+# Discover's Saved postings (Phase 2). Sheets created before it lack the tab;
+# sync_tabs adds it (ensure_tabs) before writing.
+TAB_SAVED_POSTINGS = "Saved postings"
+ALL_TABS = (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY, TAB_SAVED_POSTINGS)
 CONTACT_TABS = (TAB_PROFESSORS, TAB_COMPANY)
 HEADER_NOTE = "One-way backup mirror of Internship Tracker — edits made here are overwritten."
 SHEET_URL = "https://docs.google.com/spreadsheets/d/{id}"
@@ -48,6 +52,7 @@ CONTACT_COLUMNS = (
     "followup_subject", "followup_body", "notes", "origin", "archived", "updated_at",
 )
 NEEDS_ATTENTION_HEADER = "Needs Attention"
+SAVED_POSTING_COLUMNS = ("Company", "Role", "Locations", "Link", "Saved", "Closed")
 
 
 def _cell(value) -> str:
@@ -77,6 +82,34 @@ def contact_rows(contacts_with_nudges: Iterable[tuple[Contact, NudgeKind | None]
     return rows
 
 
+def saved_posting_rows(postings: Iterable[Posting]) -> list[list[str]]:
+    """Saved postings, as given (newest saved first). Text comes from untrusted
+    lists and boards; it is written RAW, so it is never parsed as a formula."""
+    rows = [[HEADER_NOTE], list(SAVED_POSTING_COLUMNS)]
+    rows += [
+        [
+            _cell(p.company),
+            _cell(p.title),
+            "; ".join(p.locations or []),
+            _cell(p.url),
+            _cell(p.state_changed_at.astimezone(timezone.utc).date()),
+            "yes" if p.closed else "",
+        ]
+        for p in postings
+    ]
+    return rows
+
+
+def _saved_postings(db: Session) -> list[Posting]:
+    return list(
+        db.scalars(
+            select(Posting)
+            .where(Posting.state == PostingState.SAVED)
+            .order_by(Posting.state_changed_at.desc(), Posting.id.desc())
+        )
+    )
+
+
 def _contacts_with_nudges(db: Session, kind: ContactKind) -> list[tuple[Contact, NudgeKind | None]]:
     settings = nudge_settings(get_settings(db))
     last_changes = last_status_changes(db)
@@ -92,16 +125,26 @@ def _tab_rows(db: Session, tab: str) -> list[list[str]]:
         return contact_rows(_contacts_with_nudges(db, ContactKind.PROFESSOR))
     if tab == TAB_COMPANY:
         return contact_rows(_contacts_with_nudges(db, ContactKind.COMPANY))
+    if tab == TAB_SAVED_POSTINGS:
+        return saved_posting_rows(_saved_postings(db))
     raise ValueError(f"unknown tab {tab!r}")
 
 
 def sync_tabs(db: Session, client: SheetsClient, tabs: Iterable[str], now: datetime | None = None) -> None:
+    tabs = list(dict.fromkeys(tabs))
+    unknown = [t for t in tabs if t not in ALL_TABS]
+    if unknown:
+        raise ValueError(f"unknown tab {unknown[0]!r}")
     settings = get_settings(db)
     if settings.backup_sheet_id is None:
         settings.backup_sheet_id = client.create_spreadsheet(SHEET_TITLE, list(ALL_TABS))
         # Committed at once, so a later tab failure can't orphan a new sheet.
         db.commit()
-        tabs = ALL_TABS  # a new sheet gets every tab, not just the one that changed
+        tabs = list(ALL_TABS)  # a new sheet gets every tab, not just the one that changed
+    else:
+        # A sheet made before a tab existed (e.g. Saved postings) gains it here;
+        # writing a missing tab would fail.
+        client.ensure_tabs(settings.backup_sheet_id, tabs)
     for tab in tabs:
         client.replace_tab(settings.backup_sheet_id, tab, _tab_rows(db, tab))
 

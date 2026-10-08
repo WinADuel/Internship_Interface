@@ -16,6 +16,8 @@ RECONNECT_HINT = "reconnect Google to grant the drive.file permission"
 class SheetsClient(Protocol):
     def create_spreadsheet(self, title: str, tab_titles: list[str]) -> str: ...
 
+    def ensure_tabs(self, spreadsheet_id: str, titles: list[str]) -> None: ...
+
     def replace_tab(self, spreadsheet_id: str, tab: str, rows: list[list[str]]) -> None: ...
 
 
@@ -47,6 +49,21 @@ class GoogleSheetsClient:
             return response.json()["spreadsheetId"]
         except (ValueError, KeyError):
             raise SheetSyncError("sheets create returned no spreadsheet id") from None
+
+    def ensure_tabs(self, spreadsheet_id: str, titles: list[str]) -> None:
+        """Add any of `titles` the spreadsheet lacks (sheets made before a tab
+        existed). Matched case-insensitively, as Sheets treats tab names."""
+        sheet = f"{SHEETS_API}/{quote(spreadsheet_id, safe='')}"
+        response = self._request("get", "GET", sheet, params={"fields": "sheets.properties.title"})
+        try:
+            existing = {s["properties"]["title"].casefold() for s in response.json().get("sheets", [])}
+        except (ValueError, AttributeError, KeyError, TypeError):
+            raise SheetSyncError("sheets get returned no tab list") from None
+        missing = [t for t in dict.fromkeys(titles) if t.casefold() not in existing]
+        if not missing:
+            return
+        requests = [{"addSheet": {"properties": {"title": t}}} for t in missing]
+        self._request("add tabs", "POST", f"{sheet}:batchUpdate", json={"requests": requests})
 
     def replace_tab(self, spreadsheet_id: str, tab: str, rows: list[list[str]]) -> None:
         base = f"{SHEETS_API}/{quote(spreadsheet_id, safe='')}/values"

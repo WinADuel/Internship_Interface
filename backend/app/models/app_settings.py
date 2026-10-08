@@ -1,13 +1,42 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, Text, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+# Phase 2 spec §3 defaults. Each list is both the Python default (a fresh copy
+# per row) and the column's server default.
+DEFAULT_LIST_URLS = (
+    "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+    "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
+)
+DEFAULT_TERMS = ("Summer 2027",)
+DEFAULT_CATEGORIES = ("Software", "AI/ML/Data")
+DEFAULT_WATCHLIST_KEYWORDS = ("intern", "internship", "co-op")
+DEFAULT_EXCLUDE_KEYWORDS = ("senior", "staff", "principal", "phd")
+
+
+def _text_array_literal(values: tuple[str, ...]) -> str:
+    """A Postgres `text[]` literal, e.g. `'{"a","b"}'::text[]`. Values are
+    module constants; quotes, backslashes, braces and commas are refused."""
+    if any(c in v for v in values for c in "\"\\'{},"):
+        raise ValueError(f"unsafe array default: {values!r}")
+    return "'{" + ",".join(f'"{v}"' for v in values) + "}'::text[]"
+
+
+def _text_array(values: tuple[str, ...]):
+    """Column kwargs for a NOT NULL text[] defaulting to `values`."""
+    return dict(
+        nullable=False,
+        default=lambda: list(values),
+        server_default=text(_text_array_literal(values)),
+    )
+
 
 class AppSettings(Base):
-    """Single-row (id = 1) app-wide settings for outreach (spec §13.2)."""
+    """Single-row (id = 1) app-wide settings: outreach (spec §13.2) and job discovery (Phase 2 spec §3)."""
 
     __tablename__ = "app_settings"
     __table_args__ = (CheckConstraint("id = 1", name="app_settings_single_row"),)
@@ -30,3 +59,26 @@ class AppSettings(Base):
     backup_sheet_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_sheet_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sheet_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Job discovery (Phase 2).
+    discovery_list_urls: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(DEFAULT_LIST_URLS))
+    discovery_terms: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(DEFAULT_TERMS))
+    discovery_categories: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(DEFAULT_CATEGORIES))
+    discovery_include_keywords: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    discovery_watchlist_keywords: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), **_text_array(DEFAULT_WATCHLIST_KEYWORDS)
+    )
+    discovery_exclude_keywords: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), **_text_array(DEFAULT_EXCLUDE_KEYWORDS)
+    )
+    discovery_locations: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    discovery_hide_no_sponsorship: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    discovery_scan_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=6, server_default="6")
+    # List URL -> ETag of the last download (server-owned, not exposed by the API).
+    discovery_list_etags: Mapped[dict[str, str]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_scan_error: Mapped[str | None] = mapped_column(Text, nullable=True)
