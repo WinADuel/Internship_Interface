@@ -31,7 +31,9 @@
         cellHeight: 80,
         margin: 8,
         // Phones: stack every widget in one full-width column.
-        columnOpts: { breakpoints: [{ w: 700, c: 1 }] },
+        // breakpointForWindow: measure the window, not the grid, so desktop windows
+        // narrower than ~950px keep their columns and keep saving drag changes.
+        columnOpts: { breakpointForWindow: true, breakpoints: [{ w: 700, c: 1 }] },
       },
       container,
     );
