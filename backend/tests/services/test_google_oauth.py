@@ -32,7 +32,10 @@ def test_get_authorization_url_has_required_params():
     assert q["response_type"] == ["code"]
     assert q["client_id"] == [settings.google_client_id]
     assert q["redirect_uri"] == [settings.google_redirect_uri]
-    assert q["scope"] == ["https://www.googleapis.com/auth/drive.readonly"]
+    assert q["scope"] == [
+        "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file"
+    ]
+    assert "drive.file" in url and "auth%2Fdrive.file" in url
     assert q["access_type"] == ["offline"]
     assert q["prompt"] == ["consent"]
     assert q["state"] == ["st ate&1"]

@@ -1,9 +1,9 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_sheet_sync_scheduler
 from app.db.session import get_db
 from app.models.contact import Contact, ContactKind
 from app.schemas.contact import (
@@ -23,6 +23,7 @@ from app.services.errors import (
     InvalidTransitionError,
     UndoExpiredError,
 )
+from app.services.sheet_sync_service import CONTACT_TABS, SheetSyncScheduler
 
 router = APIRouter(
     prefix="/api/contacts",
@@ -43,6 +44,14 @@ def _one(db: Session, contact: Contact) -> ContactOut:
     return _out(db, [contact])[0]
 
 
+def _synced(
+    db: Session, contact: Contact, background_tasks: BackgroundTasks, sync: SheetSyncScheduler
+) -> ContactOut:
+    """Response for a successful write; re-syncs the contact tabs afterwards."""
+    sync.schedule(background_tasks, CONTACT_TABS)
+    return _one(db, contact)
+
+
 @router.get("", response_model=list[ContactOut])
 def list_contacts(
     kind: ContactKind | None = None,
@@ -57,11 +66,17 @@ def list_contacts(
 
 
 @router.post("", response_model=ContactOut, status_code=201)
-def create_contact(data: ContactCreate, db: Session = Depends(get_db)):
+def create_contact(
+    data: ContactCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
-        return _one(db, contact_service.create_contact(db, data))
+        contact = contact_service.create_contact(db, data)
     except ApplicationNotFoundError:
         raise _BAD_APPLICATION
+    return _synced(db, contact, background_tasks, sync)
 
 
 # Static paths must be declared before "/{contact_id}".
@@ -85,17 +100,30 @@ def get_contact(contact_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{contact_id}", response_model=ContactOut)
-def update_contact(contact_id: int, data: ContactUpdate, db: Session = Depends(get_db)):
+def update_contact(
+    contact_id: int,
+    data: ContactUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
-        return _one(db, contact_service.update_contact(db, contact_id, data))
+        contact = contact_service.update_contact(db, contact_id, data)
     except ContactNotFoundError:
         raise _NOT_FOUND
     except ApplicationNotFoundError:
         raise _BAD_APPLICATION
+    return _synced(db, contact, background_tasks, sync)
 
 
 @router.post("/{contact_id}/actions", response_model=ContactOut)
-def apply_action(contact_id: int, body: ContactActionIn, db: Session = Depends(get_db)):
+def apply_action(
+    contact_id: int,
+    body: ContactActionIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
         contact = contact_service.apply_action(
             db, contact_id, body.action, on=body.on, meeting_at=body.meeting_at
@@ -104,45 +132,69 @@ def apply_action(contact_id: int, body: ContactActionIn, db: Session = Depends(g
         raise _NOT_FOUND
     except InvalidTransitionError as e:
         raise HTTPException(status_code=422, detail=e.message)
-    return _one(db, contact)
+    return _synced(db, contact, background_tasks, sync)
 
 
 @router.post("/{contact_id}/status", response_model=ContactOut)
-def move_status(contact_id: int, body: ContactStatusIn, db: Session = Depends(get_db)):
+def move_status(
+    contact_id: int,
+    body: ContactStatusIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
         contact = contact_service.move_status(db, contact_id, body.new_status)
     except ContactNotFoundError:
         raise _NOT_FOUND
     except InvalidTransitionError as e:
         raise HTTPException(status_code=422, detail=e.message)
-    return _one(db, contact)
+    return _synced(db, contact, background_tasks, sync)
 
 
 @router.post("/{contact_id}/undo", response_model=ContactOut)
-def undo(contact_id: int, db: Session = Depends(get_db)):
+def undo(
+    contact_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
         contact = contact_service.undo_last_action(db, contact_id)
     except ContactNotFoundError:
         raise _NOT_FOUND
     except UndoExpiredError:
         raise HTTPException(status_code=409, detail="undo window expired")
-    return _one(db, contact)
+    return _synced(db, contact, background_tasks, sync)
 
 
 @router.post("/{contact_id}/snooze", response_model=ContactOut)
-def snooze(contact_id: int, body: SnoozeIn, db: Session = Depends(get_db)):
+def snooze(
+    contact_id: int,
+    body: SnoozeIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
-        return _one(db, contact_service.snooze_contact(db, contact_id, body.days, today=date.today()))
+        contact = contact_service.snooze_contact(db, contact_id, body.days, today=date.today())
     except ContactNotFoundError:
         raise _NOT_FOUND
+    return _synced(db, contact, background_tasks, sync)
 
 
 @router.post("/{contact_id}/archive", response_model=ContactOut)
-def archive(contact_id: int, db: Session = Depends(get_db)):
+def archive(
+    contact_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
-        return _one(db, contact_service.archive_contact(db, contact_id))
+        contact = contact_service.archive_contact(db, contact_id)
     except ContactNotFoundError:
         raise _NOT_FOUND
+    return _synced(db, contact, background_tasks, sync)
 
 
 @router.get("/{contact_id}/history", response_model=list[ContactHistoryOut])

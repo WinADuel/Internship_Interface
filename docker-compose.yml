@@ -23,6 +23,17 @@ services:
       db:
         condition: service_healthy
 
+  # Nightly full re-sync of the backup Google Sheet (spec §13.7), at 03:00 in TZ.
+  sheet-sync:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+    command: python -m app.jobs.nightly_sheet_sync
+    depends_on:
+      - db
+
   caddy:
     build: ./frontend
     restart: unless-stopped

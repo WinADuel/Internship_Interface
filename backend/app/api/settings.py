@@ -1,11 +1,13 @@
+from collections.abc import Callable
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_sheets_client_factory
 from app.db.session import get_db
 from app.schemas.claude_token import ClaudeTokenCreatedOut, ClaudeTokenOut
-from app.schemas.settings import SettingsOut, SettingsUpdate
-from app.services import claude_token_service, settings_service
+from app.schemas.settings import SettingsOut, SettingsUpdate, SheetSyncOut
+from app.services import claude_token_service, settings_service, sheet_sync_service
 from app.services.errors import ClaudeTokenNotFoundError
 
 router = APIRouter(
@@ -42,3 +44,18 @@ def revoke_claude_token(token_id: int, db: Session = Depends(get_db)):
         return claude_token_service.revoke_token(db, token_id)
     except ClaudeTokenNotFoundError:
         raise HTTPException(status_code=404, detail="claude token not found")
+
+
+@router.post("/sheet-sync", response_model=SheetSyncOut)
+def sync_sheet_now(
+    db: Session = Depends(get_db),
+    client_factory: Callable = Depends(get_sheets_client_factory),
+):
+    ok = sheet_sync_service.safe_sync(db, client_factory, sheet_sync_service.ALL_TABS)
+    settings = settings_service.get_settings(db)
+    return SheetSyncOut(
+        ok=ok,
+        last_sheet_sync_at=settings.last_sheet_sync_at,
+        last_sheet_sync_error=settings.last_sheet_sync_error,
+        sheet_url=sheet_sync_service.sheet_url(settings.backup_sheet_id),
+    )
