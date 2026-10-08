@@ -16,3 +16,6 @@ export function gmailComposeUrl(to: string, subject: string, body: string): stri
 export function fitsInGmailUrl(url: string): boolean {
   return url.length <= MAX_GMAIL_URL_LENGTH;
 }
+
+/** Shown before opening a compose link for a pattern-guessed address (spec §13.6). */
+export const GUESS_WARNING = "This address is a guess and may bounce. Open anyway?";
