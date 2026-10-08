@@ -32,3 +32,10 @@ class SettingsUpdate(BaseModel):
         if bad:
             raise ValueError(f"{', '.join(sorted(bad))} cannot be null")
         return self
+
+
+class SheetSyncOut(BaseModel):
+    ok: bool
+    last_sheet_sync_at: datetime | None
+    last_sheet_sync_error: str | None
+    sheet_url: str | None

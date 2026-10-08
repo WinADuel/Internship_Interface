@@ -60,3 +60,7 @@ class AlreadyQueuedError(Exception):
 
 class ClaudeTokenNotFoundError(Exception):
     """No Claude token exists with the requested id."""
+
+
+class SheetSyncError(Exception):
+    """A Google Sheets API call failed (non-2xx response or network error)."""

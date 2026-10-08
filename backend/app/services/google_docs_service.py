@@ -18,7 +18,13 @@ from app.services.errors import (
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+# Read-only Docs access plus drive.file, which reaches only files this app
+# creates (the backup sheet, spec §13.7). No other write scope, ever.
+GOOGLE_SCOPES = (
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+)
+GOOGLE_SCOPE = " ".join(GOOGLE_SCOPES)
 GOOGLE_PROVIDER = "google"
 _HTTP_TIMEOUT = 10.0
 _FETCH_TIMEOUT = 15.0

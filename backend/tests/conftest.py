@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 load_dotenv()  # populates os.environ from backend/.env for local dev/test runs
 
 from app.db.base import Base  # noqa: E402
+from app.api.deps import get_sheet_sync_scheduler  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -59,18 +60,37 @@ def db_session(_engine):
     connection.close()
 
 
+class RecordingSheetSyncScheduler:
+    """Stands in for the real scheduler, which would open its own DB session
+    and call Google; records the tabs each write asked to re-sync."""
+
+    def __init__(self) -> None:
+        self.scheduled: list[list[str]] = []
+
+    def schedule(self, background_tasks, tabs) -> None:
+        self.scheduled.append(list(tabs))
+
+
 @pytest.fixture()
-def client(db_session):
+def sheet_sync_recorder():
+    return RecordingSheetSyncScheduler()
+
+
+@pytest.fixture()
+def client(db_session, sheet_sync_recorder):
     """TestClient with the `get_db` dependency overridden to use the
-    per-test transactional session, so API calls in tests share its rollback."""
+    per-test transactional session, so API calls in tests share its rollback.
+    Sheet sync is replaced by a recorder (see test_sheet_sync_hooks.py)."""
 
     def _get_db_override():
         yield db_session
 
     app.dependency_overrides[get_db] = _get_db_override
+    app.dependency_overrides[get_sheet_sync_scheduler] = lambda: sheet_sync_recorder
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_sheet_sync_scheduler, None)
 
 
 class FakeClock:
