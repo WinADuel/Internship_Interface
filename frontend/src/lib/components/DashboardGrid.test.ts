@@ -43,7 +43,7 @@ describe("DashboardGrid", () => {
   it("collapses to a single column on narrow screens", () => {
     render(DashboardGrid, { defaultLayout, widget });
     const options = vi.mocked(GridStack.init).mock.calls.at(-1)![0] as any;
-    expect(options.columnOpts).toEqual({ breakpoints: [{ w: 700, c: 1 }] });
+    expect(options.columnOpts).toEqual({ breakpointForWindow: true, breakpoints: [{ w: 700, c: 1 }] });
   });
 
   it("does not persist the stacked single-column geometry over the saved desktop layout", async () => {
