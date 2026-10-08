@@ -5,7 +5,7 @@
 <script lang="ts">
   import {
     isWebUrl,
-    postedAgo,
+    postingWhen,
     postingLabel,
     shortLocations,
     showsSponsorship,
@@ -39,14 +39,7 @@
 
   const label = $derived(postingLabel(posting));
   const locations = $derived(shortLocations(posting.locations));
-  const when = $derived.by(() => {
-    if (posting.datePosted) {
-      const ago = postedAgo(posting.datePosted, now);
-      if (ago) return `Posted ${ago}`;
-    }
-    const found = postedAgo(posting.firstSeenAt, now);
-    return found ? `Found ${found}` : "";
-  });
+  const when = $derived(postingWhen(posting, now));
 </script>
 
 <!-- Every field comes from a list, a job board or a pasted page: plain interpolation only. -->

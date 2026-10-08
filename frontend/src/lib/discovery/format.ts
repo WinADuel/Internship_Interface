@@ -45,6 +45,14 @@ export function postingLabel(posting: Pick<Posting, "company" | "title">): strin
   return `${posting.company} – ${posting.title}`;
 }
 
+/** "Posted N days ago" from the source's date, else "Found N days ago" from the first scan that saw it. */
+export function postingWhen(posting: Pick<Posting, "datePosted" | "firstSeenAt">, now: Date = new Date()): string {
+  const posted = postedAgo(posting.datePosted, now);
+  if (posted) return `Posted ${posted}`;
+  const found = postedAgo(posting.firstSeenAt, now);
+  return found ? `Found ${found}` : "";
+}
+
 /** The first two locations, then "+N more" for the rest. */
 export function shortLocations(locations: string[]): string {
   const shown = locations.slice(0, 2).join(", ");

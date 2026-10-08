@@ -3,6 +3,7 @@ import {
   isWebUrl,
   postedAgo,
   postingLabel,
+  postingWhen,
   shortLocations,
   showsSponsorship,
   SOURCE_LABELS,
@@ -129,5 +130,20 @@ describe("timeAgo", () => {
   it("reads a time slightly in the future as just now, and bad input as empty", () => {
     expect(timeAgo("2026-10-08T12:05:00Z", now)).toBe("just now");
     expect(timeAgo("not a date", now)).toBe("");
+  });
+});
+
+describe("postingWhen", () => {
+  const now = new Date(2026, 9, 8, 12);
+  it("says when it was posted when the source gives a date", () => {
+    expect(postingWhen(fakePosting({ datePosted: "2026-10-05" }), now)).toBe("Posted 3 days ago");
+  });
+  it("falls back to when the scan found it", () => {
+    const p = fakePosting({ datePosted: null, firstSeenAt: new Date(2026, 9, 7, 9).toISOString() });
+    expect(postingWhen(p, now)).toBe("Found 1 day ago");
+  });
+  it("falls back when the posted date is unparseable, and is empty when nothing parses", () => {
+    expect(postingWhen(fakePosting({ datePosted: "soon", firstSeenAt: new Date(2026, 9, 8, 9).toISOString() }), now)).toBe("Found today");
+    expect(postingWhen(fakePosting({ datePosted: null, firstSeenAt: "nope" }), now)).toBe("");
   });
 });
