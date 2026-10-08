@@ -1,38 +1,45 @@
 <script lang="ts">
   import { getRecentActivity } from "../../api/applications";
+  import { getContactActivity } from "../../api/contacts";
+  import { statusLabel as contactStatusLabel } from "../../contacts/actions";
+  import { mergeActivity, type FeedItem } from "../../dashboard/activity";
   import { relativeTime, statusLabel } from "../../dashboard/widgets";
   import { showToast } from "../../stores/toast";
-  import type { ActivityEntry } from "../../types/application";
+  import type { ApplicationStatus } from "../../types/application";
+  import type { ContactStatus } from "../../types/contact";
 
   let {
     limit = 5,
     onsettingschange,
   }: { limit?: number; onsettingschange?: (settings: { limit: number }) => void } = $props();
 
-  let entries = $state<ActivityEntry[]>([]);
+  let entries = $state<FeedItem[]>([]);
   let loaded = $state(false);
   let requestSeq = 0;
 
   $effect(() => {
     const requested = limit;
     const seq = ++requestSeq;
-    getRecentActivity(requested)
-      .then((result) => {
-        if (seq !== requestSeq) return;
-        entries = result;
-        loaded = true;
-      })
-      .catch(() => {
-        if (seq !== requestSeq) return;
-        entries = [];
-        loaded = true;
-        showToast("Couldn't load recent activity.");
-      });
+    // Either feed may fail on its own; show whatever arrived.
+    Promise.allSettled([getRecentActivity(requested), getContactActivity(requested)]).then(([apps, people]) => {
+      if (seq !== requestSeq) return;
+      entries = mergeActivity(
+        apps.status === "fulfilled" ? apps.value : [],
+        people.status === "fulfilled" ? people.value : [],
+        requested,
+      );
+      loaded = true;
+      if (apps.status === "rejected" || people.status === "rejected") showToast("Couldn't load recent activity.");
+    });
   });
 
-  function describe(e: ActivityEntry): string {
-    if (e.oldStatus === null) return `Added ${e.company} — ${e.roleTitle} (${statusLabel(e.newStatus)})`;
-    return `Moved ${e.company} to ${statusLabel(e.newStatus)}`;
+  function describe(e: FeedItem): string {
+    if (e.kind === "contact") {
+      return `${e.label}: ${contactStatusLabel(e.newStatus as ContactStatus, e.contactKind ?? "professor")}`;
+    }
+    const status = statusLabel(e.newStatus as ApplicationStatus);
+    if (e.oldStatus === null) return `Added ${e.label} (${status})`;
+    return `Moved ${e.label} to ${status}`;
   }
 
   function onChange(event: Event) {
@@ -53,7 +60,7 @@
     <p class="empty">No recent activity.</p>
   {:else}
     <ul>
-      {#each entries as e, i (`${e.applicationId}-${e.changedAt}-${i}`)}
+      {#each entries as e, i (`${e.kind}-${e.changedAt}-${i}`)}
         <li>{describe(e)} <time datetime={e.changedAt}>{relativeTime(e.changedAt)}</time></li>
       {/each}
     </ul>

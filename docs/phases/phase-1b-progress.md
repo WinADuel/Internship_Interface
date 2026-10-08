@@ -1,0 +1,118 @@
+# Phase 1b Progress Log
+
+Recovery map for Phase 1b (Outreach & Contacts) on branch `phase-1b-outreach`. There is one line per task. Resume at the first task that has no completed line here.
+
+Plan: `docs/superpowers/plans/2026-10-06-outreach-contacts-phase1b.md`. Spec: §13 of `docs/superpowers/specs/2026-10-05-internship-tracker-design.md`.
+
+**Baseline** (branch cut from `origin/main` at `d31654f`): backend 189 passed (pytest against Postgres 16), frontend 143 passed, `svelte-check` 0 errors / 0 warnings, build clean.
+
+## Task log
+
+- **Task 1: Outreach data models & migration.** DONE.
+  - Commit: `8b1e817`.
+  - Tests:
+    - Task 1 tests: 6 passed (`tests/models/test_outreach_models.py`).
+    - Full backend suite: 195 passed against real Postgres 16.
+  - Migration 0004: `alembic upgrade head`, `downgrade -1` and `upgrade head` all succeed. `alembic check` reports "No new upgrade operations detected".
+  - Review (fresh reviewer subagent): Critical none; Important 1.
+    - The Important finding asked for evidence that the migration cycle and drift check had run. They had (results above), and no code change was needed.
+  - Minor findings, logged and not fixed:
+    - The enum columns have only Python-side defaults, with no DB server default. This matches the Phase 1 pattern.
+    - Missing tests:
+      - `research_queue.application_id` SET NULL;
+      - the `app_settings` id=1 CHECK;
+      - the raw-SQL server defaults of `followup_edited`, `target_count` and `app_settings`.
+    - `app_settings.id` has no `server_default`.
+  - Ruling: `contacts.priority` reuses the PG enum `application_priority`.
+    - Why: the as-built corrections say so. The migration declares it with `create_type=False` and neither creates nor drops it. The model uses the same `enum_column(Priority, "application_priority")` helper, so `create_all` in the tests sees a single type.
+    - Cost if wrong: none at runtime; a cosmetic difference in the model declaration.
+  - Ruling: `research_queue.application_id` uses `ondelete="SET NULL"`, mirroring `contacts`.
+    - Why: the spec is silent, applications are archived rather than deleted, and keeping queue history is harmless.
+    - Cost if wrong: an orphaned queue item could survive a hard-deleted application.
+  - Ruling: `app_settings` has a `CHECK (id = 1)` constraint.
+    - Why: it enforces the single-row design at the DB level.
+    - Cost if wrong: none.
+  - Ruling: migration 0004 was applied only to the test DB, not to the local dev DB `internship_tracker`.
+    - Why: `main` has no 0004, so a migrated dev DB would break the `main` checkout until merge.
+    - Cost if wrong: the dev DB needs `alembic upgrade head` after merge.
+  - Environment: local Windows worktree, Python 3.12, Postgres 16 in the Docker container `internship-tracker-test-db`, Node 24 (CI uses 22).
+- **Handoff.** The owner moved Tasks 2–15 to a fresh cloud session. Instructions are in `docs/phases/phase-1b-cloud-handoff.md`. Task 2 was not started: no Task 2 code or tests are committed.
+- **Cloud session setup (2026-10-08).** Fresh Linux container: Python 3.12 venv, Postgres 16 via apt (`app`/`app`, `internship_tracker_test`), Node 22. Baselines reproduced: backend 195 passed, frontend 143 passed, check 0/0, build clean.
+  - Commit `1189ab5` "test: ignore passlib's stdlib crypt deprecation warning on Linux": on Linux Python 3.12 passlib imports the deprecated `crypt` module, and `filterwarnings = error` turned that into a conftest import error (likely also why backend CI is red on `main`; inferred, not confirmed from CI logs).
+  - Ruling: ignore only that exact third-party warning in `pytest.ini` — it is import-time noise from pinned passlib, not our code — cost if wrong: none; the filter is message-specific.
+- **Task 2: Contact service.** DONE. Commit `4b5e931`. Tests: 22 new (transitions + service); full backend 217 passed (Postgres 16). Review (fresh reviewer subagent): Critical none, Important none.
+  - Minor, logged not fixed: undo does not restore `nudge_snoozed_until` cleared by the action; undo doesn't assert `status == last.new_status`; `move_status` rejection test doesn't assert no history row; clearing a draft (explicit null) marks it edited, blocking a Claude redraft; no unarchive path (matches plan).
+  - Minor, deferred to Task 5: naive `now`/`on`/`meeting_at` would raise TypeError — Task 5's request schemas require timezone-aware datetimes.
+  - Ruling: `create_contact`/`update_contact` reject an unknown `application_id` with `ApplicationNotFoundError` instead of letting the FK raise a 500 — cost if wrong: none.
+- **Task 3: Nudges & app settings.** DONE. Commits `8a957f3`, `0c95ef4` (review fix: strengthen the replied-stale DB test). Tests: 23 new; full backend 240 passed (Postgres 16). Review (fresh reviewer subagent): Critical none, Important none.
+  - Minor, logged not fixed: `get_settings` commits on first read and two simultaneous first reads could race on `id=1` (single user, low risk); nudge day boundaries use the UTC date of stored timestamps vs. the caller's `today` (routes pass `date.today()` as the plan says); `list_needs_attention` DB tests live in `test_settings_service.py`; `schemas/contact.py` imports `services/nudges.py` (no cycle today).
+- **Task 4: Research queue & auto-enqueue on applied.** DONE. Commits `9c00078`, `d4cf5c5` (review fix). Tests: 11 new; full backend 251 passed (Postgres 16). Review (fresh reviewer subagent): Critical none, Important 1 — fixed.
+  - Important (fixed in `d4cf5c5`): the status change was committed before the enqueue, so a DB error during enqueue would leave the status saved with no queue item and a 500. Now `add_company_contacts_item` flushes only, and `create_application`/`change_status` commit once after it.
+  - Minor, logged not fixed: one-item-per-application is check-then-insert with no unique index (a simultaneous auto-enqueue and Find contacts click could double-insert; single user, unlikely); `complete_item`/`fail_item` default clock and `fail_item` on an unknown id untested; duplicate `_now()` helper.
+  - Ruling: `AlreadyQueuedError` counts items in any state, including done/failed — the plan says "any queue item (any state)" — cost if wrong: a user can't re-run Find contacts after a failed item.
+- **Task 5: Contacts, research queue & settings routes.** DONE. Commit `63e737c`. Tests: 33 new route tests; full backend 284 passed (Postgres 16). Review (fresh reviewer subagent): Critical none, Important none.
+  - Ruling: `ContactActionIn.on`/`meeting_at` are `AwareDatetime` (naive → 422) — stored timestamps are aware and naive values would raise TypeError (500) in undo/nudge comparisons; the frontend sends `toISOString()` (Z) — cost if wrong: a client sending naive datetimes must add an offset.
+  - Ruling: an unknown `application_id` on contact create/PATCH → 422 `{"detail": "application not found"}` (plan silent; §10 error contract) — cost if wrong: none.
+  - Minor, logged not fixed: list reads group the whole history table for nudges (one query, scales with all contacts); `find-contacts` router fetches the application itself; `/needs-attention` builds `ContactOut` separately from `_out`; `date.today()` is server-local while timestamps are UTC (matches plan text); undo-expiry route test backdates via the shared test session.
+- **Task 6: Claude tokens & auth boundary.** DONE. Commit `b71d69a`. Tests: 20 new (service + boundary); full backend 304 passed (Postgres 16). Review (fresh security-focused reviewer subagent): Critical none, Important none.
+  - Ruling: `revoke_token` is idempotent (keeps the first `revoked_at`) and an unknown id → 404 `{"detail": "claude token not found"}` — cost if wrong: none.
+  - Ruling: the `Bearer` scheme is matched case-insensitively (RFC 7235) — cost if wrong: none.
+  - Minor, logged not fixed: token-create response lacks `Cache-Control: no-store`; 401 lacks `WWW-Authenticate: Bearer`; `authenticate` commits `last_used_at` inside the dependency (separate from the route's transaction, harmless); no structural test walking `app.routes` to pin which dependency guards each router; `/api/docs/*` not pinned against a Claude bearer token.
+- **Task 7: Claude job API.** DONE. Commits `dc9ef0d`, `e360cdd` (review fixes). Tests: 26 new (service + routes), boundary tests moved from `/ping` to `/work`; full backend 330 passed (Postgres 16). Review (fresh security-focused reviewer subagent): Critical none, Important 2 — both fixed.
+  - Important (fixed): the email field accepted any text, so a hostile page could get `a@uni.edu, attacker@evil.com` or `x@y.com?bcc=…` into the Gmail compose `to=`. Now only one plain address is kept; anything else is dropped and confidence becomes `not_found`. Dedup matches on the sanitized email.
+  - Important (fixed): an unedited draft was refreshed even after the contact was sent, overwriting the record of what went out (and the basis of the follow-up). Drafts now refresh only while `status == to_contact`.
+  - Minor (fixed, cheap): a re-delivered body without a subject no longer clears the subject; NUL bytes are stripped (Postgres would 500); follow-ups apply only to non-archived `sent` contacts.
+  - Minor, logged not fixed: re-delivering the same FOUND email without sources downgrades it to PATTERN_GUESS even though stored sources remain, and a guess can replace a FOUND email; `QueueItemOut` from complete/failed includes `application_id`; `date.today()` is server-local; no test for an archived contact matched by email.
+  - Ruling: a re-delivery that omits a field (None, empty sources, no email) never erases a known value; email and confidence change together only when a new valid email arrives — the spec lets Claude update research fields, not wipe them — cost if wrong: a stale value Claude meant to retract survives until the user edits it.
+  - Ruling: on a match Claude does not change `name`/`organization` (identity, not a §13.2 research field) — cost if wrong: none.
+- **Task 8: Backup Google Sheet sync.** DONE. Commits `e40489a`, `5ecc770` (review fix). Tests: 20 new (service, hooks, nightly job) plus a scope assertion; full backend 350 passed (Postgres 16). `docker compose config` (with `.env.example` copied to a temporary `.env`) parses and lists `sheet-sync`. Review (fresh reviewer subagent): Critical none, Important 1 — fixed.
+  - Important (fixed): a Google connection made before this change has only `drive.readonly`, so every sync would fail with a bare "status 403". A 401/403 from Sheets now adds "reconnect Google to grant the drive.file permission"; Settings (Task 14) shows the Connect Google link for it.
+  - Minor, logged not fixed: two simultaneous first syncs could each create a sheet (one orphaned in Drive); a sheet or tab deleted in Drive is never recreated (every sync fails until `backup_sheet_id` is cleared); nudges in the sheet use `date.today()`, not `now`; any `GoogleAuthError` (including a failed refresh) reads "google not connected" (plan's exact string); overlapping syncs can briefly leave an older snapshot until the nightly run; a non-Sheets exception's text (up to 300 chars) is stored in `last_sheet_sync_error`; compose `TZ` repeats `env_file`.
+  - Ruling: `GOOGLE_SCOPE` is now the space-joined pair `drive.readonly drive.file` (the value stored with the token) — cost if wrong: none.
+  - Ruling: added a `get_sheets_client_factory` dependency so "Sync now" is testable with a fake client, and the test `client` fixture overrides the scheduler for every test (the real one would open a second DB connection and could block on the test transaction) — cost if wrong: none.
+  - Ruling: `sync_tabs` commits `backup_sheet_id` right after creating the sheet so a later tab failure can't orphan it; `safe_sync` rolls back before recording an error — cost if wrong: none.
+- **Task 9: Frontend contact types, API clients, store & helpers.** DONE. Commit `9fbc02d`. Tests: 14 new; frontend 157 passed, check 0/0. Review (fresh reviewer subagent): Critical none, Important none; every camelCase field verified against the backend schemas.
+  - Ruling: the clients use a small generic snake/camel key converter (`lib/api/case.ts`) instead of hand-written field maps — fewer places to drift; the full-object `toEqual` mapping test locks `Contact` — cost if wrong: a future field with a digit after an underscore would map lossily (noted in the file's review; none exist).
+  - Minor, logged not fixed: `keysToCamel` copies unknown keys through a cast; queue/settings/token types lack a full-object mapping test; `addQueueItem` builds its body by hand; `includeArchived`, `findContacts`, `listQueue(state)`, `syncSheetNow` untested (simple).
+- **Task 10: Contact card, status buttons & board.** DONE. Commits `e85887f`, `b56af1a` (review follow-ups). Tests: 20 new; frontend 177 passed, check 0/0. Review (fresh reviewer subagent): Critical none, Important none.
+  - Minor (fixed in `b56af1a`, cheap): the Undo timer now reschedules if it fires early; a drag clears the button's undo window (server undo reverts the newest change, which would be the drag); drops of unknown ids no longer reach the API.
+  - Minor, logged not fixed: `undoDeadlines` never pruned; a fast filter switch can race (`load` responses out of order); `undo()` turns unexpected errors into a toast; the date picker can't be collapsed again; inputs inside a draggable card may be awkward in Firefox (manual check); no board-level test that Undo survives a column move.
+  - Ruling: the card opens via an `onopen` callback prop (Phase 1's pattern) from a button on the name, not a dispatched event on the whole card — avoids nesting buttons inside a `role=button` element — cost if wrong: none.
+  - Ruling: one shared, collapsed "It was actually on…" date input per button group instead of one per button — same behaviour, less clutter — cost if wrong: cosmetic.
+  - Ruling: the Undo deadline lives in a shared store (`undoDeadlines`) so Undo survives the card moving to another column — cost if wrong: none.
+- **Task 11: Contact detail panel & draft editor.** DONE. Commits `a09c5ea`, `e2471cb` (review fixes). Tests: 11 new; frontend check 0/0. Review (fresh security-focused reviewer subagent): Critical none, Important 2 — 1 fixed, 1 ruled.
+  - Important (fixed): the draft editor loaded fields only when the contact id changed, so a follow-up the Claude job delivered while the panel was open stayed hidden and Save could overwrite it with stale text. It now takes a newer server copy unless the user has unsaved edits.
+  - Important (ruled, tested): "Did you send it?" is shown only while the matching action is valid (`sent` from `to_contact`, `followed_up` from `sent`). Ruling: after the email is already marked, offering Sent would only produce a 422 — cost if wrong: re-opening Gmail on an already-sent draft shows no prompt.
+  - Minor (fixed): Sent from the Gmail prompt now gets the 60 s Undo; history list keyed by index; `closed_reason` underscores all replaced.
+  - Minor, logged not fixed: blank draft fields save as `""` rather than null; a notes/draft save re-fetches history; switching contacts discards unsaved edits without a prompt.
+- **Task 12: Contacts & Research Queue pages, navigation.** DONE. Commits `1bc63aa`, `d7cab1f` (review follow-up). Tests: 5 new (queue page, contacts page) + nav assertions; frontend 193 passed, check 0/0. Review (fresh reviewer subagent): Critical none, Important none.
+  - Minor (fixed): the "How many" input is now `required`, so clearing it can't send `target_count: null` (422).
+  - Minor, logged not fixed: contact name/organization inputs have no `maxlength`; the slide-over gets no focus or dialog role on open; the Done group and kind label are untested.
+  - Manual `npm run dev` check (plan step 5) deferred to one end-to-end browser smoke run after Task 14 (see below).
+- **Task 13: Dashboard & application integration.** DONE. Commits `038bdaf`, `803ec29` (review fixes). Tests: 21 new (merge, Needs Attention, application contacts, feed); frontend 215 passed after Task 14, check 0/0. Review (fresh reviewer subagent): Critical none, Important 3 — all fixed.
+  - Important (fixed): widget buttons ([No response], [Followed up], [Accepted], [Declined], and [Sent] via the status buttons) had no 60 s Undo — the row vanished on refresh. Acted-on contacts now stay as a "marked …" row with Undo until the window closes.
+  - Important (fixed): the follow-up slide-over sat inside GridStack's drag handle, so selecting text in it dragged the widget. It is now moved to `<body>` (`lib/actions/portal.ts`), closes on Escape, focuses Close on open and returns focus on close.
+  - Important (fixed): the feed always used professor wording; company contacts now read e.g. "Positive (referral/interview)".
+  - Minor (fixed): failed loads show "Couldn't load…" instead of the empty state; a row's controls are disabled while any request runs; each row is a labelled group; compact cards in the application panel are read-only (no dead open button, not draggable).
+  - Minor, logged not fixed: the widget's snooze/skip/open add the contact to the shared contacts store (the panel reads it); snooze and skip have no undo (the backend undo covers status changes only).
+  - Ruling: the application Contacts section is its own `ApplicationContacts.svelte` component, and since compact cards have no open action it links "Open in Contacts" (`#/contacts`) — keeps the application panel small — cost if wrong: one extra click to reach a contact.
+  - Ruling: feed lines now read "Moved {company — role} to X" and "{name (org)}: {status}" so the two sources are distinguishable — cost if wrong: cosmetic.
+- **Task 14: Settings page.** DONE. Commits `43325d9`, `df05119` (review fixes). Tests: 14 new + nav assertion; frontend 229 passed, check 0/0, build OK. Review (fresh reviewer subagent): Critical none, Important 1 — fixed.
+  - Important (fixed): the token plaintext was cleared only on in-app navigation; a full-page navigation (e.g. Connect Google) could restore it from the back/forward cache. It is now also cleared on `pagehide`.
+  - Minor (fixed): a token created while the user navigated away is revoked at once (nobody saw it); focus moves to the new token and back to Create token on Done; `autocomplete=off`; Actions header; a sync that returns `ok=false` with no error now says "Sync didn't complete."; the stored error is no longer a live alert (only a manual sync's result is announced); the reconnect match uses the full hint text; Settings shows an inline load error with Retry; error-path tests added.
+  - Minor, logged not fixed: the Google OAuth callback always lands on Essays (the Settings hint says to come back and press Sync now).
+  - Ruling: the Connect Google link also shows for the "reconnect Google" error added in Task 8 — cost if wrong: none.
+- **Task 15: Claude routine instructions & end-to-end job contract test.** DONE. Commits `d298b19`, `099a387` (review fixes). Tests: the 8-step flow test plus a `utc_today` test; full backend 352 passed (Postgres 16). The flow test passed first time, so no owning-task defect from the contract walk. Field names, enums, caps and limits in `ops/claude-routine/outreach-job.md` were checked by script against `schemas/claude.py` (every schema field appears; every JSON key in the doc is a schema field). Review (fresh reviewer subagent): Critical none, Important 4 — all fixed.
+  - Important (fixed): nudges compared UTC timestamps' dates with the server's local `date.today()` (compose sets `TZ=America/Chicago`), so follow-up drafts and nudges were a day late for part of each day, and the flow test failed in non-UTC zones. All five call sites now use `nudges.utc_today()`; the flow test passes under `TZ=Etc/GMT+12` and `Etc/GMT-14`.
+  - Important (fixed): "send the bearer token on every request" could be read as including research fetches. The doc now sends it only to `$APP_BASE_URL/api/claude/*`, requires `https://`, and never in a URL.
+  - Important (fixed): a second 422 dropped a whole batch and then completed the item. The doc now says a 422 saves nothing, uses `detail[].loc` to fix or drop only the bad contact, and leaves unsaved items pending.
+  - Important (fixed): the doc now keeps `outreach_profile`, `known_contacts` and drafts out of web searches and fetched URLs.
+  - Minor (fixed): an invalid email on an existing contact keeps the stored one; unknown `contact_id` and archived matches documented; the flow test's company note reads "found 1 of 3".
+  - Ruling: nudge "today" is the UTC date — for a Chicago user a nudge can appear at 7 pm local the evening before rather than at midnight — cost if wrong: nudges show a few hours early, never late.
+  - Post-deployment scheduling (plan's last step) not done, by design: the owner does it (doc appendix).
+- **Browser smoke run** (replaces Task 12's manual `npm run dev` check). Real uvicorn + Postgres (a throwaway `internship_tracker_smoke` DB) + `vite` dev server, driven by headless Chromium via Playwright: log in with TOTP → save the outreach profile → create a token (shown once, gone after Done) → Sync now shows "google not connected" with Connect Google → queue a professor → create an applied application → act as the Claude job with the token (`/work`, `/contacts`, `/queue/{id}/complete`) → contact panel shows `<img onerror>` text literally and drops a `javascript:` source → Sent shows Undo → the application panel lists its company contact → dashboard shows Needs attention and merged activity. All passed; no page errors (only the expected pre-login 401s and a favicon 404).
+- **Whole-branch review.** Two fresh reviewers (backend half, frontend half) on `git diff origin/main...HEAD`: Critical none, Important none in every focus area (security, cross-task contracts, frontend↔backend fields, migration). Fix round for the cheap Minors: `169a450` (frontend: typing during a draft save kept, Undo on still-listed rows, panel keyed by contact, single-recipient Gmail links), `ebc4d50` (backend: email settled once sent, nudge dates via `astimezone(UTC)`, cleared follow-ups not offered to Claude, first sync fills every tab, matched company contacts linked to the application, Caddy 5 MB body cap). Also `e29b5dc` (README setup notes). Re-verified: backend 356 passed (Postgres 16), frontend 232 passed, check 0/0, build clean, Alembic downgrade/upgrade cycle and `alembic check` clean, `docker compose config` parses.
+  - Ruling: a matched contact's email refreshes only while `to_contact` — stops a hostile page redirecting the follow-up — cost if wrong: a changed address must be edited by hand after the first send.
+  - Ruling: a matched, unlinked company contact gets the queue item's `application_id` — cost if wrong: it shows under that application.
+  - Logged, not fixed: no cap on contacts per queue item; cells over Google's 50,000-character limit would fail syncs.
+- **Report.** `docs/phases/phase-1b-report.md` written; `docs/phases/README.md` row set to "Complete on branch, awaiting merge". Not merged.

@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import jwt
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
@@ -6,6 +8,10 @@ from sqlalchemy.orm import Session
 from app.core.security import ACCESS_TOKEN_TYPE, decode_token
 from app.db.session import get_db
 from app.models.auth_credential import AuthCredential
+from app.models.claude_token import ClaudeToken
+from app.services import claude_token_service
+from app.services.sheet_sync_service import SheetSyncScheduler, google_sheets_client
+from app.services.sheets_client import SheetsClient
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> AuthCredential:
@@ -24,3 +30,27 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> AuthCre
     if user is None:
         raise unauthorized
     return user
+
+
+def get_claude_token(request: Request, db: Session = Depends(get_db)) -> ClaudeToken:
+    """Authenticate the scheduled Claude job by `Authorization: Bearer` only.
+    Cookies are never consulted, so a browser session can't reach
+    /api/claude/*, and cookie routes never read this header (spec §13.5)."""
+    unauthorized = HTTPException(status_code=401, detail="invalid claude token")
+    scheme, _, raw = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not raw.strip():
+        raise unauthorized
+    token = claude_token_service.authenticate(db, raw.strip())
+    if token is None:
+        raise unauthorized
+    return token
+
+
+def get_sheet_sync_scheduler() -> SheetSyncScheduler:
+    """Overridden in tests with a recorder."""
+    return SheetSyncScheduler()
+
+
+def get_sheets_client_factory() -> Callable[[Session], SheetsClient]:
+    """Builds the Sheets client for a synchronous "Sync now"; overridden in tests."""
+    return google_sheets_client

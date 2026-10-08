@@ -5,6 +5,7 @@
   import RemindersList from "../lib/components/widgets/RemindersList.svelte";
   import BucketPreview from "../lib/components/widgets/BucketPreview.svelte";
   import KanbanSnapshot from "../lib/components/widgets/KanbanSnapshot.svelte";
+  import NeedsAttention from "../lib/components/widgets/NeedsAttention.svelte";
   import { loadLayout, type WidgetLayoutEntry } from "../lib/dashboard/layout";
   import { loadApplications } from "../lib/stores/applications";
   import { showToast } from "../lib/stores/toast";
@@ -14,6 +15,7 @@
     { id: "reminders", x: 6, y: 0, w: 6, h: 4, settings: {} },
     { id: "buckets", x: 0, y: 4, w: 6, h: 4, settings: {} },
     { id: "snapshot", x: 6, y: 4, w: 6, h: 4, settings: {} },
+    { id: "needs-attention", x: 0, y: 8, w: 12, h: 4, settings: {} },
   ];
 
   const titles: Record<string, string> = {
@@ -21,6 +23,7 @@
     reminders: "Reminders",
     buckets: "Buckets",
     snapshot: "Kanban snapshot",
+    "needs-attention": "Needs attention",
   };
 
   let grid: { updateSettings: (id: string, s: Record<string, unknown>) => void } | undefined;
@@ -53,6 +56,8 @@
       <BucketPreview limit={settings.buckets?.limit as number | undefined} onsettingschange={(s) => change(id, s)} />
     {:else if id === "snapshot"}
       <KanbanSnapshot hideEmpty={settings.snapshot?.hideEmpty as boolean | undefined} onsettingschange={(s) => change(id, s)} />
+    {:else if id === "needs-attention"}
+      <NeedsAttention />
     {/if}
   </section>
 {/snippet}

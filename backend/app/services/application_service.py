@@ -6,13 +6,26 @@ from sqlalchemy.orm import Session
 from app.models.application import Application, ApplicationStatus
 from app.models.status_history import StatusHistory
 from app.schemas.application import ApplicationCreate, ApplicationUpdate
-from app.services.errors import ApplicationNotFoundError
+from app.services.errors import AlreadyQueuedError, ApplicationNotFoundError
+from app.services.research_queue_service import add_company_contacts_item
 
 
 def _now() -> datetime:
     # Explicit timestamp: the column's now() default is constant within a
     # transaction, which would make same-transaction changes unorderable.
     return datetime.now(timezone.utc)
+
+
+def _enqueue_contacts_if_applied(db: Session, application: Application) -> None:
+    """Spec §13.2: entering `applied` queues a find-contacts request, once.
+    Runs before the caller's commit, so the status change and the queue
+    item are saved together."""
+    if application.status != ApplicationStatus.APPLIED:
+        return
+    try:
+        add_company_contacts_item(db, application)
+    except AlreadyQueuedError:
+        pass
 
 
 def create_application(db: Session, data: ApplicationCreate) -> Application:
@@ -27,6 +40,7 @@ def create_application(db: Session, data: ApplicationCreate) -> Application:
             changed_at=_now(),
         )
     )
+    _enqueue_contacts_if_applied(db, application)
     db.commit()
     return application
 
@@ -76,6 +90,7 @@ def change_status(db: Session, application_id: int, new_status: ApplicationStatu
         )
     )
     application.status = new_status
+    _enqueue_contacts_if_applied(db, application)
     db.commit()
     return application
 

@@ -28,3 +28,39 @@ class GoogleDocsFetchError(Exception):
 
 class InvalidDocRefError(Exception):
     """The doc reference is not a valid Drive file id or docs.google.com URL."""
+
+
+class ContactNotFoundError(Exception):
+    """No contact exists with the requested id."""
+
+
+class InvalidTransitionError(Exception):
+    """The requested contact status action is not valid from the current status."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class UndoExpiredError(Exception):
+    """There is no status change to undo, or the undo window has passed."""
+
+
+class QueueItemNotFoundError(Exception):
+    """No research queue item exists with the requested id."""
+
+
+class QueueItemNotPendingError(Exception):
+    """The research queue item was already completed or failed."""
+
+
+class AlreadyQueuedError(Exception):
+    """A company-contacts queue item already exists for this application."""
+
+
+class ClaudeTokenNotFoundError(Exception):
+    """No Claude token exists with the requested id."""
+
+
+class SheetSyncError(Exception):
+    """A Google Sheets API call failed (non-2xx response or network error)."""

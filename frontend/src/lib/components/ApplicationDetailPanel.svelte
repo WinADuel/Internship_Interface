@@ -7,6 +7,7 @@
   import { archiveAndRemoveApplication, moveApplicationStatus } from "../stores/applications";
   import { showToast } from "../stores/toast";
   import ApplicationForm from "./ApplicationForm.svelte";
+  import ApplicationContacts from "./contacts/ApplicationContacts.svelte";
   import GoogleDocViewer from "./GoogleDocViewer.svelte";
 
   let { application }: { application: Application } = $props();
@@ -124,6 +125,8 @@
       {/each}
     </ol>
   {/if}
+
+  <ApplicationContacts applicationId={application.id} />
 
   <h3>Document</h3>
   <GoogleDocViewer docRef={application.googleDocLink} />

@@ -7,9 +7,11 @@ vi.mock("../../api/applications", async (orig) => {
   const actual = await orig<typeof import("../../api/applications")>();
   return { ...actual, getRecentActivity: vi.fn() };
 });
+vi.mock("../../api/contacts", () => ({ getContactActivity: vi.fn() }));
 vi.mock("../../stores/toast", () => ({ showToast: vi.fn() }));
 
 import { getRecentActivity } from "../../api/applications";
+import { getContactActivity } from "../../api/contacts";
 import { showToast } from "../../stores/toast";
 import BucketPreview from "./BucketPreview.svelte";
 import KanbanSnapshot from "./KanbanSnapshot.svelte";
@@ -19,6 +21,7 @@ import RemindersList from "./RemindersList.svelte";
 describe("RecentActivityFeed", () => {
   beforeEach(() => {
     vi.mocked(getRecentActivity).mockReset();
+    vi.mocked(getContactActivity).mockReset().mockResolvedValue([]);
     vi.mocked(showToast).mockReset();
   });
 
@@ -29,8 +32,34 @@ describe("RecentActivityFeed", () => {
     ]);
     const { container } = render(RecentActivityFeed);
     await screen.findByText(/Added Acme — SWE \(Wishlist\)/);
-    expect(screen.getByText(/Moved Globex to Phone screen/)).toBeTruthy();
+    expect(screen.getByText(/Moved Globex — PM to Phone screen/)).toBeTruthy();
     expect(container.textContent).not.toContain("null");
+  });
+
+  it("merges contact activity into the feed", async () => {
+    const t = Date.now();
+    vi.mocked(getRecentActivity).mockResolvedValue([
+      { applicationId: 1, company: "Acme", roleTitle: "SWE", oldStatus: "wishlist", newStatus: "applied", changedAt: new Date(t - 60_000).toISOString() },
+    ]);
+    vi.mocked(getContactActivity).mockResolvedValue([
+      { contactId: 4, name: "Jane", organization: "MIT", kind: "professor", oldStatus: "to_contact", newStatus: "sent", changedAt: new Date(t).toISOString() },
+    ]);
+    const { container } = render(RecentActivityFeed);
+    await screen.findByText(/Jane \(MIT\): Sent/);
+    const items = Array.from(container.querySelectorAll("li")).map((li) => li.textContent ?? "");
+    expect(items[0]).toContain("Jane (MIT)");
+    expect(items[1]).toContain("Moved Acme — SWE to Applied");
+    expect(getContactActivity).toHaveBeenCalledWith(5);
+  });
+
+  it("uses company wording for company contacts and still shows one feed when the other fails", async () => {
+    vi.mocked(getRecentActivity).mockRejectedValue(new Error("boom"));
+    vi.mocked(getContactActivity).mockResolvedValue([
+      { contactId: 5, name: "Sam", organization: "Acme", kind: "company", oldStatus: "replied", newStatus: "accepted", changedAt: new Date().toISOString() },
+    ]);
+    render(RecentActivityFeed);
+    await screen.findByText(/Sam \(Acme\): Positive \(referral\/interview\)/);
+    expect(showToast).toHaveBeenCalledWith("Couldn't load recent activity.");
   });
 
   it("toasts and shows empty state when fetch fails", async () => {

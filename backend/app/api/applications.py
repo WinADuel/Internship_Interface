@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_sheet_sync_scheduler
 from app.db.session import get_db
 from app.models.application import ApplicationStatus
 from app.schemas.application import (
@@ -14,6 +14,7 @@ from app.schemas.application import (
 )
 from app.services import application_service
 from app.services.errors import ApplicationNotFoundError
+from app.services.sheet_sync_service import TAB_APPLICATIONS, SheetSyncScheduler
 
 router = APIRouter(
     prefix="/api/applications",
@@ -36,8 +37,15 @@ def list_applications(include_archived: bool = False, db: Session = Depends(get_
 
 
 @router.post("", response_model=ApplicationOut, status_code=201)
-def create_application(data: ApplicationCreate, db: Session = Depends(get_db)):
-    return application_service.create_application(db, data)
+def create_application(
+    data: ApplicationCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
+    application = application_service.create_application(db, data)
+    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    return application
 
 
 # Must be declared before "/{application_id}" or "activity" is parsed as an id.
@@ -55,27 +63,50 @@ def get_application(application_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{application_id}", response_model=ApplicationOut)
-def update_application(application_id: int, data: ApplicationUpdate, db: Session = Depends(get_db)):
+def update_application(
+    application_id: int,
+    data: ApplicationUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
-        return application_service.update_application(db, application_id, data)
+        application = application_service.update_application(db, application_id, data)
     except ApplicationNotFoundError:
         raise _not_found()
+    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    return application
 
 
 @router.post("/{application_id}/status", response_model=ApplicationOut)
-def change_status(application_id: int, body: StatusChange, db: Session = Depends(get_db)):
+def change_status(
+    application_id: int,
+    body: StatusChange,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
-        return application_service.change_status(db, application_id, body.new_status)
+        application = application_service.change_status(db, application_id, body.new_status)
     except ApplicationNotFoundError:
         raise _not_found()
+    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    return application
 
 
 @router.post("/{application_id}/archive", response_model=ApplicationOut)
-def archive_application(application_id: int, db: Session = Depends(get_db)):
+def archive_application(
+    application_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
+):
     try:
-        return application_service.archive_application(db, application_id)
+        application = application_service.archive_application(db, application_id)
     except ApplicationNotFoundError:
         raise _not_found()
+    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    return application
 
 
 @router.get("/{application_id}/history", response_model=list[StatusHistoryOut])

@@ -1,4 +1,5 @@
 import type { Application } from "../types/application";
+import type { Contact } from "../types/contact";
 
 export function fakeApplication(overrides: Partial<Application> = {}): Application {
   return {
@@ -21,6 +22,49 @@ export function fakeApplication(overrides: Partial<Application> = {}): Applicati
     archived: false,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function fakeContact(overrides: Partial<Contact> = {}): Contact {
+  return {
+    id: 1,
+    kind: "professor",
+    name: "Jane Lee",
+    organization: "Stanford",
+    department: null,
+    title: null,
+    labName: null,
+    email: null,
+    emailConfidence: "not_found",
+    websiteUrl: null,
+    profileUrl: null,
+    applicationId: null,
+    relevanceNote: null,
+    researchSummary: null,
+    recentWork: null,
+    sources: [],
+    draftSubject: null,
+    draftBody: null,
+    draftEdited: false,
+    followupSubject: null,
+    followupBody: null,
+    followupEdited: false,
+    draftReadyAt: null,
+    status: "to_contact",
+    closedReason: null,
+    priority: "medium",
+    sentAt: null,
+    followedUpAt: null,
+    repliedAt: null,
+    meetingAt: null,
+    nudgeSnoozedUntil: null,
+    notes: null,
+    origin: "manual",
+    archived: false,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    nudge: null,
     ...overrides,
   };
 }
