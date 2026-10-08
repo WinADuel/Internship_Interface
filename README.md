@@ -52,6 +52,21 @@ If docs fail to load, `docker compose logs backend` shows why: every failure log
 
 The routine runs in the cloud, so it only works once the app is reachable at its public HTTPS address. Revoking the token stops it.
 
+## Job discovery
+
+The **Discover** page finds internship postings for you. It scans two community lists on GitHub ([SimplifyJobs](https://github.com/SimplifyJobs/Summer2027-Internships) and [vanshb03](https://github.com/vanshb03/Summer2027-Internships)) plus a watchlist of companies whose careers pages run on Greenhouse, Lever, Ashby or Workday. Matches land in the Inbox; Save keeps one, and Apply turns a saved posting into an Applied application. You can also paste any posting link.
+
+Google, Microsoft, Apple, Meta and Amazon use their own careers sites, so they can't be watched. Their internships come in through the community lists, or you can paste a posting.
+
+**Workday** has no official public API. The app uses the endpoint Workday's own career pages call. If Workday changes it, only the scans of your Workday companies fail (the error shows on the Watchlist tab); everything else keeps working.
+
+- **Add a company:** Discover → Watchlist, paste its careers page URL (for example `https://job-boards.greenhouse.io/<company>` or `https://jobs.lever.co/<company>`), and press Add. Its postings arrive with the next scan.
+- **Filters** (terms, categories, keywords, locations, sponsorship, scan interval, list URLs) live in **Settings → Job discovery**. Changing them re-sorts existing postings straight away.
+- **Scanning:** `docker compose up -d --build` also starts the `job-scan` service, which scans every 6 hours by default. **Scan now** on the Discover page runs one immediately.
+- Saved postings are also mirrored to a "Saved postings" tab in the backup sheet. Discovery needs no Google permissions or secrets of its own.
+
+The board formats were written from vendor documentation, because the build environment could not reach those sites. The first real scan is their live check: if a watched company shows an error, compare its response with [`backend/tests/fixtures/discovery/README.md`](backend/tests/fixtures/discovery/README.md).
+
 ## Backups
 
 The database lives in the `pgdata` Docker volume. Take a dump regularly (cron, or before every upgrade):
