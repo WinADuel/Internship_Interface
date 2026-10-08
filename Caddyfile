@@ -23,6 +23,9 @@
 		# these two files only, never on the app's own files.
 		@public_pages path /about.html /privacy.html
 		templates @public_pages
+		# Caddy has no built-in type for .webmanifest (Add to Home Screen, spec §4.6).
+		@manifest path /manifest.webmanifest
+		header @manifest Content-Type application/manifest+json
 		file_server
 	}
 }

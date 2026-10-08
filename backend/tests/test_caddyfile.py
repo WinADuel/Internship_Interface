@@ -46,3 +46,9 @@ def test_templates_run_only_on_the_public_pages():
     lines = [line.strip() for line in CADDYFILE.splitlines()]
     templates = [line for line in lines if line.startswith("templates")]
     assert templates == ["templates @public_pages"]
+
+
+def test_manifest_is_served_as_a_web_app_manifest():
+    # Caddy's built-in type table has no entry for .webmanifest (spec §4.6).
+    assert "@manifest path /manifest.webmanifest" in CADDYFILE
+    assert "header @manifest Content-Type application/manifest+json" in CADDYFILE
