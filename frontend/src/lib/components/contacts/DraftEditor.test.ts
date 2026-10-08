@@ -96,4 +96,27 @@ describe("DraftEditor", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(writeText).toHaveBeenCalledWith("Subject: Hello\n\nMy words");
   });
+
+  it("keeps text typed while a save is in flight", async () => {
+    let resolve!: (c: ReturnType<typeof fakeContact>) => void;
+    vi.mocked(updateContact).mockReturnValue(new Promise((r) => (resolve = r)));
+    const contact = fakeContact({ ...draft, id: 9 });
+    const view = render(DraftEditor, { contact, which: "draft" });
+    const bodyField = screen.getByLabelText("Body") as HTMLTextAreaElement;
+    await fireEvent.input(bodyField, { target: { value: "Dear Prof. Lee, v2" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await fireEvent.input(bodyField, { target: { value: "Dear Prof. Lee, v2 and more" } });
+    const saved = fakeContact({ ...draft, id: 9, draftBody: "Dear Prof. Lee, v2", draftEdited: true });
+    resolve(saved);
+    await vi.waitFor(() => expect(updateContact).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    await view.rerender({ contact: saved, which: "draft" });
+    expect(bodyField.value).toBe("Dear Prof. Lee, v2 and more");
+  });
+
+  it("leaves the recipient out of the Gmail link when the address isn't a single plain one", async () => {
+    render(DraftEditor, { contact: fakeContact({ ...draft, email: "a@b.edu, x@evil.com", emailConfidence: "found" }), which: "draft" });
+    await fireEvent.click(screen.getByRole("button", { name: "Open in Gmail" }));
+    expect(String(openSpy.mock.calls[0][0])).toContain("to=&");
+  });
 });

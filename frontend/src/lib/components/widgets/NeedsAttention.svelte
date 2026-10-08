@@ -160,6 +160,10 @@
               <button type="button" onclick={() => action(c, "declined")}>Declined</button>
               <button type="button" onclick={() => snooze(c, 7)}>Still talking</button>
             {/if}
+            {#if acted[c.id] && c.nudge !== "unsent" && c.nudge !== "replied_stale"}
+              <!-- Acted on here but still listed (e.g. Sent with an old date is now follow-up due). -->
+              <button type="button" class="undo" onclick={() => undo(c)}>Undo</button>
+            {/if}
           </fieldset>
         </li>
       {/each}
@@ -178,7 +182,9 @@
 {#if opened}
   <aside class="detail" aria-label="Contact details" use:portal>
     <button type="button" class="close" bind:this={closeButton} onclick={close}>Close</button>
-    <ContactDetailPanel contact={opened} onarchived={close} />
+    {#key opened.id}
+      <ContactDetailPanel contact={opened} onarchived={close} />
+    {/key}
   </aside>
 {/if}
 

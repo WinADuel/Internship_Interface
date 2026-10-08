@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeContact } from "../../testing/fixtures";
 
@@ -89,8 +89,8 @@ describe("NeedsAttention", () => {
     render(NeedsAttention);
     await fireEvent.click(await screen.findByRole("button", { name: "No response" }));
     expect(applyContactAction).toHaveBeenCalledWith(7, "no_response", undefined);
-    const undo = await screen.findByRole("button", { name: "Undo" });
-    expect(screen.getByRole("group", { name: /Jane: marked/ })).toBeInTheDocument();
+    const row = await screen.findByRole("group", { name: /Jane: marked/ });
+    const undo = within(row).getByRole("button", { name: "Undo" });
     await fireEvent.click(undo);
     await vi.waitFor(() => expect(undoContactAction).toHaveBeenCalledWith(7));
     expect(await screen.findByRole("button", { name: "No response" })).toBeInTheDocument();
@@ -136,5 +136,16 @@ describe("NeedsAttention", () => {
     expect(await screen.findByText("Couldn't load contacts needing attention.")).toBeInTheDocument();
     expect(screen.queryByText("Nothing needs attention.")).toBeNull();
     expect(showToast).toHaveBeenCalled();
+  });
+
+  it("still offers Undo when the acted-on contact stays listed with a new nudge", async () => {
+    vi.mocked(getNeedsAttention)
+      .mockResolvedValueOnce([fakeContact({ id: 3, name: "Kim", status: "meeting", nudge: "meeting_outcome" })])
+      .mockResolvedValue([fakeContact({ id: 3, name: "Kim", status: "sent", nudge: "followup_due" })]);
+    vi.mocked(applyContactAction).mockResolvedValue(fakeContact({ id: 3, name: "Kim", status: "accepted" }));
+    render(NeedsAttention);
+    await fireEvent.click(await screen.findByRole("button", { name: "Accepted" }));
+    await screen.findByRole("button", { name: "Open follow-up" });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
   });
 });

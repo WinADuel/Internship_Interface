@@ -47,12 +47,15 @@
   async function save() {
     saving = true;
     try {
+      // What was sent, not what the fields hold after the await: text typed
+      // while saving must stay "unsaved" so the server copy can't replace it.
+      const sent = { subject, body };
       const data = isDraft
-        ? { draftSubject: subject, draftBody: body }
-        : { followupSubject: subject, followupBody: body };
+        ? { draftSubject: sent.subject, draftBody: sent.body }
+        : { followupSubject: sent.subject, followupBody: sent.body };
       const updated = await updateContact(contact.id, data);
-      loadedSubject = subject;
-      loadedBody = body;
+      loadedSubject = sent.subject;
+      loadedBody = sent.body;
       replaceContact(updated);
       showToast("Saved.", "info");
     } catch (err) {
