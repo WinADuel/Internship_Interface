@@ -10,6 +10,7 @@ from app.services.errors import SheetSyncError
 
 SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
 _TIMEOUT = 20.0
+RECONNECT_HINT = "reconnect Google to grant the drive.file permission"
 
 
 class SheetsClient(Protocol):
@@ -29,7 +30,11 @@ class GoogleSheetsClient:
         except httpx.HTTPError as exc:
             raise SheetSyncError(f"sheets {op} failed ({type(exc).__name__})") from None
         if not response.is_success:
-            raise SheetSyncError(f"sheets {op} rejected (status {response.status_code})")
+            message = f"sheets {op} rejected (status {response.status_code})"
+            if response.status_code in (401, 403):
+                # Typically a Google connection made before drive.file was requested.
+                message += f"; {RECONNECT_HINT}"
+            raise SheetSyncError(message)
         return response
 
     def create_spreadsheet(self, title: str, tab_titles: list[str]) -> str:
