@@ -116,4 +116,13 @@
   }
   .template { margin-bottom: 1rem; }
   .link-row { display: flex; gap: 0.5rem; align-items: end; margin: 0.5rem 0; }
+  /* A long "company - role" option would otherwise size the select past the screen edge. */
+  select { max-width: 100%; }
+
+  /* Phones: the link field takes the row's spare width so the button keeps its label on one line. */
+  @media (max-width: 700px) {
+    .link-row label { flex: 1; min-width: 0; }
+    .link-row input { width: 100%; box-sizing: border-box; }
+    .link-row button { white-space: nowrap; }
+  }
 </style>

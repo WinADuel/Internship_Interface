@@ -48,11 +48,12 @@
   .settings { margin-top: auto; }
   .logout { align-self: flex-start; }
 
-  /* Phones: collapse into a top bar that scrolls sideways instead of eating the screen width. */
+  /* Phones: collapse into a top bar that wraps onto a second row, so every link (Settings and
+     Log out included) is on screen without a sideways scroll. The Coming soon placeholders go. */
   @media (max-width: 700px) {
-    .sidebar { flex-direction: row; align-items: center; gap: 1rem; min-width: 0; padding: 0.5rem 0.75rem; border-right: 0; border-bottom: 1px solid #ddd; overflow-x: auto; white-space: nowrap; }
+    .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; min-width: 0; padding: 0.5rem 0.75rem; border-right: 0; border-bottom: 1px solid #ddd; white-space: nowrap; }
     .sidebar > * { flex: 0 0 auto; }
-    small { display: none; }
+    .disabled { display: none; }
     .settings { margin: 0 0 0 auto; }
   }
 </style>
