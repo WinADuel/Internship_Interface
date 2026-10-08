@@ -10,6 +10,7 @@
   import Essays from "./routes/Essays.svelte";
   import Contacts from "./routes/Contacts.svelte";
   import ResearchQueue from "./routes/ResearchQueue.svelte";
+  import Settings from "./routes/Settings.svelte";
 
   const routes = {
     "/": Dashboard,
@@ -18,6 +19,7 @@
     "/essays": Essays,
     "/contacts": Contacts,
     "/research-queue": ResearchQueue,
+    "/settings": Settings,
   };
 
   onMount(() => {
