@@ -11,7 +11,7 @@ Each development phase gets its own report in this folder once the phase is merg
 | Phase | Report | Status |
 |---|---|---|
 | 1 — Internship tracker core | [phase-1-report.md](phase-1-report.md) | Complete (merged 2026-10-06) |
-| 1b — Outreach & contacts | `phase-1b-report.md` (written when the phase finishes) | Planned |
+| 1b — Outreach & contacts | [phase-1b-report.md](phase-1b-report.md) | Complete on branch, awaiting merge |
 
 **Conventions** (spec §11b):
 - Name each report `phase-<id>-report.md`.
