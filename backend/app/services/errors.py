@@ -56,3 +56,7 @@ class QueueItemNotPendingError(Exception):
 
 class AlreadyQueuedError(Exception):
     """A company-contacts queue item already exists for this application."""
+
+
+class ClaudeTokenNotFoundError(Exception):
+    """No Claude token exists with the requested id."""
