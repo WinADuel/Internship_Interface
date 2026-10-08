@@ -150,6 +150,7 @@ def test_google_client_raw_writes_and_error_mapping(monkeypatch):
     with pytest.raises(SheetSyncError) as exc:
         client.replace_tab("abc", "Applications", [])
     assert "403" in str(exc.value) and "secret" not in str(exc.value)
+    assert "reconnect Google" in str(exc.value)
 
     def boom(*a, **k):
         raise httpx.ConnectError("down")
