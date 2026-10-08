@@ -1,6 +1,8 @@
 """End-to-end backup check on the real test Postgres (Phase 3 spec §4.4):
 dump a scratch database with committed rows, restore the dump into a second
-scratch database, and compare row counts per table.
+scratch database, and compare row counts per table. The restore tests run
+app/services/backup/restore.py (what ops/server/restore.sh uses) over a
+database that already holds other data.
 
 The usual `db_session` fixture never commits (its writes sit in a rolled-back
 transaction), so pg_dump could not see them; this test makes its own
@@ -15,6 +17,7 @@ import subprocess
 from datetime import datetime, timezone
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
@@ -23,7 +26,9 @@ from app.db.base import Base
 from app.models.application import Application
 from app.models.watch_company import WatchAts, WatchCompany
 from app.services import settings_service
+from app.services.backup.crypto import encrypt_file
 from app.services.backup.dump import BackupError, list_dump, pg_env, run_dump
+from app.services.backup.restore import restore_backup
 from app.services.backup.service import run_backup
 
 NOW = datetime(2026, 10, 8, 7, 30, tzinfo=timezone.utc)
@@ -140,3 +145,105 @@ def test_wrong_password_fails_cleanly_without_leaking_it(scratch_databases, tmp_
     assert message.startswith("pg_dump failed (exit 1): pg_dump: error:")
     assert "definitely-wrong-pw" not in message
     assert list((tmp_path / "manual").iterdir()) == []
+
+
+def _seed(url: str, companies: list[str]) -> None:
+    engine = create_engine(url)
+    try:
+        Base.metadata.create_all(bind=engine)
+        with Session(engine) as db:
+            settings_service.get_settings(db)
+            db.add_all([Application(company=name, role_title="Intern") for name in companies])
+            db.commit()
+    finally:
+        engine.dispose()
+
+
+def _tables(url: str) -> set[str]:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            return set(conn.scalars(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")))
+    finally:
+        engine.dispose()
+
+
+def _companies(url: str) -> list[str]:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            return list(conn.scalars(select(Application.company).order_by(Application.company)))
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture()
+def restore_pair(scratch_databases, tmp_path):
+    """A dump of a source database with two applications, and a target
+    database holding other rows plus a table the dump doesn't know about
+    (as if a newer migration had added it)."""
+    source_url, target_url = scratch_databases
+    _seed(source_url, ["Acme", "Globex"])
+    dump_file = run_dump(source_url, tmp_path, "pre-deploy", NOW)
+
+    _seed(target_url, ["Initech", "Hooli", "Umbrella"])
+    engine = create_engine(target_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE added_by_newer_migration (id int)"))
+    finally:
+        engine.dispose()
+    return source_url, target_url, dump_file
+
+
+def test_restore_replaces_the_whole_database(restore_pair, tmp_path):
+    source_url, target_url, dump_file = restore_pair
+
+    listing = restore_backup(dump_file, target_url, None)
+
+    assert "public.applications" in listing.tables
+    assert _companies(target_url) == ["Acme", "Globex"]
+    assert _row_counts(target_url) == _row_counts(source_url)
+    assert _tables(target_url) == _tables(source_url)  # the extra table is gone
+    assert "added_by_newer_migration" not in _tables(target_url)
+
+    # A database that was restored once (its public schema re-created) dumps
+    # and restores again cleanly.
+    again = run_dump(target_url, tmp_path / "again", "manual", NOW)
+    restore_backup(again, target_url, None)
+    assert _companies(target_url) == ["Acme", "Globex"]
+    assert _row_counts(target_url) == _row_counts(source_url)
+
+
+def test_restore_of_an_encrypted_copy(restore_pair, tmp_path):
+    source_url, target_url, dump_file = restore_pair
+    key = Fernet.generate_key().decode()
+    encrypted = tmp_path / (dump_file.name + ".enc")
+    encrypt_file(dump_file, encrypted, key)
+
+    restore_backup(encrypted, target_url, key)
+
+    assert _companies(target_url) == ["Acme", "Globex"]
+    assert _row_counts(target_url) == _row_counts(source_url)
+
+
+def test_a_failed_restore_leaves_the_database_unchanged(restore_pair):
+    _, target_url, dump_file = restore_pair
+    before_counts, before_tables = _row_counts(target_url), _tables(target_url)
+
+    def failing_late(argv, **kwargs):
+        result = subprocess.run(argv, **kwargs)
+        if argv[0] == "pg_restore" and "--list" not in argv:
+            # Break the very end of the script: everything before it, the
+            # schema drop included, must roll back.
+            sql = next(arg[len("--file="):] for arg in argv if arg.startswith("--file="))
+            with open(sql, "a") as script:
+                script.write("\nSELECT 1/0;\n")
+        return result
+
+    with pytest.raises(BackupError, match="the database was not changed: .*division by zero"):
+        restore_backup(dump_file, target_url, None, run=failing_late)
+
+    assert _row_counts(target_url) == before_counts
+    assert _tables(target_url) == before_tables
+    assert _companies(target_url) == ["Hooli", "Initech", "Umbrella"]
