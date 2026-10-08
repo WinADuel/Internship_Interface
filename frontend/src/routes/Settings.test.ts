@@ -73,4 +73,22 @@ describe("Settings page", () => {
     const max = screen.getByLabelText("Max items per daily run") as HTMLInputElement;
     expect([max.min, max.max]).toEqual(["1", "25"]);
   });
+
+  it("shows a load error with Retry instead of a dead page", async () => {
+    vi.mocked(getSettings).mockRejectedValueOnce(new Error("offline"));
+    render(Settings);
+    expect((await screen.findByRole("alert")).textContent).toContain("Couldn't load settings");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await vi.waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect((screen.getByLabelText("Outreach profile") as HTMLTextAreaElement).value).toBe("CS junior");
+  });
+
+  it("a failed save shows a toast", async () => {
+    vi.mocked(updateSettings).mockRejectedValue(new Error("db down"));
+    render(Settings);
+    await vi.waitFor(() => expect((screen.getByLabelText("Outreach profile") as HTMLTextAreaElement).value).toBe("CS junior"));
+    await fireEvent.submit(screen.getByRole("form", { name: "Outreach settings" }));
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Couldn't save settings."));
+  });
 });

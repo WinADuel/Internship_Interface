@@ -16,6 +16,11 @@
   let error = $state<string | null>(null);
   let url = $state<string | null>(null);
   let syncing = $state(false);
+  // Announce only what a manual sync just reported, not the error stored from before.
+  let announcement = $state("");
+
+  const NOT_CONNECTED = "google not connected"; // sheet_sync_service.NOT_CONNECTED
+  const RECONNECT_HINT = "reconnect Google to grant the drive.file permission"; // sheets_client.RECONNECT_HINT
 
   // Follow the parent's settings until a manual sync gives fresher values.
   $effect.pre(() => {
@@ -27,7 +32,7 @@
   });
 
   const needsGoogle = $derived(
-    error !== null && (error === "google not connected" || error.includes("reconnect Google")),
+    error !== null && (error === NOT_CONNECTED || error.includes(RECONNECT_HINT)),
   );
 
   async function sync() {
@@ -37,6 +42,8 @@
       syncedAt = result.lastSheetSyncAt;
       error = result.lastSheetSyncError;
       if (result.sheetUrl) url = result.sheetUrl;
+      if (result.ok) announcement = "Backup sheet synced.";
+      else announcement = result.lastSheetSyncError ? `Sync failed: ${result.lastSheetSyncError}` : "Sync didn't complete.";
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Couldn't sync the backup sheet.");
     } finally {
@@ -53,12 +60,16 @@
   {/if}
   <p>Last synced: {syncedAt ? formatDateTime(syncedAt) : "never"}</p>
   {#if error}
-    <p class="error" role="alert">Last sync failed: {error}</p>
+    <p class="error">Last sync failed: {error}</p>
     {#if needsGoogle}
-      <p><a href="/api/docs/google/authorize">Connect Google</a></p>
+      <p>
+        <a href="/api/docs/google/authorize">Connect Google</a>
+        <span class="muted">then come back here and press Sync now.</span>
+      </p>
     {/if}
   {/if}
   <button type="button" onclick={sync} disabled={syncing}>Sync now</button>
+  <p class="status" role="status">{announcement}</p>
 </section>
 
 <style>

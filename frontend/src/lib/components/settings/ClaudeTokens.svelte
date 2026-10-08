@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { ApiError } from "../../api/client";
   import { createClaudeToken, listClaudeTokens, revokeClaudeToken } from "../../api/settings";
   import { formatDateTime } from "../../format";
@@ -10,6 +10,9 @@
   // The plaintext lives only here, only until dismissed or the component goes away.
   let plaintext = $state<string | null>(null);
   let creating = $state(false);
+  let alive = true;
+  let tokenInput = $state<HTMLInputElement | null>(null);
+  let createButton = $state<HTMLButtonElement | null>(null);
 
   const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
 
@@ -26,19 +29,34 @@
     }
   }
 
+  const clearPlaintext = () => (plaintext = null);
+
   onMount(() => {
     void load();
+    // Leaving the app entirely (another URL, Connect Google) can keep this page in
+    // the back/forward cache, so drop the secret before the page is hidden too.
+    window.addEventListener("pagehide", clearPlaintext);
+    return () => window.removeEventListener("pagehide", clearPlaintext);
   });
   onDestroy(() => {
-    plaintext = null;
+    alive = false;
+    clearPlaintext();
   });
 
   async function create() {
     creating = true;
     try {
       const created = await createClaudeToken();
+      if (!alive) {
+        // Navigated away before the token arrived: nobody can copy it, so don't leave it active.
+        void revokeClaudeToken(created.id).catch(() => undefined);
+        return;
+      }
       plaintext = created.token;
       tokens = [strip(created), ...tokens];
+      await tick();
+      tokenInput?.focus();
+      tokenInput?.select();
     } catch (err) {
       showToast(message(err, "Couldn't create a token."));
     } finally {
@@ -54,6 +72,11 @@
     } catch {
       showToast("Couldn't copy. Select the field and copy it by hand.");
     }
+  }
+
+  function dismiss() {
+    clearPlaintext();
+    createButton?.focus();
   }
 
   async function revoke(token: ClaudeTokenInfo) {
@@ -75,22 +98,30 @@
     <div class="new-token">
       <label>
         New token
-        <input type="text" readonly value={plaintext} onfocus={(e) => e.currentTarget.select()} />
+        <input
+          type="text"
+          readonly
+          autocomplete="off"
+          spellcheck="false"
+          value={plaintext}
+          bind:this={tokenInput}
+          onfocus={(e) => e.currentTarget.select()}
+        />
       </label>
       <p class="warning">Copy this now — it won't be shown again.</p>
       <button type="button" onclick={copy}>Copy</button>
-      <button type="button" onclick={() => (plaintext = null)}>Done</button>
+      <button type="button" onclick={dismiss}>Done</button>
     </div>
   {/if}
 
-  <button type="button" onclick={create} disabled={creating}>Create token</button>
+  <button type="button" bind:this={createButton} onclick={create} disabled={creating}>Create token</button>
 
   {#if tokens.length === 0}
     <p class="muted">No tokens yet.</p>
   {:else}
     <table>
       <thead>
-        <tr><th>Token</th><th>Created</th><th>Last used</th><th>State</th><th></th></tr>
+        <tr><th>Token</th><th>Created</th><th>Last used</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr>
       </thead>
       <tbody>
         {#each tokens as token (token.id)}
@@ -115,6 +146,7 @@
 
 <style>
   .muted { color: #666; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .new-token { border: 1px solid #c90; background: #fff8e1; padding: 0.75rem; margin-bottom: 0.75rem; }
   .new-token input { width: 100%; font-family: monospace; box-sizing: border-box; }
   .warning { font-weight: 600; }
