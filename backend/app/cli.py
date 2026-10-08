@@ -1,7 +1,8 @@
 """Command-line tools. Usage:
 python -m app.cli create-user --username <u> [--reset]
 python -m app.cli restore-check <dump>
-python -m app.cli decrypt-backup <in.dump.enc> <out.dump>"""
+python -m app.cli decrypt-backup <in.dump.enc> <out.dump>
+python -m app.cli restore <file.dump|file.dump.enc> (--check | --yes)  (use ops/server/restore.sh)"""
 
 import argparse
 import getpass
@@ -14,6 +15,7 @@ from app.core.security import totp_provisioning_uri
 from app.db.session import SessionLocal
 from app.services.backup.crypto import BackupCryptoError, decrypt_file
 from app.services.backup.dump import BackupError, list_dump
+from app.services.backup.restore import check_backup, restore_backup
 from app.services.user_bootstrap import (
     AccountExistsError,
     confirm_enrollment,
@@ -93,6 +95,33 @@ def _decrypt_backup(source: str, dest: str) -> int:
     return 0
 
 
+def _restore(path: str, check: bool, yes: bool) -> int:
+    """--check: is the backup readable (decrypting a .dump.enc)? --yes: replace
+    the whole database with it. ops/server/restore.sh runs both, asking first,
+    taking a safety backup and stopping the app in between."""
+    if not (check or yes):
+        print(
+            "Error: this replaces the whole database. Use ops/server/restore.sh, which asks first "
+            "and takes a safety backup; or pass --check to only test the file, or --yes.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        if check:
+            listing = check_backup(path, settings.backup_encryption_key)
+        else:
+            listing = restore_backup(path, settings.database_url, settings.backup_encryption_key)
+    except (BackupError, BackupCryptoError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    created = f", made {listing.created_at}" if listing.created_at else ""
+    if check:
+        print(f"OK: {path} is a readable backup ({len(listing.tables)} tables{created}).")
+    else:
+        print(f"OK: restored {path} ({len(listing.tables)} tables{created}).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -110,11 +139,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     decrypt.add_argument("source", help="path to a .dump.enc file")
     decrypt.add_argument("dest", help="path for the decrypted .dump (must not exist)")
+    restore = sub.add_parser(
+        "restore", help="replace the whole database with a backup (use ops/server/restore.sh instead)"
+    )
+    restore.add_argument("file", help="path to a .dump, or a .dump.enc decrypted with BACKUP_ENCRYPTION_KEY")
+    mode = restore.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="only check the file can be restored")
+    mode.add_argument("--yes", action="store_true", help="confirm: the current data is replaced")
     args = parser.parse_args(argv)
     if args.command == "restore-check":
         return _restore_check(args.dump)
     if args.command == "decrypt-backup":
         return _decrypt_backup(args.source, args.dest)
+    if args.command == "restore":
+        return _restore(args.file, args.check, args.yes)
     return _create_user(args.username, args.reset)
 
 
