@@ -85,3 +85,7 @@ Plan: `docs/superpowers/plans/2026-10-06-outreach-contacts-phase1b.md`. Spec: §
   - Important (ruled, tested): "Did you send it?" is shown only while the matching action is valid (`sent` from `to_contact`, `followed_up` from `sent`). Ruling: after the email is already marked, offering Sent would only produce a 422 — cost if wrong: re-opening Gmail on an already-sent draft shows no prompt.
   - Minor (fixed): Sent from the Gmail prompt now gets the 60 s Undo; history list keyed by index; `closed_reason` underscores all replaced.
   - Minor, logged not fixed: blank draft fields save as `""` rather than null; a notes/draft save re-fetches history; switching contacts discards unsaved edits without a prompt.
+- **Task 12: Contacts & Research Queue pages, navigation.** DONE. Commits `1bc63aa`, `d7cab1f` (review follow-up). Tests: 5 new (queue page, contacts page) + nav assertions; frontend 193 passed, check 0/0. Review (fresh reviewer subagent): Critical none, Important none.
+  - Minor (fixed): the "How many" input is now `required`, so clearing it can't send `target_count: null` (422).
+  - Minor, logged not fixed: contact name/organization inputs have no `maxlength`; the slide-over gets no focus or dialog role on open; the Done group and kind label are untested.
+  - Manual `npm run dev` check (plan step 5) deferred to one end-to-end browser smoke run after Task 14 (see below).
