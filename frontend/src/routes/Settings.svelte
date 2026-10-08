@@ -4,6 +4,7 @@
   import { getSettings, updateSettings } from "../lib/api/settings";
   import BackupSheetStatus from "../lib/components/settings/BackupSheetStatus.svelte";
   import ClaudeTokens from "../lib/components/settings/ClaudeTokens.svelte";
+  import DiscoverySettings from "../lib/components/settings/DiscoverySettings.svelte";
   import { showToast } from "../lib/stores/toast";
   import type { AppSettings } from "../lib/types/contact";
 
@@ -99,6 +100,11 @@
 
   <button type="submit" disabled={saving || settings === null}>Save</button>
 </form>
+
+{#if settings}
+  <!-- Its own form and Save: sends only the discovery fields. -->
+  <DiscoverySettings {settings} onsaved={(saved) => (settings = saved)} />
+{/if}
 
 <ClaudeTokens />
 

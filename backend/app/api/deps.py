@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 
 import jwt
 from fastapi import Depends, HTTPException, Request
@@ -6,10 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import ACCESS_TOKEN_TYPE, decode_token
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.auth_credential import AuthCredential
 from app.models.claude_token import ClaudeToken
 from app.services import claude_token_service
+from app.services.discovery.http import DiscoveryHttp, HttpxDiscoveryHttp
 from app.services.sheet_sync_service import SheetSyncScheduler, google_sheets_client
 from app.services.sheets_client import SheetsClient
 
@@ -54,3 +56,15 @@ def get_sheet_sync_scheduler() -> SheetSyncScheduler:
 def get_sheets_client_factory() -> Callable[[Session], SheetsClient]:
     """Builds the Sheets client for a synchronous "Sync now"; overridden in tests."""
     return google_sheets_client
+
+
+def get_discovery_http() -> DiscoveryHttp:
+    """The only way discovery routes reach the network; overridden in tests."""
+    return HttpxDiscoveryHttp()
+
+
+def get_scan_session_factory() -> Callable[[], AbstractContextManager[Session]]:
+    """Opens the session Scan now's background task runs in (the request's
+    session is closed by then). `with factory() as db:` closes it on exit.
+    Overridden in tests so the scan runs inside the test transaction."""
+    return SessionLocal

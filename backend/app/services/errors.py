@@ -64,3 +64,33 @@ class ClaudeTokenNotFoundError(Exception):
 
 class SheetSyncError(Exception):
     """A Google Sheets API call failed (non-2xx response or network error)."""
+
+
+class PostingNotFoundError(Exception):
+    """No discovered posting exists with the requested id."""
+
+
+class InvalidPostingStateError(Exception):
+    """The posting action is not valid from the posting's current state.
+    `state` is the posting's state when one exists (e.g. "already saved")."""
+
+    def __init__(self, message: str, state: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.state = state
+
+
+class WatchCompanyNotFoundError(Exception):
+    """No watched company exists with the requested id."""
+
+
+class UnsupportedCareersSiteError(Exception):
+    """The careers URL is not on a job board the watchlist can read."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class DuplicateWatchCompanyError(Exception):
+    """That job board is already on the watchlist."""

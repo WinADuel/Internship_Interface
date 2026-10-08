@@ -1,0 +1,16 @@
+{
+  "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345001",
+  "data_compliance": [],
+  "internal_job_id": 3011111001,
+  "location": {"name": "San Francisco, CA"},
+  "metadata": null,
+  "id": 4012345001,
+  "updated_at": "2026-10-02T12:00:00-04:00",
+  "requisition_id": "R-1001",
+  "title": "Software Engineering Intern, Summer 2027",
+  "company_name": "Acme Robotics",
+  "first_published": "2026-09-28T09:30:00-04:00",
+  "content": "&lt;p&gt;Build robots.&lt;/p&gt;",
+  "departments": [{"id": 101, "name": "Engineering", "child_ids": [], "parent_id": null}],
+  "offices": [{"id": 201, "name": "San Francisco", "location": "San Francisco, CA", "child_ids": [], "parent_id": null}]
+}

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
+from app.models.posting import Posting, PostingSource, PostingState
 from app.schemas.application import ApplicationCreate
 from app.schemas.contact import ContactCreate
 from app.services import sheets_client
@@ -19,27 +20,46 @@ from app.services.sheet_sync_service import (
     TAB_APPLICATIONS,
     TAB_COMPANY,
     TAB_PROFESSORS,
+    TAB_SAVED_POSTINGS,
     safe_sync,
     sync_tabs,
 )
+from app.services.discovery.urls import normalize_url
 from app.services.sheets_client import GoogleSheetsClient
 
 NOW = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
 
 
 class FakeSheetsClient:
+    """In-memory Sheets: like the real API, writing a tab the sheet lacks fails."""
+
     def __init__(self, fail: bool = False):
         self.fail = fail
         self.created: list[tuple[str, list[str]]] = []
+        self.sheets: dict[str, list[str]] = {}
+        self.ensure_calls: list[tuple[str, list[str]]] = []
+        self.added: list[str] = []
         self.replaced: dict[str, list[list[str]]] = {}
 
     def create_spreadsheet(self, title, tab_titles):
         self.created.append((title, list(tab_titles)))
-        return f"sheet-{len(self.created)}"
+        sheet_id = f"sheet-{len(self.created)}"
+        self.sheets[sheet_id] = list(tab_titles)
+        return sheet_id
+
+    def ensure_tabs(self, spreadsheet_id, titles):
+        self.ensure_calls.append((spreadsheet_id, list(titles)))
+        tabs = self.sheets[spreadsheet_id]
+        for title in titles:
+            if title not in tabs:
+                tabs.append(title)
+                self.added.append(title)
 
     def replace_tab(self, spreadsheet_id, tab, rows):
         if self.fail:
             raise SheetSyncError("sheets update rejected (status 500)")
+        if tab not in self.sheets.get(spreadsheet_id, []):
+            raise SheetSyncError("sheets clear rejected (status 400)")
         self.replaced[tab] = rows
 
 
@@ -105,6 +125,77 @@ def test_needs_attention_column_filled(db_session):
     assert rows[2][rows[1].index("sent_at")].startswith((now - timedelta(days=12)).date().isoformat())
 
 
+def test_all_tabs_include_saved_postings():
+    assert ALL_TABS == (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY, TAB_SAVED_POSTINGS)
+
+
+def test_new_sheet_is_created_with_every_tab_and_needs_no_ensure(db_session):
+    fake = FakeSheetsClient()
+    sync_tabs(db_session, fake, [TAB_SAVED_POSTINGS])
+    assert fake.created == [(SHEET_TITLE, list(ALL_TABS))]
+    assert fake.ensure_calls == [] and set(fake.replaced) == set(ALL_TABS)
+
+
+def test_old_three_tab_sheet_gains_saved_postings_tab_once(db_session):
+    get_settings(db_session).backup_sheet_id = "old"
+    db_session.flush()
+    fake = FakeSheetsClient()
+    fake.sheets["old"] = [TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY]
+    sync_tabs(db_session, fake, ALL_TABS)
+    assert fake.created == []
+    assert fake.ensure_calls == [("old", list(ALL_TABS))]
+    assert fake.added == [TAB_SAVED_POSTINGS]
+    assert set(fake.replaced) == set(ALL_TABS)
+    fake.replaced.clear()
+    sync_tabs(db_session, fake, [TAB_SAVED_POSTINGS, TAB_SAVED_POSTINGS])
+    assert fake.ensure_calls[-1] == ("old", [TAB_SAVED_POSTINGS])
+    assert fake.added == [TAB_SAVED_POSTINGS]  # not added a second time
+    assert set(fake.replaced) == {TAB_SAVED_POSTINGS}
+
+
+def test_unknown_tab_is_refused_before_touching_the_sheet(db_session):
+    get_settings(db_session).backup_sheet_id = "old"
+    db_session.flush()
+    fake = FakeSheetsClient()
+    fake.sheets["old"] = list(ALL_TABS)
+    with pytest.raises(ValueError):
+        sync_tabs(db_session, fake, [TAB_APPLICATIONS, "Bogus"])
+    assert fake.ensure_calls == [] and fake.replaced == {}
+
+
+def _posting(db, key, *, state, title="Software Intern", company="Acme", locations=None,
+             closed=False, changed=NOW):
+    url = f"https://jobs.example.com/{key}"
+    p = Posting(
+        source=PostingSource.SIMPLIFY, source_key=key, company=company, title=title,
+        locations=locations if locations is not None else [], url=url, url_key=normalize_url(url),
+        state=state, state_changed_at=changed, closed=closed,
+    )
+    db.add(p)
+    db.flush()
+    return p
+
+
+def test_saved_posting_rows(db_session):
+    _posting(db_session, "old", state=PostingState.SAVED, company="Beta", title="Data Intern",
+             changed=NOW - timedelta(days=3), closed=True)
+    _posting(db_session, "new", state=PostingState.SAVED, title='=HYPERLINK("http://x","y")',
+             locations=["New York, NY", "Remote"], changed=NOW - timedelta(hours=1))
+    for state in (PostingState.NEW, PostingState.DISMISSED, PostingState.APPLIED):
+        _posting(db_session, f"other-{state.value}", state=state)
+    fake = FakeSheetsClient()
+    sync_tabs(db_session, fake, [TAB_SAVED_POSTINGS])
+    rows = fake.replaced[TAB_SAVED_POSTINGS]
+    assert rows[0] == [HEADER_NOTE]
+    assert rows[1] == ["Company", "Role", "Locations", "Link", "Saved", "Closed"]
+    assert rows[2:] == [
+        ["Acme", '=HYPERLINK("http://x","y")', "New York, NY; Remote", "https://jobs.example.com/new",
+         "2026-10-06", ""],
+        ["Beta", "Data Intern", "", "https://jobs.example.com/old", "2026-10-03", "yes"],
+    ]
+    assert all(isinstance(v, str) for r in rows for v in r)
+
+
 def test_safe_sync_success_records_time_and_clears_error(db_session):
     s = get_settings(db_session)
     s.last_sheet_sync_error = "old error"
@@ -167,3 +258,56 @@ def test_google_client_raw_writes_and_error_mapping(monkeypatch):
     monkeypatch.setattr(sheets_client.httpx, "request", boom)
     with pytest.raises(SheetSyncError):
         client.create_spreadsheet("T", [])
+
+
+def test_google_client_ensure_tabs_adds_only_missing(monkeypatch):
+    calls = []
+    existing = {"sheets": [{"properties": {"title": "Applications"}}, {"properties": {"title": "Professors"}}]}
+
+    def fake_request(method, url, headers, timeout, **kwargs):
+        calls.append((method, url, kwargs))
+        return httpx.Response(200, json=existing if method == "GET" else {})
+
+    monkeypatch.setattr(sheets_client.httpx, "request", fake_request)
+    client = GoogleSheetsClient("tok")
+    client.ensure_tabs("a/b", ["Applications", "Professors", "Saved postings", "Company Contacts"])
+    (get_method, get_url, get_kwargs), (post_method, post_url, post_kwargs) = calls
+    assert get_method == "GET" and get_url == f"{sheets_client.SHEETS_API}/a%2Fb"
+    assert get_kwargs["params"] == {"fields": "sheets.properties.title"}
+    assert post_method == "POST" and post_url == f"{sheets_client.SHEETS_API}/a%2Fb:batchUpdate"
+    assert post_kwargs["json"] == {
+        "requests": [
+            {"addSheet": {"properties": {"title": "Saved postings"}}},
+            {"addSheet": {"properties": {"title": "Company Contacts"}}},
+        ]
+    }
+
+    calls.clear()
+    client.ensure_tabs("abc", ["Applications"])
+    assert [c[0] for c in calls] == ["GET"]  # nothing missing: no batchUpdate
+
+
+def test_google_client_ensure_tabs_errors(monkeypatch):
+    client = GoogleSheetsClient("tok")
+    monkeypatch.setattr(sheets_client.httpx, "request", lambda *a, **k: httpx.Response(401, text="secret body"))
+    with pytest.raises(SheetSyncError) as exc:
+        client.ensure_tabs("abc", ["Saved postings"])
+    assert "401" in str(exc.value) and "secret" not in str(exc.value) and "reconnect Google" in str(exc.value)
+
+    def reject_add(method, url, headers, timeout, **kwargs):
+        if method == "GET":
+            return httpx.Response(200, json={"sheets": []})
+        return httpx.Response(400, text="secret body")
+
+    monkeypatch.setattr(sheets_client.httpx, "request", reject_add)
+    with pytest.raises(SheetSyncError) as exc:
+        client.ensure_tabs("abc", ["Saved postings"])
+    assert "400" in str(exc.value) and "secret" not in str(exc.value)
+
+    for bad in ({"sheets": "nope"}, [1], {"sheets": [{"properties": {"title": 5}}]}):
+        monkeypatch.setattr(sheets_client.httpx, "request", lambda *a, _b=bad, **k: httpx.Response(200, json=_b))
+        with pytest.raises(SheetSyncError):
+            client.ensure_tabs("abc", ["Saved postings"])
+    monkeypatch.setattr(sheets_client.httpx, "request", lambda *a, **k: httpx.Response(200, text="not json"))
+    with pytest.raises(SheetSyncError):
+        client.ensure_tabs("abc", ["Saved postings"])
