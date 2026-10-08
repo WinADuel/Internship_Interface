@@ -364,6 +364,34 @@ def test_paste_preview_of_a_page_without_job_data_leaves_fields_to_fill(logged_i
     assert "secret body text" not in r.text
 
 
+def test_paste_preview_of_a_page_with_a_lone_surrogate_in_its_json_ld(
+    logged_in_client, discovery_http
+):
+    # A lone surrogate anywhere in the page must not reach the response (it
+    # cannot be encoded as UTF-8, so it would break the whole request).
+    url = "https://careers.globex.example/jobs/88"
+    page = (
+        '<html><head><script type="application/ld+json">'
+        '{"@type": "JobPosting", "title": "SWE Intern\\ud800",'
+        ' "hiringOrganization": {"name": "Globex\\ud800"},'
+        ' "jobLocation": {"address": {"addressLocality": "New\\ud800 York"}}}'
+        "</script></head><body></body></html>"
+    )
+    discovery_http.add("PAGE", url, page_result(page, url=url))
+
+    r = logged_in_client.post("/api/discovery/paste/preview", json={"url": url})
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "company": "Globex",
+        "title": "SWE Intern",
+        "locations": ["New York"],
+        "url": url,
+        "date_posted": None,
+        "source": "pasted",
+    }
+
+
 @pytest.mark.parametrize("url", ["javascript:alert(1)", "not a url", ""])
 def test_paste_preview_of_a_non_web_link_is_422_without_a_request(logged_in_client, discovery_http, url):
     r = logged_in_client.post("/api/discovery/paste/preview", json={"url": url})
@@ -459,7 +487,9 @@ def test_watchlist_add_list_and_remove(logged_in_client, db_session, sheet_sync_
     r = logged_in_client.delete(f"/api/discovery/watchlist/{added['id']}")
     assert r.status_code == 204
     assert logged_in_client.get("/api/discovery/watchlist").json() == []
-    assert count(db_session, Posting) == 2  # postings stay
+    # The saved posting stays; the new one goes, since no scan lists it now.
+    assert count(db_session, Posting) == 1
+    assert db_session.scalars(select(Posting)).one().state is PostingState.SAVED
     r = logged_in_client.delete(f"/api/discovery/watchlist/{added['id']}")
     assert r.status_code == 404
     assert r.json() == {"detail": "watched company not found"}

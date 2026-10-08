@@ -1,7 +1,10 @@
 """Job discovery scans (Phase 2 spec §5), run as their own Docker Compose
 service: `python -m app.jobs.job_scan`. Scans once a minute after start-up,
-then every `discovery_scan_hours` hours (re-read before each wait). Scan now
-uses the same `run_scan`; the advisory lock keeps the two from overlapping."""
+then every `discovery_scan_hours` hours (re-read before each wait). A scan
+that crashed is retried in ten minutes instead, since the cause is usually
+passing (the database restarting, say) and the full interval would leave
+discovery idle for hours. Scan now uses the same `run_scan`; the advisory
+lock keeps the two from overlapping."""
 
 import logging
 import time
@@ -17,6 +20,7 @@ logger = logging.getLogger(__name__)
 STARTUP_DELAY = 60.0  # seconds: let the database come up first
 DEFAULT_SCAN_HOURS = 6  # used when the settings cannot be read
 MIN_SCAN_HOURS = 1
+RETRY_DELAY = 600.0  # seconds to wait after a scan that crashed
 
 
 def run_once(http: DiscoveryHttp) -> ScanReport | None:
@@ -52,7 +56,11 @@ def run_forever(http: DiscoveryHttp, sleep: Callable[[float], None] = time.sleep
                     len(report.errors),
                 )
         except Exception:  # noqa: BLE001 - keep the loop alive (e.g. DB briefly down)
-            logger.exception("job scan crashed")
+            logger.exception("job scan crashed; retrying in %.0f seconds", RETRY_DELAY)
+            # Not even the settings are read: whatever broke the scan (the
+            # database being down, say) would break reading them too.
+            sleep(RETRY_DELAY)
+            continue
         try:
             interval = scan_interval_seconds()
         except Exception:  # noqa: BLE001

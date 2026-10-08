@@ -30,6 +30,9 @@ PUBLIC_V6 = "2606:4700::1111"
 
 DNS = {
     "example.com": [PUBLIC_V4],
+    "api.example.com": [PUBLIC_V4],
+    "elsewhere.example": [PUBLIC_V4_B],
+    "nvidia.wd5.myworkdayjobs.com": [PUBLIC_V4],
     "other.example": [PUBLIC_V4_B],
     "v6.example": [PUBLIC_V6],
     "localhost": ["127.0.0.1", "::1"],
@@ -42,9 +45,11 @@ DNS = {
 }
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def dns(monkeypatch):
-    """Patch socket.getaddrinfo; any unscripted name fails like NXDOMAIN."""
+    """Patch socket.getaddrinfo for every test here; any unscripted name
+    fails like NXDOMAIN. Autouse because every call now resolves and checks
+    each hop's address, not just `get_page`."""
     lookups: list[str] = []
 
     def fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
@@ -282,6 +287,89 @@ def test_post_json_does_not_follow_redirects():
         client.post_json("https://api.example.com/jobs", {}, max_bytes=1000, timeout=10)
     assert info.value.status == 302
     assert len(rec.requests) == 1
+
+
+# --- every call is address-checked and pinned --------------------------------
+
+
+@pytest.mark.parametrize("method", ["get_json", "post_json"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/jobs",
+        "http://localhost:5432/jobs",
+        "http://10.0.0.5/jobs",
+        "http://169.254.169.254/latest/meta-data",
+        "http://internal.test/jobs",
+        "http://mixed.test/jobs",
+        "http://[::1]/jobs",
+    ],
+)
+def test_json_calls_refuse_non_public_addresses_before_connecting(dns, method, url):
+    # A list URL is user-configured and a board API can redirect, so the
+    # guard cannot be limited to pasted pages.
+    client, rec = make(lambda r: httpx.Response(200, json={}))
+    call = {
+        "get_json": lambda: client.get_json(url, max_bytes=1000, timeout=10),
+        "post_json": lambda: client.post_json(url, {}, max_bytes=1000, timeout=10),
+    }[method]
+    with pytest.raises(DiscoveryFetchError, match="not allowed"):
+        call()
+    assert rec.requests == []
+
+
+def test_get_json_connects_to_the_checked_address(dns):
+    client, rec = make(lambda r: httpx.Response(200, json=[1]))
+    result = client.get_json("https://api.example.com/jobs", max_bytes=1000, timeout=10)
+    assert result.data == [1]
+    assert result.final_url == "https://api.example.com/jobs"
+    sent = rec.requests[0]
+    assert sent.url.host == PUBLIC_V4
+    assert sent.headers["host"] == "api.example.com"
+    assert sent.extensions["sni_hostname"] == "api.example.com"
+
+
+def test_post_json_connects_to_the_checked_address_and_keeps_the_body(dns):
+    client, rec = make(lambda r: httpx.Response(200, json={"total": 0}))
+    body = {"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": "intern"}
+    url = "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/Site/jobs"
+    result = client.post_json(url, body, max_bytes=1000, timeout=10)
+    sent = rec.requests[0]
+    assert sent.method == "POST"
+    assert json.loads(sent.content) == body
+    assert sent.url.host == PUBLIC_V4
+    assert sent.headers["host"] == "nvidia.wd5.myworkdayjobs.com"
+    assert result.data == {"total": 0}
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["http://169.254.169.254/latest/meta-data", "http://internal.test/", "http://localhost/"],
+)
+def test_get_json_redirect_to_a_private_address_is_refused(dns, location):
+    client, rec = make(lambda r: redirect(location))
+    with pytest.raises(DiscoveryFetchError, match="not allowed"):
+        client.get_json("https://api.example.com/jobs", max_bytes=1000, timeout=10)
+    assert len(rec.requests) == 1
+
+
+def test_get_json_tries_the_next_checked_address_on_connect_error(dns):
+    def handler(request):
+        if request.url.host == PUBLIC_V4:
+            raise httpx.ConnectError("refused", request=request)
+        return httpx.Response(200, json=[2])
+
+    client, rec = make(handler)
+    result = client.get_json("https://multi.example/jobs", max_bytes=1000, timeout=10)
+    assert result.data == [2]
+    assert [r.url.host for r in rec.requests] == [PUBLIC_V4, PUBLIC_V4_B]
+
+
+def test_get_json_unresolvable_host(dns):
+    client, rec = make(lambda r: httpx.Response(200, json={}))
+    with pytest.raises(DiscoveryFetchError, match="could not resolve host"):
+        client.get_json("https://nowhere.invalid/jobs", max_bytes=1000, timeout=10)
+    assert rec.requests == []
 
 
 # --- get_page: SSRF guard ----------------------------------------------------

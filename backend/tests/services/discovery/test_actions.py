@@ -411,6 +411,35 @@ JSONLD_PAGE = """<html><head><title>Ignored</title>
 </script></head><body></body></html>"""
 
 
+def test_paste_preview_out_cleans_lone_surrogates_in_its_text_fields():
+    # Last line of defence: nothing the model carries can be a lone
+    # surrogate, which cannot be serialized to JSON.
+    preview = PastePreviewOut(
+        company="Globex\ud800",
+        title="SWE\udfff Intern",
+        locations=["New\udc00 York", "\ud800"],
+        url=GH_JOB_URL,
+        date_posted=None,
+        source=PostingSource.PASTED,
+    )
+    assert preview.company == "Globex"
+    assert preview.title == "SWE Intern"
+    assert preview.locations == ["New York"]
+    preview.model_dump_json()
+
+
+def test_paste_preview_out_refuses_a_url_with_a_lone_surrogate():
+    with pytest.raises(ValidationError):
+        PastePreviewOut(
+            company="Globex",
+            title="SWE Intern",
+            locations=[],
+            url="https://globex.example/jobs/\ud800",
+            date_posted=None,
+            source=PostingSource.PASTED,
+        )
+
+
 def test_preview_of_a_board_job_link_reads_the_board_api_and_writes_nothing(db_session):
     http = FakeDiscoveryHttp({("GET", GH_JOB_API): json_result(gh_job())})
 

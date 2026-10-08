@@ -1,10 +1,10 @@
 """The company watchlist (Phase 2 spec §2b; plan Task 8)."""
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.posting import Posting
+from app.models.posting import Posting, PostingState
 from app.models.watch_company import WatchAts, WatchCompany
 from app.schemas.discovery import MAX_WATCH_NAME, WatchCompanyIn
 from app.services.discovery.filters import DiscoveryFilters, inbox_clause
@@ -97,10 +97,22 @@ def list_companies(
 
 
 def remove_company(db: Session, company_id: int) -> None:
-    """Stop watching a company. Its postings stay; their `watch_company_id`
-    is nulled by the foreign key."""
+    """Stop watching a company. Its `new` postings go with it: no scan lists
+    them any more, so nothing would ever close them and they would sit in the
+    Inbox forever. Saved and applied postings stay (they are the user's own
+    work) and so do dismissed ones, which keep their de-duplication tombstone
+    role and age out through housekeeping; their `watch_company_id` is nulled
+    by the foreign key."""
     company = db.get(WatchCompany, company_id)
     if company is None:
         raise WatchCompanyNotFoundError(company_id)
+    db.execute(
+        delete(Posting).where(
+            Posting.watch_company_id == company_id, Posting.state == PostingState.NEW
+        ),
+        # Drop the deleted rows from the session too, so a caller holding one
+        # (the API, which just listed them) does not read a vanished row.
+        execution_options={"synchronize_session": "fetch"},
+    )
     db.delete(company)
     db.commit()

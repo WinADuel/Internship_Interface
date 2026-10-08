@@ -13,6 +13,8 @@ message meant for the person who pasted the link.
 """
 
 import hashlib
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -63,6 +65,10 @@ _LIST_NAMES = {
 
 WORKDAY_PAGE_SIZE = 20
 WORKDAY_MAX_PER_KEYWORD = 200
+# Seconds between two Workday page requests. Workday is the only source read
+# with several requests per company, so this is where a scan could look like
+# a hammering client.
+WORKDAY_PAGE_PAUSE = 0.5
 
 _NAME_MAX = 200
 _ERROR_MAX = 500
@@ -154,6 +160,11 @@ def _workday_parts(token: str) -> tuple[str, str, str]:
 
 
 def _search_texts(keywords: list[str]) -> list[str]:
+    """The keywords to search a Workday board for, in order: trimmed, with
+    blanks, case-insensitive duplicates and keywords another keyword already
+    covers dropped. A Workday search matches a substring, so "internship"
+    returns a subset of what "intern" returns: searching both only costs
+    round trips. The shorter keyword wins, and the original order is kept."""
     texts: list[str] = []
     seen: set[str] = set()
     for keyword in keywords:
@@ -161,8 +172,15 @@ def _search_texts(keywords: list[str]) -> list[str]:
         if text and text.casefold() not in seen:
             seen.add(text.casefold())
             texts.append(text)
+    kept: list[str] = []
+    # Shortest first, so a keyword is only ever dropped in favour of a shorter
+    # one; the result is then put back in the caller's order.
+    for text in sorted(texts, key=len):
+        folded = text.casefold()
+        if not any(k.casefold() in folded for k in kept):
+            kept.append(text)
     # No keywords: one empty search, i.e. the newest postings on the board.
-    return texts or [""]
+    return [t for t in texts if t in kept] or [""]
 
 
 # --- community lists ---------------------------------------------------------
@@ -187,6 +205,8 @@ def fetch_list(http: DiscoveryHttp, url: str, etag: str | None) -> SourceResult:
             not_modified=True,
             etag=result.etag or etag,
             key_prefix=prefix,
+            # Set so the scan can mark this list's postings seen again.
+            source=source,
         )
     data = result.data
     if not isinstance(data, list):
@@ -252,14 +272,19 @@ def _fetch_workday(
     name: str,
     keywords: list[str],
     now: datetime | None,
+    pause: Callable[[float], None],
 ) -> SourceResult:
     host, tenant, site = _workday_parts(company.board_token)
     api_url = f"https://{host}/wday/cxs/{tenant}/{site}/jobs"
     merged: dict[str, PostingIn] = {}
+    requests = 0
     for text in _search_texts(keywords):
         offset = 0
         total: int | None = None
         while offset < WORKDAY_MAX_PER_KEYWORD:
+            if requests:
+                pause(WORKDAY_PAGE_PAUSE)
+            requests += 1
             body = {
                 "appliedFacets": {},
                 "limit": WORKDAY_PAGE_SIZE,
@@ -293,14 +318,16 @@ def fetch_board(
     keywords: list[str],
     *,
     now: datetime | None = None,
+    pause: Callable[[float], None] = time.sleep,
 ) -> SourceResult:
     """One watched company's board (spec §2b). Greenhouse, Lever and Ashby:
     one GET of the whole board (`complete=True`). Workday: a search per
-    keyword (`complete=False`). `now` dates Workday's "Posted N Days Ago"."""
+    keyword (`complete=False`), with `pause` between pages. `now` dates
+    Workday's "Posted N Days Ago"."""
     name = company_name(company)
     try:
         if company.ats is WatchAts.WORKDAY:
-            return _fetch_workday(http, company, name, keywords, now)
+            return _fetch_workday(http, company, name, keywords, now, pause)
         return _fetch_single_request_board(http, company, name)
     except ValueError:
         return _failed(name, "invalid board address")

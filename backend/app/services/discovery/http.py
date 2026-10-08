@@ -3,12 +3,14 @@
 Everything goes through `DiscoveryHttp`, so tests pass a fake and never touch
 the network. `HttpxDiscoveryHttp` is the real implementation.
 
-SSRF guard for pasted pages (`get_page`, spec §2c): only http/https; every
-hop's host must resolve only to public addresses; the request is then sent
-to an address that passed the check (Host header and TLS SNI carry the
-original name, and certificates are verified against it), so a second DNS
-answer cannot swap in a private address between check and connect.
-Redirects are followed by hand, at most five, each re-checked the same way.
+SSRF guard, on every request this module makes (spec §2c, §9): only
+http/https; every hop's host must resolve only to public addresses; the
+request is then sent to an address that passed the check (Host header and
+TLS SNI carry the original name, and certificates are verified against it),
+so a second DNS answer cannot swap in a private address between check and
+connect. Redirects are followed by hand, at most five, each re-checked the
+same way. It covers `get_json` and `post_json` as well as `get_page`,
+because the list URLs are user-configured and a board API could redirect.
 
 Deadline: `timeout` bounds the whole call (DNS, connect, headers, body, every
 redirect hop). httpx's own timeouts apply per read, so a server trickling one
@@ -67,9 +69,10 @@ class DiscoveryFetchError(Exception):
 class DiscoveryHttp(Protocol):
     """Implementations raise `DiscoveryFetchError` for transport failures,
     timeouts, any status other than 2xx (or 304 from get_json), oversize
-    bodies, invalid JSON and (get_page) refused addresses or non-HTML pages.
-    A returned `FetchResult` therefore always has status 2xx, or 304 from
-    get_json called with an etag."""
+    bodies, invalid JSON, refused addresses (every method, every redirect
+    hop) and, for get_page, non-HTML pages. A returned `FetchResult`
+    therefore always has status 2xx, or 304 from get_json called with an
+    etag."""
 
     def get_json(
         self, url: str, *, etag: str | None = None, max_bytes: int, timeout: float
@@ -210,21 +213,32 @@ async def _send(client: httpx.AsyncClient, request: httpx.Request, where: str) -
 
 
 async def _send_pinned(
-    client: httpx.AsyncClient, url: httpx.URL, headers: dict[str, str], where: str
+    client: httpx.AsyncClient,
+    method: str,
+    url: httpx.URL,
+    headers: dict[str, str],
+    where: str,
+    body: dict | None = None,
 ) -> httpx.Response:
-    """GET `url` from an address that passed the public-address check, trying
-    the next checked address when one refuses the connection."""
+    """Send one hop to an address that passed the public-address check, trying
+    the next checked address when one refuses the connection (nothing was
+    delivered, so retrying is safe for POST too)."""
     host = url.raw_host.decode("ascii")
     port = url.port or (443 if url.scheme == "https" else 80)
     addresses, is_literal = await _resolve_public(host, port)
     if is_literal:
-        return await _send(client, client.build_request("GET", url, headers=headers), where)
+        request = client.build_request(method, url, headers=headers, json=body)
+        return await _send(client, request, where)
     pinned_headers = {**headers, "Host": f"{host}:{url.port}" if url.port else host}
     extensions = {"sni_hostname": host} if url.scheme == "https" else {}
     last_error: Exception | None = None
     for address in addresses:
         request = client.build_request(
-            "GET", url.copy_with(host=address), headers=pinned_headers, extensions=extensions
+            method,
+            url.copy_with(host=address),
+            headers=pinned_headers,
+            extensions=extensions,
+            json=body,
         )
         try:
             return await client.send(request, stream=True)
@@ -317,7 +331,6 @@ class HttpxDiscoveryHttp:
         headers: dict[str, str],
         body: dict | None = None,
         follow_redirects: bool,
-        guard: bool,
         page: bool,
     ) -> FetchResult:
         current = _check_url(url)
@@ -325,11 +338,7 @@ class HttpxDiscoveryHttp:
             for _hop in range(MAX_REDIRECTS + 1):
                 where = progress["where"] = _where(current)
                 client.cookies.clear()
-                if guard:
-                    response = await _send_pinned(client, current, headers, where)
-                else:
-                    request = client.build_request(method, current, headers=headers, json=body)
-                    response = await _send(client, request, where)
+                response = await _send_pinned(client, method, current, headers, where, body)
                 try:
                     status = response.status_code
                     if follow_redirects and status in _REDIRECT_STATUSES:
@@ -375,7 +384,6 @@ class HttpxDiscoveryHttp:
             max_bytes=max_bytes,
             headers=headers,
             follow_redirects=True,
-            guard=False,
             page=False,
         )
 
@@ -388,7 +396,6 @@ class HttpxDiscoveryHttp:
             headers={"Accept": "application/json"},
             body=body,
             follow_redirects=False,
-            guard=False,
             page=False,
         )
 
@@ -400,6 +407,5 @@ class HttpxDiscoveryHttp:
             max_bytes=max_bytes,
             headers={"Accept": "text/html,application/xhtml+xml"},
             follow_redirects=True,
-            guard=True,
             page=True,
         )

@@ -27,8 +27,28 @@ MAX_DISMISS_IDS = 500
 
 
 def _one_line(value: str) -> str:
-    """Control characters become spaces, whitespace runs collapse, ends trimmed."""
-    return " ".join("".join(" " if ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F else c for c in value).split())
+    """Control characters and lone UTF-16 surrogates (which cannot be encoded
+    as UTF-8) become spaces, whitespace runs collapse, ends trimmed."""
+    return " ".join(
+        "".join(
+            " " if ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F or 0xD800 <= ord(c) <= 0xDFFF else c
+            for c in value
+        ).split()
+    )
+
+
+def _cleaned_text(limit: int):
+    """For a response field: clean it and cap it, never raise."""
+    return AfterValidator(lambda value: _one_line(value)[:limit])
+
+
+def _cleaned_locations(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for raw in values:
+        value = _one_line(raw)[:MAX_LOCATION]
+        if value and value not in out:
+            out.append(value)
+    return out[:MAX_LOCATIONS]
 
 
 def _required_text(limit: int):
@@ -145,10 +165,13 @@ class PasteIn(BaseModel):
 
 
 class PastePreviewOut(BaseModel):
-    company: str
-    title: str
-    locations: list[str]
-    url: str
+    """Built from a pasted page or a board API, so every field is cleaned
+    again here: a lone surrogate anywhere would break serialization."""
+
+    company: Annotated[str, _cleaned_text(MAX_COMPANY)]
+    title: Annotated[str, _cleaned_text(MAX_TITLE)]
+    locations: Annotated[list[str], AfterValidator(_cleaned_locations)]
+    url: HttpUrl
     date_posted: datetime | None
     source: PostingSource
 

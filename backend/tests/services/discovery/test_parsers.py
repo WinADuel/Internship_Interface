@@ -16,6 +16,7 @@ from app.services.discovery.parsers import (
     MAX_TITLE,
     PastedDetails,
     PostingIn,
+    _from_iso,
     clean_text,
     company_from_token,
     find_ashby_job,
@@ -70,10 +71,83 @@ def day(y: int, m: int, d: int) -> datetime:
         (None, 300, ""),
         (42, 300, ""),
         (["x"], 300, ""),
+        # Lone UTF-16 surrogates: psycopg cannot encode them, so they are
+        # treated as control characters.
+        ("Bad\ud800Co", 300, "Bad Co"),
+        ("\udfff", 300, ""),
+        ("A\udc00\ud83d B", 300, "A B"),
     ],
 )
 def test_clean_text(value, limit, expected):
-    assert clean_text(value, limit) == expected
+    cleaned = clean_text(value, limit)
+    assert cleaned == expected
+    cleaned.encode("utf-8")  # a lone surrogate would raise here
+
+
+def test_parse_listings_cleans_surrogates_and_drops_rows_whose_url_carries_one():
+    rows = [
+        {
+            "id": "good",
+            "company_name": "Good Co",
+            "title": "Software Intern",
+            "url": "https://good.example/1",
+            "locations": ["Remote"],
+            "terms": ["Summer 2027"],
+        },
+        {
+            "id": "bad-text",
+            "company_name": "Bad\ud800 Co",
+            "title": "Software\udfff Intern",
+            "url": "https://bad.example/1",
+            "locations": ["New\ud800 York"],
+            "terms": ["Summer\udc00 2027"],
+        },
+        {
+            "id": "bad-url",
+            "company_name": "Url Co",
+            "title": "Software Intern",
+            "url": "https://bad.example/\ud800",
+            "locations": [],
+            "terms": [],
+        },
+        {
+            "id": "bad\ud800-key",
+            "company_name": "Key Co",
+            "title": "Software Intern",
+            "url": "https://key.example/1",
+            "locations": [],
+            "terms": [],
+        },
+    ]
+    postings = parse_listings(rows, PostingSource.SIMPLIFY)
+    keys = {p.source_key for p in postings}
+    assert "good" in keys and "bad-text" in keys
+    assert "bad-url" not in keys
+    cleaned = next(p for p in postings if p.source_key == "bad-text")
+    assert cleaned.company == "Bad Co"
+    assert cleaned.title == "Software Intern"
+    assert cleaned.locations == ["New York"]
+    assert cleaned.terms == ["Summer 2027"]
+    for posting in postings:
+        for text in [posting.source_key, posting.company, posting.title, posting.url,
+                     *posting.locations, *posting.terms]:
+            text.encode("utf-8")  # a lone surrogate would raise here
+
+
+def test_parse_html_posting_cleans_surrogates_from_json_ld():
+    page = (
+        '<html><head><script type="application/ld+json">'
+        '{"@type": "JobPosting", "title": "SWE Intern\\ud800",'
+        ' "hiringOrganization": {"name": "Acme\\ud800"},'
+        ' "jobLocation": {"address": {"addressLocality": "New\\ud800 York"}}}'
+        "</script></head><body></body></html>"
+    )
+    details = parse_html_posting(page, "https://acme.example/jobs/1")
+    assert details.title == "SWE Intern"
+    assert details.company == "Acme"
+    assert details.locations == ["New York"]
+    for text in [details.company, details.title, details.source_key, *details.locations]:
+        text.encode("utf-8")
 
 
 @pytest.mark.parametrize(
@@ -82,6 +156,61 @@ def test_clean_text(value, limit, expected):
 )
 def test_company_from_token(token, expected):
     assert company_from_token(token) == expected
+
+
+# --- _from_iso ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-09-01T10:00:00-05:00", datetime(2026, 9, 1, 15, 0, tzinfo=UTC)),
+        ("2026-09-01", datetime(2026, 9, 1, tzinfo=UTC)),
+        ("2026-09-01T10:00:00", datetime(2026, 9, 1, 10, 0, tzinfo=UTC)),
+        # Converting these to UTC walks off the end of datetime's range:
+        # OverflowError, not ValueError.
+        ("0001-01-01T00:00:00+05:00", None),
+        ("9999-12-31T23:59:59-05:00", None),
+        ("not a date", None),
+        ("", None),
+        (None, None),
+        (12345, None),
+    ],
+)
+def test_from_iso_returns_none_for_dates_it_cannot_represent(value, expected):
+    assert _from_iso(value) == expected
+
+
+def test_a_greenhouse_job_with_an_out_of_range_date_still_parses():
+    jobs = [
+        {
+            "id": 7,
+            "title": "Software Intern",
+            "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/7",
+            "location": {"name": "Remote"},
+            "first_published": "0001-01-01T00:00:00+05:00",
+        }
+    ]
+    postings = parse_greenhouse_board({"jobs": jobs}, "acme", "Acme")
+    assert [p.source_key for p in postings] == ["7"]
+    assert postings[0].date_posted is None
+
+
+def test_a_pasted_page_with_an_out_of_range_date_still_previews():
+    details = parse_html_posting(
+        _page(
+            _ld(
+                {
+                    "@type": "JobPosting",
+                    "title": "Ops Intern",
+                    "datePosted": "9999-12-31T23:59:59-05:00",
+                }
+            )
+        ),
+        "https://a.example/j",
+    )
+    assert details.title == "Ops Intern"
+    assert details.date_posted is None
 
 
 # --- parse_listings: Simplify (real trimmed rows) ----------------------------
