@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - Internship Tracker</title>
+  <link rel="stylesheet" href="/static.css">
+</head>
+<body>
+  <header>
+    <span class="brand">Internship Tracker</span>
+    <a href="/about.html">About</a>
+    <a href="/">Log in</a>
+  </header>
+  <main>
+    <h1>Privacy policy</h1>
+    <p class="muted">Last updated: 2026-10-08</p>
+    <p>
+      Internship Tracker is a personal app with a single user, its owner. This page explains
+      what it stores and what it does with Google access.
+    </p>
+
+    <h2>What the app stores</h2>
+    <p>
+      The app stores what its owner enters: internship applications, deadlines, notes,
+      contacts (names, organizations, work emails and public profile links), outreach email
+      drafts, essay prompts and saved job postings. It also stores the owner's login (a
+      username, a hashed password and an encrypted two-factor secret) and an encrypted Google
+      access token. All of this is kept in a database on the owner's own server.
+    </p>
+
+    <h2>Google permissions and why</h2>
+    <ul>
+      <li>
+        <code>drive.readonly</code>: to show the text of the owner's essays from Google Docs
+        inside the app. Essays are read when they are opened and are not copied into the
+        database. The app never changes or deletes them.
+      </li>
+      <li>
+        <code>drive.file</code>: to create and update files the app made itself, namely a backup
+        Google Sheet of the tracker and encrypted backup copies of the database in a Drive folder.
+        This permission gives no access to any other Drive file.
+      </li>
+    </ul>
+    <p>
+      Google data is used only to provide these features to the owner. It is not used for
+      advertising and is not used to train AI models.
+    </p>
+
+    <h2>Sharing</h2>
+    <p>
+      Nothing is shared with or sold to anyone. There are no ads, analytics or tracking
+      cookies. The only cookie is the login session.
+    </p>
+
+    <h2>Revoking access</h2>
+    <p>
+      Google access can be removed at any time at
+      <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.
+      The app then stops reading essays and stops updating the backup files.
+    </p>
+
+    <h2>Deleting data</h2>
+    <p>
+      To ask for data to be deleted, or for any question about this policy, contact
+      {{with env "CONTACT_EMAIL"}}<a href="mailto:{{. | html}}">{{. | html}}</a>{{else}}the site owner{{end}}.
+    </p>
+  </main>
+  <footer>
+    <a href="/about.html">About</a> &middot; <a href="/">Log in</a>
+  </footer>
+</body>
+</html>
