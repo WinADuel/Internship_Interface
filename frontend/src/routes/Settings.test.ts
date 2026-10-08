@@ -10,8 +10,10 @@ vi.mock("../lib/api/settings", () => ({
   syncSheetNow: vi.fn(),
 }));
 vi.mock("../lib/api/discovery", () => ({ getMatchCount: vi.fn() }));
+vi.mock("../lib/api/backups", () => ({ getBackupStatus: vi.fn(), runBackupNow: vi.fn() }));
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
 
+import { getBackupStatus } from "../lib/api/backups";
 import { getMatchCount } from "../lib/api/discovery";
 import { getSettings, listClaudeTokens, updateSettings } from "../lib/api/settings";
 import { showToast } from "../lib/stores/toast";
@@ -47,6 +49,9 @@ beforeEach(() => {
   vi.mocked(listClaudeTokens).mockReset().mockResolvedValue([]);
   vi.mocked(showToast).mockReset();
   vi.mocked(getMatchCount).mockReset().mockResolvedValue(3);
+  vi.mocked(getBackupStatus).mockReset().mockResolvedValue({
+    lastBackupAt: null, lastBackupError: null, lastOffsiteAt: null, lastOffsiteError: null, offsiteConfigured: true,
+  });
 });
 
 describe("Settings page", () => {
@@ -125,5 +130,14 @@ describe("Settings page", () => {
     expect(body.discoveryTerms).toEqual(["Summer 2027", "Fall 2027"]);
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Job discovery settings saved.", "info"));
     expect(profile.value).toBe("unsaved edit");
+  });
+
+  it("shows the Backups card right after the backup-sheet card", async () => {
+    render(Settings);
+    await screen.findByRole("heading", { name: "Backup sheet" });
+    await screen.findByText("Last backup: No backup yet");
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings.slice(-2)).toEqual(["Backup sheet", "Backups"]);
+    expect(getBackupStatus).toHaveBeenCalledTimes(1);
   });
 });
