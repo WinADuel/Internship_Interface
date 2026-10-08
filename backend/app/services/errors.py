@@ -44,3 +44,15 @@ class InvalidTransitionError(Exception):
 
 class UndoExpiredError(Exception):
     """There is no status change to undo, or the undo window has passed."""
+
+
+class QueueItemNotFoundError(Exception):
+    """No research queue item exists with the requested id."""
+
+
+class QueueItemNotPendingError(Exception):
+    """The research queue item was already completed or failed."""
+
+
+class AlreadyQueuedError(Exception):
+    """A company-contacts queue item already exists for this application."""
