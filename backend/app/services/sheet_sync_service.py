@@ -29,6 +29,9 @@ SHEET_TITLE = "Internship Tracker Backup"
 TAB_APPLICATIONS = "Applications"
 TAB_PROFESSORS = "Professors"
 TAB_COMPANY = "Company Contacts"
+# Discover's Saved postings (Phase 2). Joins ALL_TABS once the sheet can
+# gain the tab (plan Task 10); until then a sync of it is recorded as failed.
+TAB_SAVED_POSTINGS = "Saved postings"
 ALL_TABS = (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY)
 CONTACT_TABS = (TAB_PROFESSORS, TAB_COMPANY)
 HEADER_NOTE = "One-way backup mirror of Internship Tracker — edits made here are overwritten."
