@@ -29,11 +29,16 @@
   const deadline = $derived($undoDeadlines[contact.id] ?? 0);
   const canUndo = $derived(deadline > now);
   let timer: ReturnType<typeof setTimeout> | undefined;
+  function tick() {
+    const t = Date.now();
+    now = t; // written, never read here, so the effect below tracks only `deadline`
+    const remaining = deadline - t;
+    // +1 ms so a timer that fires early still lands past the deadline.
+    if (remaining > 0) timer = setTimeout(tick, remaining + 1);
+  }
   $effect(() => {
     clearTimeout(timer);
-    const remaining = deadline - Date.now();
-    if (remaining > 0) timer = setTimeout(() => (now = Date.now()), remaining);
-    now = Date.now();
+    tick();
   });
   onDestroy(() => clearTimeout(timer));
 
