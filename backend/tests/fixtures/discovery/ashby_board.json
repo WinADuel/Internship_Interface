@@ -1,0 +1,56 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "2bb6be67-d1a8-42f7-bb1b-64ee36bf613f",
+      "title": "Research Engineer Intern",
+      "department": "Research",
+      "team": "Applied AI",
+      "employmentType": "Intern",
+      "location": "San Francisco",
+      "secondaryLocations": [
+        {"location": "New York", "address": {"postalAddress": {"addressLocality": "New York", "addressRegion": "NY", "addressCountry": "United States"}}},
+        {"location": "Remote (US)", "address": null}
+      ],
+      "publishedAt": "2026-09-30T17:02:11.123+00:00",
+      "isListed": true,
+      "isRemote": false,
+      "address": {"postalAddress": {"addressLocality": "San Francisco", "addressRegion": "CA", "addressCountry": "United States"}},
+      "jobUrl": "https://jobs.ashbyhq.com/acmerobotics/2bb6be67-d1a8-42f7-bb1b-64ee36bf613f",
+      "applyUrl": "https://jobs.ashbyhq.com/acmerobotics/2bb6be67-d1a8-42f7-bb1b-64ee36bf613f/application",
+      "descriptionHtml": "<p>Do research.</p>",
+      "descriptionPlain": "Do research."
+    },
+    {
+      "id": "7c9d0e1f-2a3b-4c5d-8e9f-0a1b2c3d4e5f",
+      "title": "Confidential Intern Role",
+      "department": "Research",
+      "team": "Stealth",
+      "employmentType": "Intern",
+      "location": "San Francisco",
+      "secondaryLocations": [],
+      "publishedAt": "2026-09-29T10:00:00.000+00:00",
+      "isListed": false,
+      "isRemote": false,
+      "jobUrl": "https://jobs.ashbyhq.com/acmerobotics/7c9d0e1f-2a3b-4c5d-8e9f-0a1b2c3d4e5f",
+      "applyUrl": "https://jobs.ashbyhq.com/acmerobotics/7c9d0e1f-2a3b-4c5d-8e9f-0a1b2c3d4e5f/application",
+      "descriptionHtml": "<p>Hidden.</p>",
+      "descriptionPlain": "Hidden."
+    },
+    {
+      "id": "e4f5a6b7-c8d9-4e0f-a1b2-c3d4e5f6a7b8",
+      "title": "Product Designer",
+      "department": "Design",
+      "team": "Design",
+      "employmentType": "FullTime",
+      "location": "Remote",
+      "publishedAt": "2026-09-01T09:00:00.000+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "jobUrl": "https://jobs.ashbyhq.com/acmerobotics/e4f5a6b7-c8d9-4e0f-a1b2-c3d4e5f6a7b8",
+      "applyUrl": "https://jobs.ashbyhq.com/acmerobotics/e4f5a6b7-c8d9-4e0f-a1b2-c3d4e5f6a7b8/application",
+      "descriptionHtml": "<p>Design.</p>",
+      "descriptionPlain": "Design."
+    }
+  ]
+}

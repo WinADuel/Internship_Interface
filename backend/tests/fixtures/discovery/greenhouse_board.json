@@ -1,0 +1,70 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345001?gh_src=abc123",
+      "data_compliance": [{"type": "gdpr", "requires_consent": false, "requires_processing_consent": false, "requires_retention_consent": false, "retention_period": null}],
+      "internal_job_id": 3011111001,
+      "location": {"name": "San Francisco, CA"},
+      "metadata": null,
+      "id": 4012345001,
+      "updated_at": "2026-10-02T12:00:00-04:00",
+      "requisition_id": "R-1001",
+      "title": "Software Engineering Intern, Summer 2027",
+      "company_name": "Acme Robotics",
+      "first_published": "2026-09-28T09:30:00-04:00"
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345002",
+      "data_compliance": [],
+      "internal_job_id": 3011111002,
+      "location": {"name": "Remote - US"},
+      "metadata": null,
+      "id": 4012345002,
+      "updated_at": "2026-10-03T08:15:00Z",
+      "requisition_id": "R-1002",
+      "title": "Senior Staff Software Engineer",
+      "company_name": "Acme Robotics",
+      "first_published": null
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345003",
+      "data_compliance": [],
+      "internal_job_id": 3011111003,
+      "location": null,
+      "metadata": null,
+      "id": 4012345003,
+      "updated_at": "2026-10-01T00:00:00Z",
+      "requisition_id": null,
+      "title": "  Machine Learning   Intern  ",
+      "company_name": "Acme Robotics",
+      "first_published": "2026-09-30T16:45:00Z"
+    },
+    {
+      "absolute_url": "javascript:alert(1)",
+      "data_compliance": [],
+      "internal_job_id": 3011111004,
+      "location": {"name": "New York, NY"},
+      "metadata": null,
+      "id": 4012345004,
+      "updated_at": "2026-10-01T00:00:00Z",
+      "requisition_id": "R-1004",
+      "title": "Hardware Intern",
+      "company_name": "Acme Robotics",
+      "first_published": "2026-10-01T00:00:00Z"
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345005",
+      "data_compliance": [],
+      "internal_job_id": 3011111005,
+      "location": {"name": "Boston, MA"},
+      "metadata": null,
+      "id": 4012345005,
+      "updated_at": "2026-10-01T00:00:00Z",
+      "requisition_id": "R-1005",
+      "title": "",
+      "company_name": "Acme Robotics",
+      "first_published": "2026-10-01T00:00:00Z"
+    }
+  ],
+  "meta": {"total": 5}
+}

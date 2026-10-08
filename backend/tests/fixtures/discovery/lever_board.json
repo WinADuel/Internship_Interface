@@ -1,0 +1,85 @@
+[
+  {
+    "additionalPlain": "",
+    "additional": "",
+    "categories": {
+      "commitment": "Intern",
+      "department": "Engineering",
+      "location": "Toronto, ON",
+      "team": "Platform",
+      "allLocations": [
+        "Toronto, ON",
+        "Waterloo, ON"
+      ]
+    },
+    "createdAt": 1790000000000,
+    "descriptionPlain": "Join the platform team.",
+    "description": "<div>Join the platform team.</div>",
+    "id": "5ac21346-8e0c-4494-8e7a-3eb92ff77902",
+    "lists": [],
+    "text": "Software Developer Co-op (Winter 2027)",
+    "country": "CA",
+    "workplaceType": "hybrid",
+    "hostedUrl": "https://jobs.lever.co/acmerobotics/5ac21346-8e0c-4494-8e7a-3eb92ff77902",
+    "applyUrl": "https://jobs.lever.co/acmerobotics/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply"
+  },
+  {
+    "additionalPlain": "",
+    "additional": "",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Sales",
+      "location": "New York, NY",
+      "team": "Enterprise"
+    },
+    "createdAt": 1789500000000,
+    "descriptionPlain": "Sell robots.",
+    "description": "<div>Sell robots.</div>",
+    "id": "0f8d2c4e-1b3a-4c5d-9e7f-123456789abc",
+    "lists": [],
+    "text": "Account Executive",
+    "country": "US",
+    "workplaceType": "onsite",
+    "hostedUrl": "https://jobs.lever.co/acmerobotics/0f8d2c4e-1b3a-4c5d-9e7f-123456789abc",
+    "applyUrl": "https://jobs.lever.co/acmerobotics/0f8d2c4e-1b3a-4c5d-9e7f-123456789abc/apply"
+  },
+  {
+    "additionalPlain": "",
+    "additional": "",
+    "categories": {
+      "commitment": "Intern",
+      "department": "Engineering",
+      "team": "Data"
+    },
+    "createdAt": 1789000000000,
+    "descriptionPlain": "Crunch numbers.",
+    "description": "<div>Crunch numbers.</div>",
+    "id": "9b1e7a52-6c3d-4f8e-a0b1-c2d3e4f5a6b7",
+    "lists": [],
+    "text": "Data Science Intern",
+    "country": "US",
+    "workplaceType": "remote",
+    "hostedUrl": "https://jobs.lever.co/acmerobotics/9b1e7a52-6c3d-4f8e-a0b1-c2d3e4f5a6b7",
+    "applyUrl": "https://jobs.lever.co/acmerobotics/9b1e7a52-6c3d-4f8e-a0b1-c2d3e4f5a6b7/apply"
+  },
+  {
+    "additionalPlain": "",
+    "additional": "",
+    "categories": {
+      "commitment": "Intern",
+      "department": "Sales",
+      "location": "New York, NY",
+      "team": "Enterprise"
+    },
+    "createdAt": 1789500000000,
+    "descriptionPlain": "Sell robots.",
+    "description": "<div>Sell robots.</div>",
+    "id": "1d2e3f40-5a6b-4c7d-8e9f-a0b1c2d3e4f5",
+    "lists": [],
+    "text": "Mechanical Engineering Intern",
+    "country": "US",
+    "workplaceType": "onsite",
+    "hostedUrl": "javascript:alert(1)",
+    "applyUrl": "javascript:alert(1)"
+  }
+]

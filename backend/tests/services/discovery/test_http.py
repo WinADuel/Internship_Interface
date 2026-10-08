@@ -1,9 +1,11 @@
 """HttpxDiscoveryHttp over httpx.MockTransport with a patched resolver: no
 test here opens a socket or performs a real DNS lookup."""
 
-import itertools
+import asyncio
 import json
 import socket
+import threading
+import time
 
 import httpx
 import pytest
@@ -16,7 +18,11 @@ from app.services.discovery.http import (
     FetchResult,
     HttpxDiscoveryHttp,
 )
-from tests.services.discovery.fakes import FakeDiscoveryHttp, UnexpectedRequestError, json_result
+from tests.services.discovery.fakes import (
+    FakeDiscoveryHttp,
+    UnexpectedRequestError,
+    json_result,
+)
 
 PUBLIC_V4 = "93.184.216.34"
 PUBLIC_V4_B = "93.184.216.35"
@@ -31,6 +37,8 @@ DNS = {
     "mixed.test": [PUBLIC_V4, "192.168.1.10"],
     "metadata.test": ["169.254.169.254"],
     "2130706433": ["127.0.0.1"],  # decimal form of 127.0.0.1
+    "multi.example": [PUBLIC_V4, PUBLIC_V4_B],
+    "fec0.example": ["fec0::1"],
 }
 
 
@@ -84,6 +92,12 @@ def html(
 
 def redirect(location: str, status: int = 302, **headers) -> httpx.Response:
     return httpx.Response(status, headers={"location": location, **headers})
+
+
+async def chunks(parts: list[bytes]):
+    """An async body with no content-length (the client is async)."""
+    for part in parts:
+        yield part
 
 
 # --- get_json ----------------------------------------------------------------
@@ -152,7 +166,7 @@ def test_get_json_too_large_by_content_length():
 
 def test_get_json_too_large_when_streamed_without_length():
     def handler(request):
-        return httpx.Response(200, content=iter([b"x" * 400] * 5))  # chunked, no content-length
+        return httpx.Response(200, content=chunks([b"x" * 400] * 5))  # chunked, no content-length
 
     client, _ = make(handler)
     with pytest.raises(DiscoveryFetchError, match="too large"):
@@ -171,12 +185,52 @@ def test_get_json_transport_error_is_one_line_without_query():
     assert info.value.status is None
 
 
-def test_get_json_deadline_covers_slow_body(monkeypatch):
-    clock = itertools.count(start=0, step=100)
-    monkeypatch.setattr(http_module.time, "monotonic", lambda: next(clock))
-    client, _ = make(lambda r: httpx.Response(200, content=iter([b"[1", b"]"])))
+def test_get_json_deadline_covers_slow_body():
+    async def slow_body():
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            yield b" "
+
+    client, _ = make(lambda r: httpx.Response(200, content=slow_body()))
+    started = time.monotonic()
     with pytest.raises(DiscoveryFetchError, match="timed out"):
+        client.get_json("https://api.example.com/jobs", max_bytes=1000, timeout=0.3)
+    assert time.monotonic() - started < 1.5
+
+
+def test_post_json_deadline_covers_slow_response():
+    async def handler(request):
+        await asyncio.sleep(5)
+        return httpx.Response(200, json={})
+
+    client, _ = make(handler)
+    started = time.monotonic()
+    with pytest.raises(DiscoveryFetchError, match="timed out"):
+        client.post_json("https://api.example.com/jobs", {}, max_bytes=1000, timeout=0.3)
+    assert time.monotonic() - started < 1.5
+
+
+def test_error_message_keeps_path_encoded_so_crlf_cannot_reach_logs():
+    client, _ = make(lambda r: httpx.Response(500))
+    with pytest.raises(DiscoveryFetchError) as info:
+        client.get_json(
+            "https://api.example.com/a%0D%0AFAKE-LOG-LINE?x=secret", max_bytes=1000, timeout=10
+        )
+    message = str(info.value)
+    assert "\r" not in message and "\n" not in message
+    assert "api.example.com/a%0D%0AFAKE-LOG-LINE" in message
+    assert "secret" not in message
+
+
+def test_calling_from_inside_a_running_event_loop_fails_clearly():
+    client, rec = make(lambda r: httpx.Response(200, json={}))
+
+    async def inside_loop():
         client.get_json("https://api.example.com/jobs", max_bytes=1000, timeout=10)
+
+    with pytest.raises(RuntimeError, match="event loop"):
+        asyncio.run(inside_loop())
+    assert rec.requests == []
 
 
 def test_get_json_follows_redirects_and_drops_cookies():
@@ -255,11 +309,13 @@ def test_post_json_does_not_follow_redirects():
         "http://[::ffff:127.0.0.1]/",
         "http://[::ffff:10.0.0.1]/",
         "http://[fe80::1]/",
+        "http://[fec0::1]/",
         "http://[fd00::1]/",
         "http://[ff02::1]/",
         "http://[2002:7f00:1::]/",
         "http://[2001:db8::1]/",
         "http://internal.test/",
+        "http://fec0.example/",
         "http://mixed.test/",
         "http://2130706433/",
     ],
@@ -432,7 +488,7 @@ def test_get_page_too_large(dns):
 def test_get_page_too_large_streamed(dns):
     def handler(request):
         return httpx.Response(
-            200, content=iter([b"<p>" + b"x" * 500] * 10), headers={"content-type": "text/html"}
+            200, content=chunks([b"<p>" + b"x" * 500] * 10), headers={"content-type": "text/html"}
         )
 
     client, _ = make(handler)
@@ -476,6 +532,124 @@ def test_get_page_error_status_carries_status_without_query(dns):
     assert info.value.status == 403
     assert "secret" not in str(info.value)
     assert "denied" not in str(info.value)
+
+
+def test_get_page_treats_304_as_an_error(dns):
+    client, _ = make(lambda r: httpx.Response(304))
+    with pytest.raises(DiscoveryFetchError) as info:
+        client.get_page("https://example.com/", max_bytes=PAGE_MAX_BYTES, timeout=10)
+    assert info.value.status == 304
+
+
+def test_get_page_tries_the_next_checked_address_on_connect_error(dns):
+    def handler(request):
+        if request.url.host == PUBLIC_V4:
+            raise httpx.ConnectError("refused", request=request)
+        return html("<title>second</title>")
+
+    client, rec = make(handler)
+    result = client.get_page("https://multi.example/", max_bytes=PAGE_MAX_BYTES, timeout=10)
+    assert result.text == "<title>second</title>"
+    assert [r.url.host for r in rec.requests] == [PUBLIC_V4, PUBLIC_V4_B]
+    assert all(r.headers["host"] == "multi.example" for r in rec.requests)
+
+
+def test_get_page_all_addresses_refusing_is_one_error(dns):
+    def handler(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    client, rec = make(handler)
+    with pytest.raises(DiscoveryFetchError, match="ConnectError"):
+        client.get_page("https://multi.example/", max_bytes=PAGE_MAX_BYTES, timeout=10)
+    assert len(rec.requests) == 2
+
+
+def test_get_page_non_connect_error_does_not_retry(dns):
+    def handler(request):
+        raise httpx.ReadError("reset", request=request)
+
+    client, rec = make(handler)
+    with pytest.raises(DiscoveryFetchError, match="ReadError"):
+        client.get_page("https://multi.example/", max_bytes=PAGE_MAX_BYTES, timeout=10)
+    assert len(rec.requests) == 1
+
+
+def test_get_page_dns_lookup_is_bounded_by_the_deadline(monkeypatch):
+    release = threading.Event()
+
+    def hanging_getaddrinfo(*args, **kwargs):
+        release.wait(5)
+        raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+
+    monkeypatch.setattr(socket, "getaddrinfo", hanging_getaddrinfo)
+    client, rec = make(lambda r: html())
+    started = time.monotonic()
+    try:
+        with pytest.raises(DiscoveryFetchError, match="timed out"):
+            client.get_page("https://slow-dns.example/", max_bytes=PAGE_MAX_BYTES, timeout=0.3)
+        assert time.monotonic() - started < 1.5
+    finally:
+        release.set()
+    assert rec.requests == []
+
+
+# --- real deadline against a local server that trickles headers --------------
+
+
+@pytest.fixture()
+def trickle_server():
+    """A 127.0.0.1-only server that sends a status line and then one header
+    byte every 50 ms forever, so every individual read succeeds well inside
+    httpx's per-read timeout. Never leaves the machine."""
+    stop = threading.Event()
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    listener.settimeout(0.05)
+
+    def trickle(conn: socket.socket) -> None:
+        with conn:
+            try:
+                conn.recv(65536)
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-Slow: ")
+                while not stop.is_set():
+                    conn.sendall(b"a")
+                    stop.wait(0.05)
+            except OSError:
+                pass
+
+    def serve() -> None:
+        while not stop.is_set():
+            try:
+                conn, _addr = listener.accept()
+            except (TimeoutError, OSError):
+                continue
+            threading.Thread(target=trickle, args=(conn,), daemon=True).start()
+
+    server = threading.Thread(target=serve, daemon=True)
+    server.start()
+    yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    stop.set()
+    server.join(2)
+    listener.close()
+
+
+@pytest.mark.parametrize("method", ["get_json", "post_json", "get_page"])
+def test_deadline_holds_against_trickled_headers(monkeypatch, trickle_server, method):
+    # Allow loopback for this test only, so get_page can reach the local server.
+    monkeypatch.setattr(http_module, "_address_allowed", lambda ip: True)
+    client = HttpxDiscoveryHttp()  # the real transport, on 127.0.0.1 only
+    url = f"{trickle_server}/slow"
+    call = {
+        "get_json": lambda: client.get_json(url, max_bytes=PAGE_MAX_BYTES, timeout=1.0),
+        "post_json": lambda: client.post_json(url, {}, max_bytes=PAGE_MAX_BYTES, timeout=1.0),
+        "get_page": lambda: client.get_page(url, max_bytes=PAGE_MAX_BYTES, timeout=1.0),
+    }[method]
+    started = time.monotonic()
+    with pytest.raises(DiscoveryFetchError, match="timed out"):
+        call()
+    elapsed = time.monotonic() - started
+    assert 0.9 <= elapsed < 2.0
 
 
 # --- FakeDiscoveryHttp -------------------------------------------------------
