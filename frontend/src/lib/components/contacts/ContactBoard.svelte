@@ -3,7 +3,7 @@
   import { ApiError } from "../../api/client";
   import { moveContactStatus } from "../../api/contacts";
   import { STATUS_ORDER, statusLabel } from "../../contacts/actions";
-  import { contacts, loadContacts, replaceContact } from "../../stores/contacts";
+  import { clearUndoable, contacts, loadContacts, replaceContact } from "../../stores/contacts";
   import { showToast } from "../../stores/toast";
   import type { Contact, ContactKind, ContactStatus } from "../../types/contact";
   import ContactCard from "./ContactCard.svelte";
@@ -48,9 +48,12 @@
     const raw = event.dataTransfer?.getData("text/plain") ?? "";
     if (!/^\d+$/.test(raw.trim())) return;
     const id = Number(raw);
-    if ($contacts.find((c) => c.id === id)?.status === status) return;
+    const current = $contacts.find((c) => c.id === id);
+    if (!current || current.status === status) return;
     try {
       replaceContact(await moveContactStatus(id, status));
+      // The server's undo reverts the newest change, which is now this drag.
+      clearUndoable(id);
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Couldn't move the contact.");
     }
