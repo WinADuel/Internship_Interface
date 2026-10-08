@@ -60,16 +60,47 @@ describe("ClaudeTokens", () => {
     expect(container.innerHTML).not.toContain(SECRET);
   });
 
-  it("drops the plaintext when the component is destroyed (navigating away)", async () => {
-    const view = render(ClaudeTokens);
+  it("drops the plaintext when the page is hidden (leaving the app)", async () => {
+    render(ClaudeTokens);
     await screen.findByText("ct_abcde…");
     await fireEvent.click(screen.getByRole("button", { name: "Create token" }));
     await screen.findByLabelText("New token");
-    view.unmount();
-    render(ClaudeTokens);
-    await screen.findByText("ct_abcde…");
+    await fireEvent(window, new Event("pagehide"));
     expect(screen.queryByLabelText("New token")).toBeNull();
     expect(document.body.innerHTML).not.toContain(SECRET);
+  });
+
+  it("focuses the new token, and Done returns focus to Create token", async () => {
+    render(ClaudeTokens);
+    await screen.findByText("ct_abcde…");
+    await fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+    const field = await screen.findByLabelText("New token");
+    await vi.waitFor(() => expect(document.activeElement).toBe(field));
+    await fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Create token" }));
+  });
+
+  it("revokes a token that arrives after the user navigated away", async () => {
+    let resolve!: (v: Awaited<ReturnType<typeof createClaudeToken>>) => void;
+    vi.mocked(createClaudeToken).mockReturnValue(new Promise((r) => (resolve = r)));
+    vi.mocked(revokeClaudeToken).mockResolvedValue(info({ id: 3 }));
+    const view = render(ClaudeTokens);
+    await screen.findByText("ct_abcde…");
+    await fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+    view.unmount();
+    resolve({ ...info({ id: 3 }), token: SECRET });
+    await vi.waitFor(() => expect(revokeClaudeToken).toHaveBeenCalledWith(3));
+  });
+
+  it("a failed revoke shows a toast and keeps the token active", async () => {
+    vi.mocked(revokeClaudeToken).mockRejectedValue(new Error("gone"));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(ClaudeTokens);
+    await screen.findByText("ct_abcde…");
+    await fireEvent.click(screen.getByRole("button", { name: "Revoke ct_abcde…" }));
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Couldn't revoke the token."));
+    expect(screen.getAllByText("Active")).toHaveLength(1);
+    vi.mocked(window.confirm).mockRestore();
   });
 
   it("Copy writes the token to the clipboard", async () => {

@@ -18,6 +18,7 @@
   let nudgeRepliedStaleDays = $state(14);
   let claudeJobMaxItems = $state(8);
   let saving = $state(false);
+  let loadError = $state<string | null>(null);
 
   function fill(s: AppSettings) {
     settings = s;
@@ -29,12 +30,17 @@
     claudeJobMaxItems = s.claudeJobMaxItems;
   }
 
-  onMount(async () => {
+  async function load() {
+    loadError = null;
     try {
       fill(await getSettings());
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't load settings.");
+      loadError = err instanceof ApiError ? err.message : "Couldn't load settings.";
     }
+  }
+
+  onMount(() => {
+    void load();
   });
 
   async function save(event: SubmitEvent) {
@@ -61,6 +67,13 @@
 </script>
 
 <h1>Settings</h1>
+
+{#if loadError}
+  <p class="error" role="alert">
+    Couldn't load settings: {loadError}
+    <button type="button" onclick={load}>Retry</button>
+  </p>
+{/if}
 
 <form aria-label="Outreach settings" onsubmit={save}>
   <label class="block">
@@ -94,6 +107,7 @@
 {/if}
 
 <style>
+  .error { color: #a00; }
   form { display: flex; flex-direction: column; gap: 0.75rem; max-width: 40rem; margin-bottom: 1.5rem; }
   .block textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 0.25rem; }
   fieldset { display: flex; flex-direction: column; gap: 0.5rem; }
