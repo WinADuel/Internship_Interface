@@ -19,7 +19,7 @@ from app.models.contact import Contact, ContactKind
 from app.services.contact_service import last_status_changes
 from app.services.errors import GoogleAuthError
 from app.services.google_docs_service import get_valid_access_token
-from app.services.nudges import NudgeKind, compute_nudge
+from app.services.nudges import NudgeKind, compute_nudge, utc_today
 from app.services.settings_service import get_settings, nudge_settings
 from app.services.sheets_client import GoogleSheetsClient, SheetsClient
 
@@ -80,7 +80,7 @@ def contact_rows(contacts_with_nudges: Iterable[tuple[Contact, NudgeKind | None]
 def _contacts_with_nudges(db: Session, kind: ContactKind) -> list[tuple[Contact, NudgeKind | None]]:
     settings = nudge_settings(get_settings(db))
     last_changes = last_status_changes(db)
-    today = date.today()
+    today = utc_today()
     contacts = db.scalars(select(Contact).where(Contact.kind == kind).order_by(Contact.id))
     return [(c, compute_nudge(c, last_changes.get(c.id), settings, today)) for c in contacts]
 

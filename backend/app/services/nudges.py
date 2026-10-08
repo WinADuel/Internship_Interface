@@ -3,7 +3,7 @@ status, evaluated on read. No background job."""
 
 import enum
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from app.models.contact import Contact, ContactStatus
 
@@ -22,6 +22,13 @@ class NudgeSettings:
     followup_days: int
     gone_quiet_days: int
     replied_stale_days: int
+
+
+def utc_today() -> date:
+    """"Today" for nudges. Stored timestamps are compared by their UTC date,
+    so today must be the UTC date too; the server's local date (TZ in
+    docker-compose) would be a day off for part of every day."""
+    return datetime.now(UTC).date()
 
 
 def _older_than(moment: datetime | None, days: int, today: date) -> bool:
