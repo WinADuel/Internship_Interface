@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.api.applications import router as applications_router
 from app.api.auth import router as auth_router
+from app.api.claude import router as claude_router
 from app.api.contacts import router as contacts_router
 from app.api.docs import router as docs_router
 from app.api.research_queue import router as research_queue_router
@@ -14,6 +15,7 @@ app.include_router(docs_router)
 app.include_router(contacts_router)
 app.include_router(research_queue_router)
 app.include_router(settings_router)
+app.include_router(claude_router)
 
 
 @app.get("/api/health")
