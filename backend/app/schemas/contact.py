@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from app.models.application import Priority
 from app.models.contact import ContactKind, ContactOrigin, ContactStatus, EmailConfidence
 from app.services.contact_transitions import ContactAction
+from app.services.nudges import NudgeKind
 
 RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -102,7 +103,7 @@ class ContactOut(BaseModel):
     archived: bool
     created_at: datetime
     updated_at: datetime
-    nudge: str | None = None
+    nudge: NudgeKind | None = None
 
 
 class ContactActionIn(BaseModel):
