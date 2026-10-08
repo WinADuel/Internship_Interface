@@ -24,10 +24,15 @@
 </script>
 
 <!-- All contact text is plain interpolation: it can come from web pages via Claude. -->
-<article class="card" draggable="true" ondragstart={onDragStart}>
-  <button type="button" class="open" onclick={() => onopen?.(contact)}>
+<!-- Compact cards (inside an application's panel) are read-only: no drag, and no open button without onopen. -->
+<article class="card" class:compact draggable={compact ? undefined : "true"} ondragstart={compact ? undefined : onDragStart}>
+  {#if onopen}
+    <button type="button" class="open" onclick={() => onopen(contact)}>
+      <strong>{contact.name}</strong>
+    </button>
+  {:else}
     <strong>{contact.name}</strong>
-  </button>
+  {/if}
   <span>{contact.organization}</span>
   {#if contact.title}<span class="muted">{contact.title}</span>{/if}
   <div class="badges">
@@ -42,6 +47,7 @@
 
 <style>
   .card { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.6rem; background: #fff; border: 1px solid #ddd; border-radius: 6px; cursor: grab; }
+  .compact { cursor: default; }
   .open { all: unset; cursor: pointer; text-align: left; }
   .open:focus-visible { outline: 2px solid #1a5fb4; }
   .open:hover strong { text-decoration: underline; }

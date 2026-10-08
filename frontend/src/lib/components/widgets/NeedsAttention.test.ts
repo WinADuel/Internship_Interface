@@ -13,7 +13,15 @@ vi.mock("../../api/contacts", () => ({
 }));
 vi.mock("../../stores/toast", () => ({ showToast: vi.fn() }));
 
-import { applyContactAction, archiveContact, getNeedsAttention, snoozeContact } from "../../api/contacts";
+import {
+  applyContactAction,
+  archiveContact,
+  getNeedsAttention,
+  snoozeContact,
+  undoContactAction,
+} from "../../api/contacts";
+import { showToast } from "../../stores/toast";
+import { undoDeadlines } from "../../stores/contacts";
 import NeedsAttention from "./NeedsAttention.svelte";
 
 beforeEach(() => {
@@ -21,6 +29,9 @@ beforeEach(() => {
   vi.mocked(snoozeContact).mockReset().mockResolvedValue(fakeContact());
   vi.mocked(archiveContact).mockReset().mockResolvedValue(fakeContact({ archived: true }));
   vi.mocked(applyContactAction).mockReset().mockResolvedValue(fakeContact());
+  vi.mocked(undoContactAction).mockReset();
+  vi.mocked(showToast).mockReset();
+  undoDeadlines.set({});
 });
 
 describe("NeedsAttention", () => {
@@ -66,5 +77,64 @@ describe("NeedsAttention", () => {
     await fireEvent.click(await screen.findByRole("button", { name: "Open follow-up" }));
     expect(screen.getByLabelText("Contact details")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Follow-up draft" })).toBeInTheDocument();
+  });
+
+  it("keeps an Undo row after a widget button clears the nudge, and Undo reverts it", async () => {
+    vi.mocked(getNeedsAttention)
+      .mockResolvedValueOnce([fakeContact({ id: 7, name: "Jane", status: "followed_up", nudge: "gone_quiet" })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fakeContact({ id: 7, name: "Jane", status: "followed_up", nudge: "gone_quiet" })]);
+    vi.mocked(applyContactAction).mockResolvedValue(fakeContact({ id: 7, name: "Jane", status: "declined", closedReason: "no_response" }));
+    vi.mocked(undoContactAction).mockResolvedValue(fakeContact({ id: 7, name: "Jane", status: "followed_up" }));
+    render(NeedsAttention);
+    await fireEvent.click(await screen.findByRole("button", { name: "No response" }));
+    expect(applyContactAction).toHaveBeenCalledWith(7, "no_response", undefined);
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    expect(screen.getByRole("group", { name: /Jane: marked/ })).toBeInTheDocument();
+    await fireEvent.click(undo);
+    await vi.waitFor(() => expect(undoContactAction).toHaveBeenCalledWith(7));
+    expect(await screen.findByRole("button", { name: "No response" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("Followed up applies the action", async () => {
+    vi.mocked(getNeedsAttention).mockResolvedValue([fakeContact({ id: 4, status: "sent", nudge: "followup_due" })]);
+    render(NeedsAttention);
+    await fireEvent.click(await screen.findByRole("button", { name: "Followed up" }));
+    expect(applyContactAction).toHaveBeenCalledWith(4, "followed_up", undefined);
+  });
+
+  it("names each row's buttons by contact", async () => {
+    vi.mocked(getNeedsAttention).mockResolvedValue([
+      fakeContact({ id: 8, name: "Ada", status: "replied", nudge: "replied_stale" }),
+    ]);
+    render(NeedsAttention);
+    const row = await screen.findByRole("group", { name: "Ada" });
+    expect(row).toBeInTheDocument();
+    // replied_stale shows the regular status buttons.
+    expect(screen.getByRole("button", { name: "Meeting set" })).toBeInTheDocument();
+  });
+
+  it("the follow-up panel lives outside the widget, closes on Escape and returns focus", async () => {
+    vi.mocked(getNeedsAttention).mockResolvedValue([
+      fakeContact({ id: 4, status: "sent", nudge: "followup_due", followupBody: "Following up" }),
+    ]);
+    const { container } = render(NeedsAttention);
+    const opener = await screen.findByRole("button", { name: "Open follow-up" });
+    await fireEvent.click(opener);
+    const panel = screen.getByLabelText("Contact details");
+    expect(container.contains(panel)).toBe(false);
+    await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" })));
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByLabelText("Contact details")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("a failed load says so instead of showing the empty state", async () => {
+    vi.mocked(getNeedsAttention).mockRejectedValue(new Error("offline"));
+    render(NeedsAttention);
+    expect(await screen.findByText("Couldn't load contacts needing attention.")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing needs attention.")).toBeNull();
+    expect(showToast).toHaveBeenCalled();
   });
 });
