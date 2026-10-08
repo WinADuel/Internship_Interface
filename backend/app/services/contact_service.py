@@ -1,6 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.application import Application
@@ -22,6 +22,8 @@ from app.services.errors import (
     InvalidTransitionError,
     UndoExpiredError,
 )
+from app.services.nudges import NudgeKind, compute_nudge
+from app.services.settings_service import get_settings, nudge_settings
 
 _DRAFT_FIELDS = ("draft_subject", "draft_body")
 _FOLLOWUP_FIELDS = ("followup_subject", "followup_body")
@@ -202,3 +204,24 @@ def get_recent_contact_activity(db: Session, limit: int = 10) -> list[dict]:
         }
         for history, contact in rows
     ]
+
+
+def last_status_changes(db: Session) -> dict[int, datetime]:
+    """Newest history timestamp per contact, in one grouped query."""
+    rows = db.execute(
+        select(ContactStatusHistory.contact_id, func.max(ContactStatusHistory.changed_at)).group_by(
+            ContactStatusHistory.contact_id
+        )
+    )
+    return {contact_id: changed_at for contact_id, changed_at in rows}
+
+
+def list_needs_attention(db: Session, today: date) -> list[tuple[Contact, NudgeKind]]:
+    settings = nudge_settings(get_settings(db))
+    last_changes = last_status_changes(db)
+    result = []
+    for contact in list_contacts(db):
+        nudge = compute_nudge(contact, last_changes.get(contact.id), settings, today)
+        if nudge is not None:
+            result.append((contact, nudge))
+    return result
