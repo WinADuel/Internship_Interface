@@ -70,7 +70,12 @@ def _has_unsafe_chars(value: str) -> bool:
     # Backslash: browsers treat "\" as "/" in http(s) URLs but urlsplit does
     # not, so "https://evil.com\@acme.wd5.myworkdayjobs.com/x" would be read
     # here as an acme Workday URL while a browser goes to evil.com.
-    return any(ord(ch) <= 0x20 or ord(ch) == 0x7F or ch == "\\" for ch in value)
+    # 0xd800-0xdfff: a lone UTF-16 surrogate, which psycopg cannot encode, so
+    # a URL or source key carrying one must be unusable rather than stored.
+    return any(
+        ord(ch) <= 0x20 or ord(ch) == 0x7F or ch == "\\" or 0xD800 <= ord(ch) <= 0xDFFF
+        for ch in value
+    )
 
 
 def _split_http(url: object):

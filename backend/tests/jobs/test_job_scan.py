@@ -93,9 +93,37 @@ def test_loop_survives_a_crashing_scan_and_a_failed_settings_read(monkeypatch, f
         job_scan.run_forever(object(), sleep=sleep)
 
     assert len(scans) == 2
-    # Settings unreadable: fall back to the default interval.
-    assert sleep.calls == [60.0, 6 * 3600.0, 6 * 3600.0]
+    # A crashed scan is retried in ten minutes (the database may be briefly
+    # down); after the scan that worked, the normal interval applies — here
+    # the default, since the settings could not be read either.
+    assert sleep.calls == [60.0, job_scan.RETRY_DELAY, 6 * 3600.0]
     assert all(s.closed for s in fake_sessions)
+
+
+def test_a_crashed_scan_is_retried_sooner_than_the_configured_interval(
+    monkeypatch, fake_sessions
+):
+    scans = []
+
+    def scan(db, http):
+        scans.append(db)
+        if len(scans) == 1:
+            raise RuntimeError("db down")
+        return ScanReport(1, 0, 0, [])
+
+    monkeypatch.setattr(job_scan, "run_scan", scan)
+    monkeypatch.setattr(
+        job_scan, "get_settings", lambda db: SimpleNamespace(discovery_scan_hours=12)
+    )
+    sleep = FakeSleep(stop_after=2)
+
+    with pytest.raises(StopLoop):
+        job_scan.run_forever(object(), sleep=sleep)
+
+    assert job_scan.RETRY_DELAY == 600.0
+    assert sleep.calls == [60.0, 600.0, 12 * 3600.0]
+    # The settings are not even read after a crash: the database may be down.
+    assert len(fake_sessions) == 3
 
 
 @pytest.mark.parametrize(("stored", "expected"), [(0, 1), (-5, 1), (1, 1), (48, 48)])

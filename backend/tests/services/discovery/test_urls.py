@@ -133,6 +133,31 @@ def test_safe_http_url_accepts_exactly_2000_chars():
     assert safe_http_url(url) == url
 
 
+SURROGATE_URLS = [
+    "https://example.com/jobs/\ud800",
+    "https://exam\udfffple.com/jobs/1",
+    "https://example.com/?q=\udc00",
+]
+
+
+@pytest.mark.parametrize("raw", SURROGATE_URLS)
+def test_lone_surrogates_make_a_url_unusable(raw):
+    # psycopg cannot encode a lone surrogate, so such a URL (or source key)
+    # must never reach the database.
+    assert safe_http_url(raw) is None
+    assert normalize_url(raw) is None
+    assert parse_board_url(raw) is None
+    assert parse_job_url(raw) is None
+
+
+def test_lone_surrogate_in_a_board_path_is_not_a_board():
+    assert parse_board_url("https://jobs.lever.co/acme\ud800") is None
+    assert (
+        parse_job_url("https://jobs.lever.co/acme/5a9a8c9b-0b1e-4f3a-9a7e-9f1b2c3d4e5f\ud800")
+        is None
+    )
+
+
 def test_safe_http_url_rejects_non_string():
     assert safe_http_url(None) is None  # type: ignore[arg-type]
     assert safe_http_url(123) is None  # type: ignore[arg-type]

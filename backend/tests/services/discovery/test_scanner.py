@@ -9,18 +9,19 @@ from the test engine, released in teardown.
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 
 from app.models.app_settings import DEFAULT_LIST_URLS
 from app.models.posting import Posting, PostingSource, PostingState
 from app.models.watch_company import WatchAts, WatchCompany
 from app.services import settings_service
-from app.services.discovery import scanner
+from app.services.discovery import scanner, sources, watchlist
 from app.services.discovery.http import DiscoveryFetchError, FetchResult
 from app.services.discovery.scanner import (
     LAST_SCAN_ERROR_MAX,
     SCAN_LOCK_KEY,
     ScanReport,
+    is_scan_running,
     run_scan,
     scan_status,
 )
@@ -187,11 +188,10 @@ def test_full_scan_ingests_lists_and_boards_and_records_etags(db_session):
         assert company.last_error is None
 
 
-def test_second_scan_sends_stored_etags_and_304_skips_ingest(db_session):
+def test_second_scan_sends_stored_etags_and_304_refreshes_last_seen(db_session):
     db = db_session
     configure(db)
     run_scan(db, full_http(), now=NOW, pause=Pauses())
-    before = {(p.source, p.source_key): p.last_seen_at for p in postings(db)}
 
     later = NOW + timedelta(hours=6)
     http = full_http(
@@ -205,13 +205,76 @@ def test_second_scan_sends_stored_etags_and_304_skips_ingest(db_session):
 
     assert report == ScanReport(added=0, closed=0, removed=0, errors=[])
     assert [(c.url, c.etag) for c in http.calls] == [(SIMPLIFY_URL, '"s1"'), (VANSHB03_URL, '"v1"')]
-    # Nothing ingested: no posting closed, none touched.
+    # Nothing ingested, but an unchanged list still lists its postings, so
+    # they count as seen now (else housekeeping would eventually delete them).
     after = postings(db)
-    assert {(p.source, p.source_key): p.last_seen_at for p in after} == before
+    assert [p.last_seen_at for p in after] == [later, later]
+    assert [p.first_seen_at for p in after] == [NOW, NOW]
     assert not any(p.closed for p in after)
     s = settings_service.get_settings(db)
     assert s.discovery_list_etags == {SIMPLIFY_URL: '"s1"', VANSHB03_URL: '"v2"'}
     assert s.last_scan_at == later
+
+
+def test_304_lists_postings_are_never_housekept_while_the_list_is_unchanged(db_session):
+    db = db_session
+    configure(db, list_urls=[SIMPLIFY_URL])
+    run_scan(
+        db,
+        FakeDiscoveryHttp(
+            {("GET", SIMPLIFY_URL): json_result([list_row(1), list_row(2)], etag='"a"')}
+        ),
+        now=NOW,
+        pause=Pauses(),
+    )
+    # A dismissed posting the list still carries, and a closed one.
+    rows = postings(db)
+    rows[0].state = PostingState.DISMISSED
+    rows[1].closed = True
+    db.commit()
+
+    much_later = NOW + timedelta(days=200)
+    report = run_scan(
+        db,
+        FakeDiscoveryHttp({("GET", SIMPLIFY_URL): not_modified('"a"')}),
+        now=much_later,
+        pause=Pauses(),
+    )
+
+    assert report == ScanReport(added=0, closed=0, removed=0, errors=[])
+    assert [p.source_key for p in postings(db)] == ["row-1", "row-2"]
+    assert all(p.last_seen_at == much_later for p in postings(db))
+
+
+def test_304_refresh_is_scoped_to_the_list_that_did_not_change(db_session):
+    db = db_session
+    custom = "https://lists.example.test/custom.json"
+    configure(db, list_urls=[SIMPLIFY_URL, custom])
+    run_scan(
+        db,
+        full_http({("GET", custom): json_result([list_row(9)], etag='"c1"')}),
+        now=NOW,
+        pause=Pauses(),
+    )
+
+    later = NOW + timedelta(hours=6)
+    run_scan(
+        db,
+        full_http(
+            {
+                ("GET", SIMPLIFY_URL): not_modified('"s1"'),
+                ("GET", custom): json_result([list_row(9)], etag='"c1"'),
+            }
+        ),
+        now=later,
+        pause=Pauses(),
+    )
+
+    seen = {(p.source, p.source_key): p.last_seen_at for p in postings(db)}
+    assert seen[(PostingSource.SIMPLIFY, "row-1")] == later
+    custom_keys = [k for k in seen if k[0] is PostingSource.LIST]
+    assert len(custom_keys) == 1
+    assert seen[custom_keys[0]] == later
 
 
 def test_list_that_no_longer_sends_an_etag_forgets_the_old_one_and_dropped_urls_are_pruned(db_session):
@@ -256,7 +319,8 @@ def test_closing_and_housekeeping_are_counted(db_session):
     db.add(stale)
     db.commit()
 
-    # Row 2 disappears from the list: closed, then removed by housekeeping.
+    # Row 2 disappears from the list: closed now, deleted only once 90 days
+    # have passed without any scan seeing it.
     report = run_scan(
         db,
         FakeDiscoveryHttp({("GET", SIMPLIFY_URL): json_result([list_row(1)], etag='"b"')}),
@@ -265,8 +329,18 @@ def test_closing_and_housekeeping_are_counted(db_session):
     )
 
     assert report.closed == 1
-    assert report.removed == 2
+    assert report.removed == 1
     assert report.errors == []
+    assert [p.source_key for p in postings(db)] == ["row-1", "row-2"]
+
+    report = run_scan(
+        db,
+        FakeDiscoveryHttp({("GET", SIMPLIFY_URL): json_result([list_row(1)], etag='"c"')}),
+        now=NOW + timedelta(days=91),
+        pause=Pauses(),
+    )
+
+    assert report.removed == 1
     assert [p.source_key for p in postings(db)] == ["row-1"]
 
 
@@ -282,6 +356,105 @@ def test_workday_board_is_searched_with_the_watchlist_keywords(db_session):
 
     assert report.errors == []
     assert [c.body["searchText"] for c in http.calls] == ["intern"]
+
+
+def test_a_lone_surrogate_in_a_list_row_does_not_fail_the_source(db_session):
+    # psycopg cannot encode a lone surrogate: one row carrying one must not
+    # fail the whole list on every scan (the good rows still ingest).
+    db = db_session
+    configure(db, list_urls=[SIMPLIFY_URL])
+    rows = [
+        list_row(1),
+        list_row(2) | {"company_name": "Bad\ud800 Co"},
+        list_row(3) | {"url": "https://jobs.example.com/list/\ud800"},
+    ]
+    http = FakeDiscoveryHttp({("GET", SIMPLIFY_URL): json_result(rows, etag='"a"')})
+
+    report = run_scan(db, http, now=NOW, pause=Pauses())
+
+    assert report.errors == []
+    assert report.added == 2
+    stored = postings(db)
+    assert sorted(p.source_key for p in stored) == ["row-1", "row-2"]
+    assert next(p.company for p in stored if p.source_key == "row-2") == "Bad Co"
+    for posting in stored:
+        (posting.company + posting.title + posting.url).encode("utf-8")
+
+
+def test_a_company_removed_during_the_scan_is_skipped_not_an_error(db_session):
+    # The watchlist row is gone by the time its postings are written, so the
+    # insert fails on the foreign key: that is a skip, not a scan error.
+    db = db_session
+    configure(db, list_urls=[])
+    acme = add_company(db, "Acme", WatchAts.GREENHOUSE, "acme")
+    beta = add_company(db, "Beta", WatchAts.LEVER, "beta")
+
+    def remove_acme_then_answer(call: FakeCall) -> FetchResult:
+        watchlist.remove_company(db, acme.id)
+        return json_result({"jobs": [gh_job(11)]})
+
+    http = full_http({("GET", GH_API.format(token="acme")): remove_acme_then_answer})
+
+    report = run_scan(db, http, now=NOW, pause=Pauses())
+
+    assert report.errors == []
+    assert [p.source_key for p in postings(db)] == ["aaa-1"]  # only Beta's
+    assert db.get(WatchCompany, acme.id) is None
+    db.refresh(beta)
+    assert beta.last_checked_at == NOW and beta.last_error is None
+    assert settings_service.get_settings(db).last_scan_error is None
+
+
+def test_a_company_removed_before_its_scan_is_recorded_is_skipped(db_session):
+    db = db_session
+    configure(db, list_urls=[])
+    acme = add_company(db, "Acme", WatchAts.GREENHOUSE, "acme")
+
+    def remove_acme_after_a_failure(call: FakeCall) -> FetchResult:
+        # The board answered badly and the company is removed right after, so
+        # there is nothing left to record the failure on.
+        watchlist.remove_company(db, acme.id)
+        raise DiscoveryFetchError("boards-api.greenhouse.io/v1: status 500", status=500)
+
+    http = full_http({("GET", GH_API.format(token="acme")): remove_acme_after_a_failure})
+
+    report = run_scan(db, http, now=NOW, pause=Pauses())
+
+    assert report.errors == []
+    assert db.get(WatchCompany, acme.id) is None
+    assert settings_service.get_settings(db).last_scan_error is None
+
+
+def test_workday_pages_are_paused_through_the_scans_own_pause(db_session):
+    db = db_session
+    configure(db, list_urls=[], keywords=["intern", "internship"])
+    host = "acme.wd5.myworkdayjobs.com"
+    add_company(db, "Acme", WatchAts.WORKDAY, f"{host}/acme/External")
+    api = f"https://{host}/wday/cxs/acme/External/jobs"
+    page = {
+        "total": 21,
+        "jobPostings": [
+            {
+                "title": f"Engineering Intern {n}",
+                "externalPath": f"/job/Remote/Engineering-Intern_JR{n}",
+                "locationsText": "Remote",
+                "postedOn": "Posted Today",
+            }
+            for n in range(20)
+        ],
+    }
+    http = FakeDiscoveryHttp(
+        {("POST", api): [json_result(page), json_result({"total": 0, "jobPostings": []})]}
+    )
+    pauses = Pauses()
+
+    report = run_scan(db, http, now=NOW, pause=pauses)
+
+    assert report.errors == []
+    # "internship" is covered by "intern", so only one search runs, over two
+    # pages, with the scan's own pause between them.
+    assert [c.body["searchText"] for c in http.calls] == ["intern", "intern"]
+    assert pauses.calls == [sources.WORKDAY_PAGE_PAUSE]
 
 
 # --- one source down ---------------------------------------------------------
@@ -527,6 +700,50 @@ def test_scan_status_reports_the_last_scan_and_inbox_count(db_session):
         # The default exclude keywords hide "Senior ..." from the Inbox.
         "inbox_count": 1,
     }
+
+
+def test_is_scan_running_reads_pg_locks_without_taking_the_lock(db_session, _engine):
+    # Taking the lock even for an instant (the old check did) makes a scan
+    # that starts at that moment skip itself, so the check must be read-only.
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(_engine, "before_cursor_execute", record)
+    try:
+        assert is_scan_running(db_session) is False
+    finally:
+        event.remove(_engine, "before_cursor_execute", record)
+
+    assert statements, "the check ran no SQL at all"
+    assert any("pg_locks" in sql for sql in statements)
+    assert not any("advisory" in sql.lower() and "pg_locks" not in sql for sql in statements)
+
+
+def test_is_scan_running_sees_a_real_held_lock_and_leaves_it_alone(
+    db_session, other_connection
+):
+    assert try_lock(other_connection)
+
+    assert is_scan_running(db_session) is True
+    assert is_scan_running(db_session) is True
+    # Not ours to release: the holder still has it.
+    assert unlock(other_connection) is True
+
+    assert is_scan_running(db_session) is False
+    assert try_lock(other_connection)  # nothing of ours is in the way
+
+
+def test_is_scan_running_ignores_another_advisory_lock(db_session, other_connection):
+    other_key = SCAN_LOCK_KEY + 1
+    assert other_connection.execute(
+        text("SELECT pg_try_advisory_lock(:k)"), {"k": other_key}
+    ).scalar_one()
+    try:
+        assert is_scan_running(db_session) is False
+    finally:
+        other_connection.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": other_key})
 
 
 def test_scan_status_reports_scanning_while_the_lock_is_held_and_leaves_it_held(

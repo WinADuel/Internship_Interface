@@ -201,7 +201,7 @@ def test_list_companies_when_empty(db_session):
 # --- removing ----------------------------------------------------------------
 
 
-def test_remove_company_keeps_its_postings(db_session):
+def test_remove_company_keeps_the_postings_worth_keeping(db_session):
     acme = add(db_session, "https://boards.greenhouse.io/acme")
     row = posting(db_session, acme, "a1", "Software Intern", state=PostingState.SAVED)
 
@@ -211,6 +211,32 @@ def test_remove_company_keeps_its_postings(db_session):
     db_session.refresh(row)
     assert row.watch_company_id is None
     assert row.state is PostingState.SAVED
+
+
+def test_remove_company_deletes_only_its_new_postings(db_session):
+    # New postings of a company nobody watches any more would sit in the
+    # Inbox forever: no scan lists them, so nothing ever closes them.
+    db = db_session
+    acme = add(db, "https://boards.greenhouse.io/acme")
+    beta = add(db, "https://jobs.lever.co/beta")
+    new = posting(db, acme, "a1", "Software Intern")
+    posting(db, acme, "a2", "Hardware Intern", state=PostingState.SAVED)
+    posting(db, acme, "a3", "Senior Intern", state=PostingState.DISMISSED)
+    posting(db, acme, "a4", "Data Intern", state=PostingState.APPLIED)
+    posting(db, beta, "b1", "Software Intern", source=PostingSource.LEVER)
+    posting(db, None, "x1", "Software Intern", source=PostingSource.SIMPLIFY)
+    new_id = new.id
+
+    watchlist.remove_company(db, acme.id)
+
+    kept = {r.source_key: r for r in db.scalars(select(Posting))}
+    assert set(kept) == {"a2", "a3", "a4", "b1", "x1"}
+    assert db.get(Posting, new_id) is None
+    assert {kept[k].state for k in ("b1", "x1")} == {PostingState.NEW}
+    assert kept["a2"].state is PostingState.SAVED
+    assert kept["a3"].state is PostingState.DISMISSED
+    assert kept["a4"].state is PostingState.APPLIED
+    assert kept["a2"].watch_company_id is None
 
 
 def test_remove_missing_company_raises_not_found(db_session):

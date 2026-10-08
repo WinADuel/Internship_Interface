@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TypeVar
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.posting import Posting, PostingSource, PostingState
@@ -37,8 +37,10 @@ BOARD_SOURCES = frozenset(
 # first seen within this window is the same role (spec §3).
 DUPLICATE_WINDOW = timedelta(days=14)
 # New or dismissed postings no scan has seen for this long are deleted by
-# housekeeping. Measured from last_seen_at, never first_seen_at: deleting a
-# still-listed posting would bring it back to the Inbox as new.
+# housekeeping. Measured from last_seen_at, never first_seen_at, and never
+# on `closed` alone: a closed row whose source still lists it (inactive) is
+# the de-duplication tombstone that keeps another list's copy of the same
+# role out of the Inbox, so deleting it would bring the role back as new.
 HOUSEKEEPING_AGE = timedelta(days=90)
 
 # Bound on bind parameters per IN (...) list.
@@ -117,7 +119,8 @@ def _apply_update(
     now: datetime,
     watch_company_id: int | None,
 ) -> bool:
-    """Refresh an existing row from its source. Returns True if this closed it."""
+    """Refresh an existing row from its source. Returns True if this closed it.
+    `last_seen_at` moves on even for an inactive row: still listed is seen."""
     was_closed = row.closed
     row.company = posting.company
     row.title = posting.title
@@ -134,6 +137,13 @@ def _apply_update(
     return row.closed and not was_closed
 
 
+def _scope(source: PostingSource, key_prefix: str | None) -> list:
+    conditions = [Posting.source == source]
+    if key_prefix is not None:
+        conditions.append(Posting.source_key.startswith(f"{key_prefix}:", autoescape=True))
+    return conditions
+
+
 def _close_missing(
     db: Session,
     result: SourceResult,
@@ -146,11 +156,7 @@ def _close_missing(
         # Board keys are not scoped per company, so without the company this
         # would close every other watched board's postings.
         return 0
-    conditions = [Posting.source == source, Posting.closed.is_(False)]
-    if result.key_prefix is not None:
-        conditions.append(
-            Posting.source_key.startswith(f"{result.key_prefix}:", autoescape=True)
-        )
+    conditions = [*_scope(source, result.key_prefix), Posting.closed.is_(False)]
     if watch_company_id is not None:
         conditions.append(Posting.watch_company_id == watch_company_id)
     rows = db.execute(select(Posting.id, Posting.source_key).where(*conditions))
@@ -264,18 +270,38 @@ def ingest(
     )
 
 
+def refresh_unchanged(db: Session, result: SourceResult, now: datetime) -> int:
+    """A list answered 304 (unchanged): what its last download listed is
+    still listed, so those postings are seen again now. They are the
+    source's rows with its latest `last_seen_at` (the last ingest stamped
+    every listed row, inactive ones included, with one time); rows it
+    already dropped keep their older time and still age out. Scoped like
+    closing: custom LIST sources by key prefix. Returns the rows touched."""
+    if result.source is None:
+        return 0
+    conditions = _scope(result.source, result.key_prefix)
+    latest = db.scalar(select(func.max(Posting.last_seen_at)).where(*conditions))
+    if latest is None:
+        return 0
+    touched = db.execute(
+        update(Posting)
+        .where(*conditions, Posting.last_seen_at == latest)
+        .values(last_seen_at=now)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    db.commit()
+    return touched
+
+
 def housekeep(db: Session, now: datetime) -> int:
-    """Delete new or dismissed postings that are closed or that no scan has
-    seen for 90 days (`last_seen_at`). Postings still listed by an open source
-    are kept however old they are; saved and applied postings are never
-    deleted. Returns the number deleted."""
+    """Delete new or dismissed postings that no scan has seen for 90 days
+    (`last_seen_at`). Closed postings are kept while their source still
+    lists them (inactive rows count as seen), as de-duplication tombstones;
+    saved and applied postings are never deleted. Returns the number deleted."""
     deleted = db.execute(
         delete(Posting).where(
             Posting.state.in_([PostingState.NEW, PostingState.DISMISSED]),
-            or_(
-                Posting.closed.is_(True),
-                Posting.last_seen_at < now - HOUSEKEEPING_AGE,
-            ),
+            Posting.last_seen_at < now - HOUSEKEEPING_AGE,
         )
     )
     db.commit()

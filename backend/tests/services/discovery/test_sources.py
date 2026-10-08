@@ -26,6 +26,7 @@ from app.services.discovery.parsers import MAX_SOURCE_KEY
 from app.services.discovery.sources import (
     LIST_SOURCE_BY_URL,
     WORKDAY_MAX_PER_KEYWORD,
+    WORKDAY_PAGE_PAUSE,
     WORKDAY_PAGE_SIZE,
     SourceResult,
     fetch_board,
@@ -204,6 +205,17 @@ def test_fetch_list_304_is_not_modified_and_not_complete():
     assert result.postings == []
     assert result.error is None
     assert result.etag == '"v1"'
+    # Carried so the scan can mark this list's postings seen again (M4).
+    assert result.source is PostingSource.SIMPLIFY
+
+
+def test_fetch_list_304_of_a_custom_list_carries_its_source_and_prefix():
+    url = "https://lists.example.test/custom.json"
+    http = FakeDiscoveryHttp({("GET", url): not_modified('"v1"')})
+    result = fetch_list(http, url, '"v1"')
+    assert result.not_modified is True
+    assert result.source is PostingSource.LIST
+    assert result.key_prefix == list_key_prefix(url)
 
 
 def test_fetch_list_304_without_etag_header_keeps_the_sent_etag():
@@ -458,6 +470,16 @@ def test_fetch_board_name_is_one_line_and_capped():
 # --- fetch_board: Workday ----------------------------------------------------
 
 
+class Pauses:
+    """Records the pauses between Workday pages instead of sleeping them."""
+
+    def __init__(self) -> None:
+        self.calls: list[float] = []
+
+    def __call__(self, seconds: float) -> None:
+        self.calls.append(seconds)
+
+
 def workday_responder(pages: dict[str, list], totals: dict[str, int]):
     """Answer Workday search POSTs: pages[keyword][offset // 20] -> jobPostings rows."""
 
@@ -496,6 +518,7 @@ def test_fetch_board_workday_pages_with_total_from_the_first_page():
         company(WatchAts.WORKDAY, token=WD_TOKEN, name="NVIDIA"),
         ["intern"],
         now=NOW,
+        pause=Pauses(),
     )
 
     assert result.error is None
@@ -523,7 +546,7 @@ def test_fetch_board_workday_stops_at_200_per_keyword():
     )
 
     result = fetch_board(
-        http, company(WatchAts.WORKDAY, token=WD_TOKEN), ["intern"], now=NOW
+        http, company(WatchAts.WORKDAY, token=WD_TOKEN), ["intern"], now=NOW, pause=Pauses()
     )
 
     assert result.error is None
@@ -537,7 +560,7 @@ def test_fetch_board_workday_stops_on_an_empty_page():
         {("POST", WD_JOBS_API): workday_responder(pages, {"intern": 100})}
     )
     result = fetch_board(
-        http, company(WatchAts.WORKDAY, token=WD_TOKEN), ["intern"], now=NOW
+        http, company(WatchAts.WORKDAY, token=WD_TOKEN), ["intern"], now=NOW, pause=Pauses()
     )
     assert len(result.postings) == 20
     assert [c.body["offset"] for c in http.calls] == [0, 20]
@@ -556,6 +579,7 @@ def test_fetch_board_workday_merges_keywords_by_source_key():
         company(WatchAts.WORKDAY, token=WD_TOKEN),
         ["intern", "Intern ", "co-op", " "],
         now=NOW,
+        pause=Pauses(),
     )
     assert result.error is None
     assert len(result.postings) == 3
@@ -564,10 +588,65 @@ def test_fetch_board_workday_merges_keywords_by_source_key():
     assert [c.body["searchText"] for c in http.calls] == ["intern", "co-op"]
 
 
+def test_fetch_board_workday_drops_keywords_covered_by_a_shorter_one():
+    # "internship" and "software intern" both match everything "intern"
+    # matches, so searching them again only costs Workday round trips.
+    pages = {"intern": [[wd_row(1)]], "co-op": [[wd_row(2)]], "New Grad": [[wd_row(3)]]}
+    http = FakeDiscoveryHttp(
+        {("POST", WD_JOBS_API): workday_responder(pages, {k: 1 for k in pages})}
+    )
+
+    result = fetch_board(
+        http,
+        company(WatchAts.WORKDAY, token=WD_TOKEN),
+        [
+            "internship",
+            "intern",
+            "Software Intern",
+            "co-op",
+            "co-op program",
+            "New Grad",
+            "new grad 2027",
+        ],
+        now=NOW,
+        pause=Pauses(),
+    )
+
+    assert result.error is None
+    assert [c.body["searchText"] for c in http.calls] == ["intern", "co-op", "New Grad"]
+
+
+def test_fetch_board_workday_pauses_half_a_second_between_pages():
+    pages = {
+        "intern": [[wd_row(j) for j in range(20)], [wd_row(99)]],
+        "co-op": [[wd_row(50)]],
+    }
+    http = FakeDiscoveryHttp(
+        {("POST", WD_JOBS_API): workday_responder(pages, {"intern": 21, "co-op": 1})}
+    )
+    waits = Pauses()
+
+    fetch_board(
+        http,
+        company(WatchAts.WORKDAY, token=WD_TOKEN),
+        ["intern", "co-op"],
+        now=NOW,
+        pause=waits,
+    )
+
+    # Three requests (two pages of "intern", one of "co-op"): a pause before
+    # each one but the first, never after the last.
+    assert len(http.calls) == 3
+    assert waits.calls == [WORKDAY_PAGE_PAUSE, WORKDAY_PAGE_PAUSE]
+    assert WORKDAY_PAGE_PAUSE == 0.5
+
+
 def test_fetch_board_workday_without_keywords_searches_once_with_empty_text():
     pages = {"": [[wd_row(1)]]}
     http = FakeDiscoveryHttp({("POST", WD_JOBS_API): workday_responder(pages, {"": 1})})
-    result = fetch_board(http, company(WatchAts.WORKDAY, token=WD_TOKEN), [], now=NOW)
+    result = fetch_board(
+        http, company(WatchAts.WORKDAY, token=WD_TOKEN), [], now=NOW, pause=Pauses()
+    )
     assert len(result.postings) == 1
     assert [c.body["searchText"] for c in http.calls] == [""]
 
@@ -588,6 +667,7 @@ def test_fetch_board_workday_failure_on_a_later_page_fails_the_source():
         company(WatchAts.WORKDAY, token=WD_TOKEN, name="NVIDIA"),
         ["intern"],
         now=NOW,
+        pause=Pauses(),
     )
     assert_failed(result, "NVIDIA", "status 500")
 
@@ -600,6 +680,7 @@ def test_fetch_board_workday_malformed_page_fails_the_source(data):
         company(WatchAts.WORKDAY, token=WD_TOKEN, name="NVIDIA"),
         ["intern"],
         now=NOW,
+        pause=Pauses(),
     )
     assert_failed(result, "NVIDIA", "unexpected response")
 
@@ -613,7 +694,9 @@ def test_fetch_board_workday_body_is_fresh_per_request():
             )
         }
     )
-    fetch_board(http, company(WatchAts.WORKDAY, token=WD_TOKEN), ["intern"], now=NOW)
+    fetch_board(
+        http, company(WatchAts.WORKDAY, token=WD_TOKEN), ["intern"], now=NOW, pause=Pauses()
+    )
     assert http.calls[0].body is not http.calls[1].body
     assert http.calls[0].body["offset"] == 0
 

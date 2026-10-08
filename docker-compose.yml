@@ -43,7 +43,8 @@ services:
       TZ: ${TZ:-UTC}
     command: python -m app.jobs.job_scan
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   caddy:
     build: ./frontend

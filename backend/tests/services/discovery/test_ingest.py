@@ -9,7 +9,13 @@ from sqlalchemy import select
 
 from app.models.posting import Posting, PostingSource, PostingState
 from app.models.watch_company import WatchAts, WatchCompany
-from app.services.discovery.ingest import IngestStats, housekeep, ingest
+from app.services.discovery.ingest import (
+    HOUSEKEEPING_AGE,
+    IngestStats,
+    housekeep,
+    ingest,
+    refresh_unchanged,
+)
 from app.services.discovery.parsers import PostingIn
 from app.services.discovery.sources import SourceResult
 
@@ -436,6 +442,58 @@ def test_not_modified_result_changes_nothing(db_session):
     assert existing.last_seen_at == NOW - timedelta(days=1)
 
 
+def test_refresh_unchanged_marks_what_the_last_download_listed_as_seen(db_session):
+    # a listed, b listed but inactive, c no longer listed (closed by absence).
+    ingest(db_session, result([pin("a"), pin("b"), pin("c")]), NOW)
+    ingest(db_session, result([pin("a"), pin("b", active=False)]), LATER)
+    other = stored(db_session, "v", source=PostingSource.VANSHB03, last_seen_at=LATER)
+    nm = SourceResult(
+        "Simplify list",
+        [],
+        complete=False,
+        not_modified=True,
+        source=PostingSource.SIMPLIFY,
+    )
+    at = LATER + timedelta(hours=6)
+
+    assert refresh_unchanged(db_session, nm, at) == 2
+
+    assert by_key(db_session, PostingSource.SIMPLIFY, "a").last_seen_at == at
+    assert by_key(db_session, PostingSource.SIMPLIFY, "b").last_seen_at == at
+    assert by_key(db_session, PostingSource.SIMPLIFY, "c").last_seen_at == NOW
+    db_session.refresh(other)
+    assert other.last_seen_at == LATER
+
+
+def test_refresh_unchanged_scopes_custom_lists_by_key_prefix(db_session):
+    stored(db_session, "aaaa:1", source=PostingSource.LIST, last_seen_at=NOW)
+    stored(db_session, "bbbb:1", source=PostingSource.LIST, last_seen_at=NOW)
+    nm = SourceResult(
+        "Custom list",
+        [],
+        complete=False,
+        not_modified=True,
+        key_prefix="aaaa",
+        source=PostingSource.LIST,
+    )
+
+    assert refresh_unchanged(db_session, nm, LATER) == 1
+
+    assert by_key(db_session, PostingSource.LIST, "aaaa:1").last_seen_at == LATER
+    assert by_key(db_session, PostingSource.LIST, "bbbb:1").last_seen_at == NOW
+
+
+def test_refresh_unchanged_without_a_source_or_rows_does_nothing(db_session):
+    stored(db_session, "a")
+    nm = SourceResult("Simplify list", [], complete=False, not_modified=True)
+    assert refresh_unchanged(db_session, nm, LATER) == 0
+    empty = SourceResult(
+        "vanshb03 list", [], complete=False, not_modified=True, source=PostingSource.VANSHB03
+    )
+    assert refresh_unchanged(db_session, empty, LATER) == 0
+    assert by_key(db_session, PostingSource.SIMPLIFY, "a").last_seen_at == NOW - timedelta(days=1)
+
+
 def test_closing_does_not_touch_other_sources(db_session):
     stored(db_session, "v", source=PostingSource.VANSHB03)
     ingest(db_session, result([pin("a")]), NOW)
@@ -573,13 +631,22 @@ def test_five_thousand_rows_ingest_in_one_call(db_session):
 # --- housekeeping -----------------------------------------------------------------
 
 
-def test_housekeep_deletes_closed_or_unseen_new_and_dismissed_only(db_session):
+def test_housekeep_deletes_only_new_and_dismissed_postings_unseen_for_90_days(db_session):
     def days(n: int) -> datetime:
         return NOW - timedelta(days=n)
 
     keep = {
         "new-unseen-89": {"first_seen_at": days(120), "last_seen_at": days(89)},
         "dismissed-unseen-89": {
+            "first_seen_at": days(120),
+            "last_seen_at": days(89),
+            "state": PostingState.DISMISSED,
+        },
+        # Closed but still seen: a de-duplication tombstone (see below).
+        "new-closed": {"closed": True},
+        "dismissed-closed": {"closed": True, "state": PostingState.DISMISSED},
+        "dismissed-closed-unseen-89": {
+            "closed": True,
             "first_seen_at": days(120),
             "last_seen_at": days(89),
             "state": PostingState.DISMISSED,
@@ -604,14 +671,84 @@ def test_housekeep_deletes_closed_or_unseen_new_and_dismissed_only(db_session):
             "last_seen_at": days(91),
             "state": PostingState.DISMISSED,
         },
-        "new-closed": {"closed": True},
-        "dismissed-closed": {"closed": True, "state": PostingState.DISMISSED},
+        "new-closed-unseen-91": {
+            "closed": True,
+            "first_seen_at": days(120),
+            "last_seen_at": days(91),
+        },
+        "dismissed-closed-unseen-91": {
+            "closed": True,
+            "first_seen_at": days(120),
+            "last_seen_at": days(91),
+            "state": PostingState.DISMISSED,
+        },
     }
     for key, overrides in {**keep, **drop}.items():
         stored(db_session, key, **overrides)
 
     assert housekeep(db_session, NOW) == len(drop)
     assert sorted(r.source_key for r in all_postings(db_session)) == sorted(keep)
+
+
+def test_dismissed_posting_closed_by_one_list_does_not_return_from_the_other(db_session):
+    # Simplify and vanshb03 list the same role; only Simplify's row is stored
+    # (vanshb03's is a url_key duplicate). The user dismisses it, Simplify
+    # marks it inactive (closed), housekeeping runs: the closed row must stay
+    # as a tombstone, or vanshb03's copy would come back to the Inbox as new.
+    url = "https://zeta.example/jobs/1"
+
+    def lists(at: datetime, simplify_active: bool) -> None:
+        simplify = pin(
+            "s1",
+            company="ZetaCo",
+            title="SWE Intern",
+            url=url,
+            active=simplify_active,
+        )
+        vanshb03 = pin(
+            "v1",
+            source=PostingSource.VANSHB03,
+            company="ZetaCo",
+            title="SWE Intern",
+            url=url,
+        )
+        ingest(db_session, result([simplify]), at)
+        ingest(
+            db_session,
+            result(
+                [vanshb03],
+                source=PostingSource.VANSHB03,
+                name="vanshb03 list",
+            ),
+            at,
+        )
+        housekeep(db_session, at)
+
+    lists(NOW, simplify_active=True)
+    (row,) = all_postings(db_session)
+    row.state = PostingState.DISMISSED
+    db_session.flush()
+
+    for hours in (6, 12, 18):
+        lists(NOW + timedelta(hours=hours), simplify_active=False)
+
+    (row,) = all_postings(db_session)
+    assert row.source is PostingSource.SIMPLIFY
+    assert row.state is PostingState.DISMISSED
+    assert row.closed is True
+    # Inactive rows still listed count as seen.
+    assert row.last_seen_at == NOW + timedelta(hours=18)
+
+
+def test_inactive_listed_posting_keeps_being_seen_and_is_not_housekept(db_session):
+    ingest(db_session, result([pin("a")]), NOW)
+    much_later = NOW + HOUSEKEEPING_AGE + timedelta(days=30)
+    for at in (NOW + timedelta(days=45), NOW + timedelta(days=90), much_later):
+        ingest(db_session, result([pin("a", active=False)]), at)
+        housekeep(db_session, at)
+    row = by_key(db_session, PostingSource.SIMPLIFY, "a")
+    assert row.closed is True
+    assert row.last_seen_at == much_later
 
 
 def test_housekeep_keeps_old_postings_that_are_still_listed(db_session):

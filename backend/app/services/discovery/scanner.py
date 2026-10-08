@@ -18,6 +18,10 @@ same engine in autocommit mode (no transaction left idle for the length of
 the scan), takes the lock, and unlocks it in `finally`; if the unlock fails
 the connection is invalidated, which ends its database session and so
 releases the lock.
+
+Whether a scan is running (`is_scan_running`, for the Discover header) is
+read out of `pg_locks` on the caller's session: a check that took the lock
+would make a scan starting at that moment skip itself.
 """
 
 import logging
@@ -34,7 +38,7 @@ from sqlalchemy.orm import Session
 from app.models.watch_company import WatchCompany
 from app.services.discovery.filters import filters_from_settings, match_count
 from app.services.discovery.http import DiscoveryHttp
-from app.services.discovery.ingest import housekeep, ingest
+from app.services.discovery.ingest import housekeep, ingest, refresh_unchanged
 from app.services.discovery.parsers import clean_text
 from app.services.discovery.sources import (
     company_name,
@@ -98,13 +102,28 @@ def _unlock(conn: Connection) -> None:
         conn.invalidate()
 
 
+# Postgres reports a bigint advisory lock in pg_locks as classid = the key's
+# high 32 bits, objid = its low 32 bits, objsubid = 1 (2 is the two-int form).
+_LOCK_CLASSID = (SCAN_LOCK_KEY >> 32) & 0xFFFF_FFFF
+_LOCK_OBJID = SCAN_LOCK_KEY & 0xFFFF_FFFF
+
+_LOCK_HELD_SQL = text(
+    "SELECT EXISTS ("
+    " SELECT 1 FROM pg_locks"
+    " WHERE locktype = 'advisory'"
+    " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+    " AND classid = :classid AND objid = :objid AND objsubid = 1"
+    " AND granted"
+    ")"
+)
+
+
 def is_scan_running(db: Session) -> bool:
-    """Whether a scan holds the lock right now (another connection's)."""
-    with _lock_connection(db) as conn:
-        if not _try_lock(conn):
-            return True
-        _unlock(conn)
-        return False
+    """Whether a scan holds the lock right now. Read-only: it looks the lock
+    up in `pg_locks` instead of trying to take it, because taking it even for
+    an instant (as `pg_try_advisory_lock` would) makes a real scan starting at
+    that moment find the lock busy and skip itself."""
+    return bool(db.scalar(_LOCK_HELD_SQL, {"classid": _LOCK_CLASSID, "objid": _LOCK_OBJID}))
 
 
 # --- the scan ----------------------------------------------------------------
@@ -135,7 +154,11 @@ def _scan_lists(
                 # Keep the old ETag: nothing changed on our side.
                 report.errors.append(result.error)
                 continue
-            if not result.not_modified:
+            if result.not_modified:
+                # Unchanged means still listed: mark those postings seen, or
+                # housekeeping would delete a list's rows after 90 days of 304s.
+                refresh_unchanged(db, result, now)
+            else:
                 stats = ingest(db, result, now)
                 report.added += stats.added
                 report.closed += stats.closed
@@ -149,6 +172,10 @@ def _scan_lists(
             report.errors.append(_unexpected(name, exc))
             # Download it in full next time.
             etags.pop(url, None)
+
+
+def _still_watched(db: Session, company_id: int) -> bool:
+    return db.scalar(select(WatchCompany.id).where(WatchCompany.id == company_id)) is not None
 
 
 def _scan_boards(
@@ -165,8 +192,9 @@ def _scan_boards(
         if index:
             pause(BOARD_PAUSE)
         error: str | None
+        failure: BaseException | None = None
         try:
-            result = fetch_board(http, company, keywords, now=now)
+            result = fetch_board(http, company, keywords, now=now, pause=pause)
             error = result.error
             if error is None:
                 stats = ingest(db, result, now, watch_company_id=company_id)
@@ -174,8 +202,15 @@ def _scan_boards(
                 report.closed += stats.closed
         except Exception as exc:  # noqa: BLE001 - one source never stops the scan
             db.rollback()
-            logger.exception("scan of %s failed", name)
-            error = _unexpected(name, exc)
+            failure, error = exc, _unexpected(name, exc)
+        if error is not None and not _still_watched(db, company_id):
+            # Removed from the watchlist mid-scan: the failure (a foreign key
+            # on its postings, say) is that removal, so this is a skip, and
+            # there is nothing left to record an error on either way.
+            logger.info("skipped %s: removed from the watchlist during the scan", name)
+            continue
+        if failure is not None:
+            logger.error("scan of %s failed", name, exc_info=failure)
         if error is not None:
             report.errors.append(error)
         try:
@@ -184,7 +219,10 @@ def _scan_boards(
             db.commit()
         except Exception:  # noqa: BLE001 - e.g. the company was removed mid-scan
             db.rollback()
-            logger.exception("could not record the scan of %s", name)
+            if _still_watched(db, company_id):
+                logger.exception("could not record the scan of %s", name)
+            else:
+                logger.info("%s was removed from the watchlist during the scan", name)
 
 
 def _scan(

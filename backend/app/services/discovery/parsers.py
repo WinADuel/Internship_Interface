@@ -31,7 +31,10 @@ MAX_TERMS = 20
 MAX_LABEL = 100  # category, sponsorship
 MAX_SOURCE_KEY = 500  # longer keys are dropped, not truncated (truncation could collide)
 
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# Control characters, plus lone UTF-16 surrogates (\ud800-\udfff): a source
+# can carry one in any string, and psycopg cannot encode it, so one would
+# otherwise fail the whole source on every scan.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 
 # Simplify still carries some rows under older, longer category names.
 # Mapping them keeps the category filter (spec §4) working on those rows.
@@ -166,11 +169,13 @@ def _from_iso(value: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(value.strip())
-    except ValueError:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        # A date at either end of datetime's range raises OverflowError when
+        # its offset is applied ("0001-01-01T00:00:00+05:00").
+        return parsed.astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
 
 
 def _midnight(dt: datetime) -> datetime:

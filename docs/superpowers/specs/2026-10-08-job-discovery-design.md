@@ -46,6 +46,8 @@ You add a company by pasting its careers page URL. The app recognizes the four j
 
 Greenhouse, Lever and Ashby publish their APIs officially. Workday's is the undocumented endpoint its own career pages call, so it could change without notice; if it breaks, only Workday companies' scans fail (shown on the Watchlist tab) and everything else keeps working.
 
+A Workday search matches substrings, so a keyword another keyword already covers ("internship" next to "intern") is dropped before searching — the shorter one returns everything the longer one would. Workday is also the only board read with several requests, so there is a 0.5 s pause between its pages, on top of the pause between companies (§5).
+
 Companies with their own custom career sites (Google, Microsoft, Apple, Meta, Amazon) can't be watched. They are covered by the community lists instead, which track them closely (Simplify had 15 active Summer 2027 Google roles and 10 Amazon roles on 2026-10-08), and you can paste any of their postings (2c). The app explains this when you try to add one.
 
 Watchlist boards list every job, not just internships. So by default only titles containing *intern*, *internship* or *co-op* count as matches (a filter you can change, §4). A watched job that disappears from its board is marked **closed**.
@@ -85,7 +87,7 @@ Pasted postings skip the filters and go straight to **Saved**. Because the serve
 
 **De-duplication.** A new posting is skipped if its `url_key` matches an existing row, or if the same company and title (case-insensitive) arrived from another source in the last 14 days. So the same role on Simplify, vanshb03 and a Greenhouse board appears once.
 
-**Housekeeping.** Postings that are `new` or `dismissed` and either closed or not seen by any scan for 90 days (`last_seen_at`) are deleted by the scan. Postings still listed by their source are never deleted, so a dismissed posting cannot come back to the Inbox as new. Saved and applied postings are never deleted automatically.
+**Housekeeping.** Postings that are `new` or `dismissed` and not seen by any scan for 90 days (`last_seen_at`) are deleted by the scan. Being closed is never enough: a row whose source still lists it (a list's inactive rows count as seen, as do the postings of a list that answered 304) keeps its place as a de-duplication tombstone, so neither a dismissed posting nor the same role from another list can come back to the Inbox as new. A closed posting stops being seen once its source drops it, and is deleted 90 days later. Saved and applied postings are never deleted automatically.
 
 ### `watch_companies`
 `id`, `name`, `ats` (`greenhouse`/`lever`/`ashby`/`workday`), `board_token` (unique with `ats`; for Workday, `<host>/<tenant>/<site>`), `careers_url`, `added_at`, `last_checked_at`, `last_error` (one line, never a response body).
@@ -124,12 +126,12 @@ A new Docker Compose service, `job-scan`, works like the existing `sheet-sync`: 
 
 Each scan:
 1. Takes a Postgres advisory lock, so two scans never run at once (a second Scan now just reports "already scanning").
-2. Downloads each list (conditional GET) and upserts its active rows.
+2. Downloads each list (conditional GET) and upserts its active rows; a `304` ingests nothing but still marks that list's postings seen (§3).
 3. Reads each watched board in turn, with a 10-second timeout and a short pause between companies.
 4. Marks closed postings and runs housekeeping (§3).
 5. Records `last_scan_at`, plus a short per-source error summary in `last_scan_error`. One broken source never stops the others.
 
-All outbound requests go to the fixed list and board hosts (pasted links aside, §2c), send a plain `User-Agent` naming the app, and never send cookies or credentials.
+All outbound requests go to the fixed list and board hosts (pasted links aside, §2c), send a plain `User-Agent` naming the app, and never send cookies or credentials. Every request — list, board API or pasted page — is resolved, address-checked and pinned on every redirect hop (§9), since list URLs are user-configured and a board API can redirect.
 
 ## 6. Claude ranking (designed now, switched on later)
 
@@ -145,7 +147,7 @@ This phase only adds the two nullable columns and sorts the Inbox by score when 
 - **Inbox:** matching postings, newest first. Each row shows company, title, locations, how long ago it was posted, a source badge, and a sponsorship note when the list has one. Buttons: **Save**, **Dismiss**, **Open** (new tab). **Dismiss all shown** clears a batch after a confirm. Header: last scan time, **Scan now**, and any scan errors.
 - **Saved:** your saved postings, with a **closed** badge on any the source has since closed. Buttons: **Apply** (confirm: "Add to your tracker as Applied today?"), **Remove** (moves it to Dismissed), **Open**.
 - **Dismissed:** the most recent 200, each with **Restore**, so a mis-click is never permanent.
-- **Watchlist:** add a company by pasting its careers URL; each company shows its system, last checked time, open matches, and any error; **Remove**.
+- **Watchlist:** add a company by pasting its careers URL; each company shows its system, last checked time, open matches, and any error; **Remove** (which also drops that company's still-new postings from the Inbox, since no scan lists them any more; saved, applied and dismissed ones stay).
 - A **Paste a posting link** box above the tabs, with an editable preview before saving (§2c).
 
 **Apply** creates an application with status Applied, `date_applied` = today, company, role, first location, `job_link` = the posting URL, and `source` = "Discover: Simplify" (or the board/pasted). It goes through the existing `create_application`, so Phase 1b's company-contact auto-queue runs unchanged. The posting moves to `applied` and links to the application.
@@ -170,7 +172,8 @@ The Claude token is rejected on all of these.
 
 - No new Google scopes and no new secrets.
 - Everything from lists, boards and pasted pages is untrusted: Pydantic caps every field's length, URLs must be `http`/`https`, and the frontend renders it as plain text only (never `{@html}`).
-- The pasted-link fetcher guards against server-side request forgery as described in §2c.
+- Every outbound request guards against server-side request forgery as described in §2c: each hop's host is resolved, every address it answers must be public, and the request is sent to a checked address. This covers pasted pages, the user-configured list URLs and the board APIs alike.
+- Lone UTF-16 surrogates (`\ud800`–`\udfff`), which a source can put in any string and which Postgres cannot store, are treated as control characters in cleaned text and make a URL or source key unusable.
 - Board tokens are validated as `[A-Za-z0-9_-]{1,100}` before they go into an API URL, and a Workday host must match `<tenant>.wd<N>.myworkdayjobs.com` exactly.
 
 ## 10. Testing
