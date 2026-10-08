@@ -73,7 +73,7 @@
   {#if mode === "professor_search"}
     <label class="inline">
       How many
-      <input type="number" min="1" max="10" bind:value={targetCount} />
+      <input type="number" required min="1" max="10" bind:value={targetCount} />
     </label>
   {/if}
   <button type="submit" disabled={saving}>Add to queue</button>
