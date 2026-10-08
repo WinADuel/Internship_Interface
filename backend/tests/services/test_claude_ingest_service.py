@@ -165,6 +165,8 @@ def test_item_for_unknown_or_done_queue_item_skipped(db_session):
 def test_followup_not_applied_when_edited(db_session):
     a = create_contact(db_session, ContactCreate(kind="professor", name="A", organization="X"))
     b = create_contact(db_session, ContactCreate(kind="professor", name="B", organization="X"))
+    for c in (a, b):
+        apply_action(db_session, c.id, ContactAction.SENT, now=NOW)
     update_contact(db_session, b.id, ContactUpdate(followup_body="mine"))
     result = apply_followups(
         db_session,
@@ -196,3 +198,63 @@ def test_get_work_respects_max_items_and_lists_followups(db_session):
     assert work["outreach_profile"] == "CS junior"
     assert {k["name"] for k in work["known_contacts"]} == {"Due", "Fresh"}
     assert [f["contact_id"] for f in work["followups_needed"]] == [due.id]
+
+
+def test_followup_only_for_active_sent_contacts(db_session):
+    unsent = create_contact(db_session, ContactCreate(kind="professor", name="U", organization="X"))
+    gone = create_contact(db_session, ContactCreate(kind="professor", name="G", organization="X"))
+    apply_action(db_session, gone.id, ContactAction.SENT, now=NOW)
+    gone.archived = True
+    db_session.flush()
+    result = apply_followups(
+        db_session,
+        FollowupsBatchIn(
+            followups=[
+                {"contact_id": c.id, "followup_subject": "s", "followup_body": "b"} for c in (unsent, gone)
+            ]
+        ),
+    )
+    assert (result.updated, result.skipped) == (0, 2)
+    assert unsent.followup_body is None and gone.followup_body is None
+
+
+def test_multi_recipient_or_malformed_email_dropped(db_session):
+    item = _prof_item(db_session)
+    for i, bad in enumerate(
+        ["prof@uni.edu, attacker@evil.com", "x@y.com?bcc=a@b.com", "Jane <j@uni.edu>", "not-an-email", "a@b"]
+    ):
+        _ingest(db_session, _payload(item.id, name=f"P{i}", email=bad))
+    contacts = db_session.query(Contact).all()
+    assert len(contacts) == 5
+    assert all(c.email is None and c.email_confidence == EmailConfidence.NOT_FOUND for c in contacts)
+
+
+def test_sent_contact_draft_is_not_refreshed(db_session):
+    item = _prof_item(db_session)
+    _ingest(db_session, _payload(item.id))
+    c = db_session.query(Contact).one()
+    apply_action(db_session, c.id, ContactAction.SENT, now=NOW)
+    _ingest(db_session, _payload(item.id, draft_subject="New", draft_body="Rewritten"))
+    assert (c.draft_subject, c.draft_body) == ("Hello", "Claude draft")
+
+
+def test_redelivered_body_without_subject_keeps_subject(db_session):
+    item = _prof_item(db_session)
+    _ingest(db_session, _payload(item.id))
+    _ingest(db_session, _payload(item.id, draft_subject=None, draft_body="Second"))
+    c = db_session.query(Contact).one()
+    assert (c.draft_subject, c.draft_body) == ("Hello", "Second")
+
+
+def test_nul_bytes_are_dropped(db_session):
+    item = _prof_item(db_session)
+    _ingest(db_session, _payload(item.id, research_summary="Robo\x00tics", name="Ja\x00ne Lee"))
+    c = db_session.query(Contact).one()
+    assert c.research_summary == "Robotics" and c.name == "Jane Lee"
+
+
+def test_two_items_sharing_an_email_in_one_batch_merge(db_session):
+    item = _prof_item(db_session)
+    result = _ingest(db_session, _payload(item.id), _payload(item.id, name="Dr. Jane Lee", research_summary="v2"))
+    assert (result.created, result.updated) == (1, 1)
+    assert db_session.query(Contact).one().research_summary == "v2"

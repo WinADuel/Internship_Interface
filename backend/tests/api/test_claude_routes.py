@@ -50,7 +50,7 @@ def test_valid_batch_upserts(claude, db_session):
 
 
 def test_followups_route(claude, db_session):
-    c = Contact(kind="professor", name="A", organization="X")
+    c = Contact(kind="professor", name="A", organization="X", status="sent")
     db_session.add(c)
     db_session.flush()
     r = claude.post(

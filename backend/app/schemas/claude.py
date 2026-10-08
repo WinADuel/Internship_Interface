@@ -6,7 +6,7 @@ string is stripped and length-capped and every list is size-capped."""
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
 from app.models.contact import EmailConfidence
 from app.models.research_queue import QueueKind
@@ -15,9 +15,16 @@ MAX_BATCH = 25
 MAX_SOURCES = 20
 
 
+def _drop_nul(value: str) -> str:
+    # Postgres text cannot hold NUL; dropping it keeps a hostile byte from
+    # turning a valid payload into a 500.
+    return value.replace("\x00", "")
+
+
 def _text(max_length: int, required: bool = False):
     return Annotated[
         str,
+        AfterValidator(_drop_nul),
         StringConstraints(strip_whitespace=True, min_length=1 if required else 0, max_length=max_length),
     ]
 
