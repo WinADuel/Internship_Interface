@@ -57,7 +57,10 @@ def test_list_needs_attention_replied_stale_uses_history(db_session):
     long_ago = datetime(2026, 1, 1, tzinfo=UTC)
     c = create_contact(db_session, ContactCreate(kind="professor", name="Old", organization="MIT"))
     apply_action(db_session, c.id, ContactAction.SENT, now=long_ago)
-    apply_action(db_session, c.id, ContactAction.REPLIED, now=long_ago + timedelta(days=1))
+    # replied_at is backdated a year; the recent history row must win.
+    apply_action(
+        db_session, c.id, ContactAction.REPLIED, on=long_ago - timedelta(days=365), now=long_ago + timedelta(days=1)
+    )
     result = list_needs_attention(db_session, today=date(2026, 1, 10))
     assert result == []
     result = list_needs_attention(db_session, today=date(2026, 1, 20))
