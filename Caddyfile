@@ -7,6 +7,10 @@
 		Referrer-Policy strict-origin-when-cross-origin
 	}
 	handle /api/* {
+		# Every API payload is small (the largest, a 25-contact Claude batch, is well under this).
+		request_body {
+			max_size 5MB
+		}
 		reverse_proxy backend:8000
 	}
 	handle {

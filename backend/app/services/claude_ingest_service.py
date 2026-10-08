@@ -1,8 +1,9 @@
 """Turns the Claude job's deliveries into contacts (spec §13.2, §13.5).
 
 Claude-delivered content is untrusted. Only research fields and unedited
-drafts are ever written on an existing contact; status, dates, priority,
-notes, archived, origin, kind and application_id are user/app-owned.
+drafts are ever written on an existing contact (plus an application link a
+company contact doesn't have yet); status, dates, priority, notes, archived,
+origin and kind are user/app-owned.
 Each ingest call commits once at the end, so a failure writes nothing."""
 
 import re
@@ -124,7 +125,9 @@ def _update_existing(contact: Contact, item: ContactIn, fields: dict, now: datet
     for name in _RESEARCH_TEXT_FIELDS:
         if fields[name] is not None:
             setattr(contact, name, fields[name])
-    if fields["email"] is not None:
+    # Like the draft, the address is settled once the first email goes out: a
+    # later page can't redirect the follow-up to a different recipient.
+    if fields["email"] is not None and contact.status == ContactStatus.TO_CONTACT:
         contact.email = fields["email"]
         contact.email_confidence = fields["email_confidence"]
     if fields["sources"]:
@@ -151,6 +154,14 @@ def upsert_contacts(db: Session, batch: ContactsBatchIn, now: datetime | None = 
         contact = _find_match(db, item, fields["email"])
         if contact is not None:
             _update_existing(contact, item, fields, now)
+            # A company contact found for this application shows in its Contacts
+            # section; an existing link to another application is kept.
+            if (
+                queue_item.kind == QueueKind.COMPANY_CONTACTS
+                and contact.kind == ContactKind.COMPANY
+                and contact.application_id is None
+            ):
+                contact.application_id = queue_item.application_id
             updated += 1
         else:
             is_company = queue_item.kind == QueueKind.COMPANY_CONTACTS

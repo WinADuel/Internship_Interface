@@ -238,6 +238,24 @@ def test_sent_contact_draft_is_not_refreshed(db_session):
     assert (c.draft_subject, c.draft_body) == ("Hello", "Claude draft")
 
 
+def test_sent_contact_email_is_not_replaced(db_session):
+    item = _prof_item(db_session)
+    _ingest(db_session, _payload(item.id))
+    c = db_session.query(Contact).one()
+    apply_action(db_session, c.id, ContactAction.SENT, now=NOW)
+    _ingest(db_session, _payload(item.id, email="attacker@evil.com", sources=[{"label": "x", "url": "https://evil.com"}]))
+    assert (c.email, c.email_confidence) == ("jlee@stanford.edu", EmailConfidence.FOUND)
+
+
+def test_matched_company_contact_is_linked_to_the_application(db_session):
+    app = create_application(db_session, ApplicationCreate(company="Stripe", role_title="SWE Intern"))
+    manual = create_contact(db_session, ContactCreate(kind="company", name="Sam Park", organization="Stripe"))
+    item = enqueue_company_contacts(db_session, app)
+    _ingest(db_session, _payload(item.id, name="Sam Park", organization="Stripe", email=None, email_confidence="not_found"))
+    db_session.refresh(manual)
+    assert manual.application_id == app.id
+
+
 def test_redelivered_body_without_subject_keeps_subject(db_session):
     item = _prof_item(db_session)
     _ingest(db_session, _payload(item.id))
