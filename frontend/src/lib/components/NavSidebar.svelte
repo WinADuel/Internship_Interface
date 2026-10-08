@@ -17,6 +17,8 @@
 <nav class="sidebar" aria-label="Main">
   <a href="#/">Dashboard</a>
   <a href="#/applications">Applications</a>
+  <a href="#/contacts">Contacts</a>
+  <a href="#/research-queue">Research Queue</a>
   <a href="#/essays">Essays</a>
   <span class="disabled" aria-disabled="true">Job Discovery <small>Coming soon</small></span>
   <span class="disabled" aria-disabled="true">Interview Prep <small>Coming soon</small></span>
