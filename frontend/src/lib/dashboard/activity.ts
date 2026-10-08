@@ -1,5 +1,5 @@
 import type { ActivityEntry } from "../types/application";
-import type { ContactActivityEntry } from "../types/contact";
+import type { ContactActivityEntry, ContactKind } from "../types/contact";
 
 export type FeedItem = {
   kind: "application" | "contact";
@@ -7,6 +7,8 @@ export type FeedItem = {
   oldStatus: string | null;
   newStatus: string;
   changedAt: string;
+  /** Contact entries only: the status wording differs for professors and company contacts. */
+  contactKind?: ContactKind;
 };
 
 /** Both history feeds as one list, newest first, cut to `limit`. */
@@ -25,6 +27,7 @@ export function mergeActivity(apps: ActivityEntry[], contacts: ContactActivityEn
       oldStatus: c.oldStatus,
       newStatus: c.newStatus,
       changedAt: c.changedAt,
+      contactKind: c.kind,
     })),
   ];
   return items

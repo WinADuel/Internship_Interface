@@ -52,6 +52,16 @@ describe("RecentActivityFeed", () => {
     expect(getContactActivity).toHaveBeenCalledWith(5);
   });
 
+  it("uses company wording for company contacts and still shows one feed when the other fails", async () => {
+    vi.mocked(getRecentActivity).mockRejectedValue(new Error("boom"));
+    vi.mocked(getContactActivity).mockResolvedValue([
+      { contactId: 5, name: "Sam", organization: "Acme", kind: "company", oldStatus: "replied", newStatus: "accepted", changedAt: new Date().toISOString() },
+    ]);
+    render(RecentActivityFeed);
+    await screen.findByText(/Sam \(Acme\): Positive \(referral\/interview\)/);
+    expect(showToast).toHaveBeenCalledWith("Couldn't load recent activity.");
+  });
+
   it("toasts and shows empty state when fetch fails", async () => {
     vi.mocked(getRecentActivity).mockRejectedValue(new Error("boom"));
     render(RecentActivityFeed);

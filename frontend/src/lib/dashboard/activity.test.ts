@@ -25,4 +25,9 @@ describe("mergeActivity", () => {
     expect(mergeActivity([], [], 5)).toEqual([]);
     expect(mergeActivity([app("Acme", "2026-10-01T10:00:00Z")], [], 5)).toHaveLength(1);
   });
+
+  it("keeps the contact kind for status wording", () => {
+    const [item] = mergeActivity([], [{ ...contact("Sam", "2026-10-02T10:00:00Z"), kind: "company" }], 5);
+    expect(item.contactKind).toBe("company");
+  });
 });

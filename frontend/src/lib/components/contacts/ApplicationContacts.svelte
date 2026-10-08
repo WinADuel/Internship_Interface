@@ -10,12 +10,14 @@
 
   let items = $state<Contact[]>([]);
   let loaded = $state(false);
+  let failed = $state(false);
   let finding = $state(false);
 
   $effect(() => {
     const id = applicationId;
     let cancelled = false;
     loaded = false;
+    failed = false;
     listContacts({ kind: "company", applicationId: id }).then(
       (rows) => {
         if (cancelled) return;
@@ -24,7 +26,9 @@
       },
       () => {
         if (cancelled) return;
+        items = [];
         loaded = true;
+        failed = true;
         showToast("Couldn't load this application's contacts.");
       },
     );
@@ -52,7 +56,9 @@
     <h3>Contacts</h3>
     <button type="button" disabled={finding} onclick={find}>Find contacts</button>
   </div>
-  {#if loaded && items.length === 0}
+  {#if failed}
+    <p class="empty">Couldn't load this application's contacts.</p>
+  {:else if loaded && items.length === 0}
     <p class="empty">No contacts yet — they'll appear after the daily Claude run.</p>
   {:else}
     <div class="list">

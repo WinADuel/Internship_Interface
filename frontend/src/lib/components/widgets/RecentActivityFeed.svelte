@@ -35,7 +35,7 @@
 
   function describe(e: FeedItem): string {
     if (e.kind === "contact") {
-      return `${e.label}: ${contactStatusLabel(e.newStatus as ContactStatus, "professor")}`;
+      return `${e.label}: ${contactStatusLabel(e.newStatus as ContactStatus, e.contactKind ?? "professor")}`;
     }
     const status = statusLabel(e.newStatus as ApplicationStatus);
     if (e.oldStatus === null) return `Added ${e.label} (${status})`;
