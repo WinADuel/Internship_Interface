@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from app import cli
 from app.core.security import decrypt_value, verify_password
 from app.models.auth_credential import AuthCredential
+from app.services.backup.dump import BackupError, DumpListing
 from app.services.user_bootstrap import create_or_reset_user
 
 PASSWORD = "correct-horse-battery"
@@ -107,3 +108,29 @@ def test_correct_code_confirms_account(cli_env, monkeypatch):
     row = cli_env.scalars(select(AuthCredential)).one()
     assert row.totp_confirmed is True
     assert decrypt_value(row.totp_secret_encrypted) == captured["secret"]
+
+
+def test_restore_check_prints_a_summary(monkeypatch, capsys):
+    seen = []
+
+    def fake_list_dump(path):
+        seen.append(path)
+        return DumpListing(42, ["public.applications", "public.contacts"], "16.4", "2026-10-08 02:30:05 UTC")
+
+    monkeypatch.setattr(cli, "list_dump", fake_list_dump)
+    assert cli.main(["restore-check", "/backups/nightly/tracker-20261008T023005Z.dump"]) == 0
+    out = capsys.readouterr().out
+    assert seen == ["/backups/nightly/tracker-20261008T023005Z.dump"]
+    assert "readable dump" in out
+    assert "42 entries, 2 tables" in out
+    assert "public.applications, public.contacts" in out
+    assert "16.4" in out
+
+
+def test_restore_check_fails_on_an_unreadable_file(monkeypatch, capsys):
+    def fake_list_dump(path):
+        raise BackupError("not a readable dump: pg_restore: error: input file is too short")
+
+    monkeypatch.setattr(cli, "list_dump", fake_list_dump)
+    assert cli.main(["restore-check", "broken.dump"]) == 1
+    assert "not a readable dump" in capsys.readouterr().err

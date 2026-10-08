@@ -71,6 +71,23 @@ services:
       db:
         condition: service_healthy
 
+  # Database backups (Phase 3 spec §4.4): pg_dump nightly at 02:30 in TZ, kept in ./backups.
+  # deploy.sh runs `python -m app.jobs.db_backup --once --label pre-deploy` in this service.
+  db-backup:
+    build: ./backend
+    restart: unless-stopped
+    logging: *default-logging
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+      BACKUP_DIR: /backups
+    command: python -m app.jobs.db_backup
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
   caddy:
     build: ./frontend
     restart: unless-stopped

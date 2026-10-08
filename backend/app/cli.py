@@ -1,4 +1,6 @@
-"""Command-line tools. Usage: python -m app.cli create-user --username <u> [--reset]"""
+"""Command-line tools. Usage:
+python -m app.cli create-user --username <u> [--reset]
+python -m app.cli restore-check <dump>"""
 
 import argparse
 import getpass
@@ -8,6 +10,7 @@ import qrcode
 
 from app.core.security import totp_provisioning_uri
 from app.db.session import SessionLocal
+from app.services.backup.dump import BackupError, list_dump
 from app.services.user_bootstrap import (
     AccountExistsError,
     confirm_enrollment,
@@ -55,6 +58,24 @@ def _create_user(username: str, reset: bool) -> int:
         db.close()
 
 
+def _restore_check(dump: str) -> int:
+    """List a dump with `pg_restore --list` to check that it is readable."""
+    try:
+        listing = list_dump(dump)
+    except BackupError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"OK: {dump} is a readable dump.")
+    if listing.created_at:
+        print(f"Created: {listing.created_at}")
+    if listing.database_version:
+        print(f"PostgreSQL version: {listing.database_version}")
+    print(f"{listing.entries} entries, {len(listing.tables)} tables")
+    if listing.tables:
+        print("Tables: " + ", ".join(listing.tables))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -65,7 +86,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="replace the existing account's username, password and authenticator",
     )
+    check = sub.add_parser("restore-check", help="check that a backup dump is readable (pg_restore --list)")
+    check.add_argument("dump", help="path to a .dump file")
     args = parser.parse_args(argv)
+    if args.command == "restore-check":
+        return _restore_check(args.dump)
     return _create_user(args.username, args.reset)
 
 

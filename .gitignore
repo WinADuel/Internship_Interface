@@ -1,5 +1,8 @@
 .env
 *.log
 
+# Database dumps from the db-backup service (they hold the whole database)
+/backups/
+
 # Local git worktrees (never commit)
 .claude/worktrees/

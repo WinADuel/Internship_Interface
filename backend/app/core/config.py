@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
     cookie_secure: bool = True
+    # Database backups (Phase 3 spec §4.4). Both optional: a missing key never stops start-up.
+    backup_dir: str = "/backups"
+    backup_encryption_key: str | None = None
 
     @field_validator("jwt_secret")
     @classmethod
@@ -39,6 +42,22 @@ class Settings(BaseSettings):
         except (ValueError, TypeError):
             raise ValueError(
                 "TOKEN_ENCRYPTION_KEY is not a valid Fernet key (32 url-safe base64-encoded "
+                "bytes); generate one with: python -c "
+                '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+            ) from None
+        return value
+
+    @field_validator("backup_encryption_key")
+    @classmethod
+    def _backup_encryption_key_is_fernet(cls, value: str | None) -> str | None:
+        # Unset or blank (`BACKUP_ENCRYPTION_KEY=` in .env) means "no off-site copy".
+        if value is None or not value.strip():
+            return None
+        try:
+            Fernet(value)
+        except (ValueError, TypeError):
+            raise ValueError(
+                "BACKUP_ENCRYPTION_KEY is not a valid Fernet key (32 url-safe base64-encoded "
                 "bytes); generate one with: python -c "
                 '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
             ) from None
