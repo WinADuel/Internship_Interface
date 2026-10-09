@@ -20,6 +20,7 @@ from app.services.errors import (
     ContactNotFoundError,
     ContactNotOnApplicationError,
     InterviewRoundNotFoundError,
+    StoryArchivedError,
     StoryNotFoundError,
 )
 from app.services.interview_service import (
@@ -242,6 +243,23 @@ def test_list_filters_by_application(db_session):
     assert [r.id for r in list_rounds(db_session, application_id=mine.id)] == [kept.id]
 
 
+def test_lists_hide_archived_applications_except_their_own_list(db_session):
+    live, archived = _app(db_session), _app(db_session, "Gone")
+    archived.archived = True
+    shown = _round(db_session, live, scheduled_at=NOW + timedelta(days=1))
+    hidden = _round(db_session, archived, scheduled_at=NOW + timedelta(days=1))
+    hidden_past = _round(db_session, archived, scheduled_at=NOW - timedelta(days=1), state=InterviewState.DONE)
+    for scope in ("upcoming", "past", "all"):
+        ids = {r.id for r in list_rounds(db_session, scope, now=NOW)}
+        assert hidden.id not in ids and hidden_past.id not in ids
+    assert [r.id for r in list_rounds(db_session, "upcoming", now=NOW)] == [shown.id]
+    assert [r.id for r in list_rounds(db_session, application_id=archived.id, now=NOW)] == [
+        hidden_past.id,
+        hidden.id,
+    ]
+    assert list_rounds(db_session, now=NOW)[0].application.company == "Acme"
+
+
 # --- contact links -----------------------------------------------------------
 
 
@@ -299,13 +317,28 @@ def test_deleting_a_contact_unlinks_it(db_session):
 
 def test_set_stories_replaces_the_set(db_session):
     interview_round = _round(db_session, _app(db_session))
-    a, b = Story(title="A"), Story(title="B", archived=True)
+    a, b = Story(title="A"), Story(title="B")
     db_session.add_all([a, b])
     db_session.flush()
     set_round_stories(db_session, interview_round.id, [b.id, a.id])
     assert [s.id for s in interview_round.stories] == [a.id, b.id]
     set_round_stories(db_session, interview_round.id, [a.id])
     assert [s.id for s in interview_round.stories] == [a.id]
+
+
+def test_archived_story_stays_linked_but_cannot_be_newly_linked(db_session):
+    interview_round = _round(db_session, _app(db_session))
+    kept, other = Story(title="Kept"), Story(title="Other", archived=True)
+    db_session.add_all([kept, other])
+    db_session.flush()
+    set_round_stories(db_session, interview_round.id, [kept.id])
+    kept.archived = True
+    db_session.flush()
+    set_round_stories(db_session, interview_round.id, [kept.id])  # already linked: fine
+    assert [s.id for s in interview_round.stories] == [kept.id]
+    with pytest.raises(StoryArchivedError):
+        set_round_stories(db_session, interview_round.id, [kept.id, other.id])
+    assert [s.id for s in interview_round.stories] == [kept.id]
 
 
 def test_link_missing_story_raises(db_session):

@@ -42,6 +42,48 @@ def test_patch_discovery_settings_validation(logged_in_client):
     assert r.status_code == 200 and "discovery_list_etags" not in r.json()
 
 
+RANKING_LISTS = (
+    "ranking_role_keywords",
+    "ranking_skill_keywords",
+    "ranking_preferred_locations",
+    "ranking_preferred_companies",
+    "ranking_avoid_companies",
+    "ranking_dealbreaker_keywords",
+)
+
+
+def test_settings_expose_ranking_fields(logged_in_client):
+    s = logged_in_client.get("/api/settings").json()
+    assert all(s[name] == [] for name in RANKING_LISTS)
+    assert s["ranking_claude_daily_limit"] == 40 and s["ranking_updated_at"] is None
+
+
+def test_patch_ranking_settings_rescores_and_stamps(logged_in_client):
+    r = logged_in_client.patch(
+        "/api/settings",
+        json={"ranking_role_keywords": [" machine learning ", "Machine Learning", ""], "ranking_claude_daily_limit": 0},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ranking_role_keywords"] == ["machine learning"]
+    assert body["ranking_claude_daily_limit"] == 0 and body["ranking_updated_at"] is not None
+
+
+def test_patch_ranking_settings_validation(logged_in_client):
+    for payload in (
+        {"ranking_role_keywords": ["x" * 61]},
+        {"ranking_skill_keywords": [f"k{i}" for i in range(31)]},
+        {"ranking_avoid_companies": None},
+        {"ranking_claude_daily_limit": -1},
+        {"ranking_claude_daily_limit": 151},
+        {"ranking_claude_daily_limit": None},
+    ):
+        assert logged_in_client.patch("/api/settings", json=payload).status_code == 422, payload
+    # ranking_updated_at is server-owned.
+    r = logged_in_client.patch("/api/settings", json={"ranking_updated_at": "2020-01-01T00:00:00Z"})
+    assert r.status_code == 200 and r.json()["ranking_updated_at"] is None
+
+
 def test_settings_report_google_and_gmail_connection(logged_in_client, db_session):
     from app.services.google_docs_service import GMAIL_SCOPE, GOOGLE_SCOPE, store_token
 

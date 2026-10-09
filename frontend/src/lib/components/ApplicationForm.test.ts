@@ -154,7 +154,11 @@ describe("ApplicationForm", () => {
 
     expect((screen.getByLabelText("Company") as HTMLInputElement).value).toBe("Initech");
     expect((screen.getByLabelText("Follow-up date") as HTMLInputElement).value).toBe("2026-04-01");
-    expect((screen.getByLabelText("Interview date and time") as HTMLInputElement).value).toBe("2026-04-02T09:00");
+    // The next interview is derived from the rounds: shown, not editable.
+    expect(screen.queryByLabelText("Interview date and time")).toBeNull();
+    expect(screen.getByText("Next interview")).toBeInTheDocument();
+    expect(screen.getByText(new Date(2026, 3, 2, 9, 0).toLocaleString())).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage rounds" }).getAttribute("href")).toBe("#/interviews");
 
     await fill("Company", "Initech 2");
     await fill("Notes", "");
@@ -165,6 +169,7 @@ describe("ApplicationForm", () => {
     expect(init.method).toBe("PATCH");
     const body = JSON.parse(init.body);
     expect(body).toMatchObject({ company: "Initech 2", notes: null, follow_up_date: "2026-04-01" });
+    expect(body).not.toHaveProperty("interview_datetime");
     await vi.waitFor(() => expect(get(applications)[0].company).toBe("Initech 2"));
     expect(get(applications)).toHaveLength(1);
     expect(onsaved).toHaveBeenCalled();
@@ -187,6 +192,11 @@ describe("ApplicationForm", () => {
     expect(get(toasts)[0].text).toBe("job_link: Input should be a valid URL");
     expect(onsaved).not.toHaveBeenCalled();
     expect(get(applications)).toHaveLength(0);
+  });
+
+  it("shows None scheduled when editing an application with no upcoming round", () => {
+    render(ApplicationForm, { props: { application: fakeApplication({ id: 3 }) } });
+    expect(screen.getByText("None scheduled")).toBeInTheDocument();
   });
 
   it("Cancel calls oncancel without calling the API", async () => {

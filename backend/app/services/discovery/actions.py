@@ -20,7 +20,9 @@ from app.schemas.application import ApplicationCreate
 from app.schemas.discovery import PasteConfirmIn, PastePreviewOut
 from app.services.application_service import add_application
 from app.services.discovery.http import DiscoveryHttp
+from app.services.discovery.ingest import ranker_from_settings
 from app.services.discovery.labels import application_source
+from app.services.discovery.ranking import RESCORED_STATES, apply_score
 from app.services.discovery.sources import fetch_pasted
 from app.services.discovery.urls import normalize_url, parse_job_url, safe_http_url
 from app.services.errors import InvalidPostingStateError, PostingNotFoundError
@@ -81,6 +83,9 @@ def _transition(
         raise error
     posting.state = target
     posting.state_changed_at = _now(now)
+    if target in RESCORED_STATES:
+        # A dismissed posting missed preference re-scores (spec §4).
+        apply_score(posting, ranker_from_settings(db), posting.state_changed_at)
     db.commit()
     return posting
 
@@ -294,6 +299,7 @@ def paste_confirm(db: Session, data: PasteConfirmIn, now: datetime | None = None
     if url is None:  # PasteConfirmIn already checks this
         raise ValueError("not an http(s) URL")
     ident = _identify(url)
+    ranker = ranker_from_settings(db)
     for attempt in range(2):
         rows = _stored(db, ident, lock=True)
         if rows:
@@ -302,6 +308,7 @@ def paste_confirm(db: Session, data: PasteConfirmIn, now: datetime | None = None
             except InvalidPostingStateError:
                 db.rollback()
                 raise
+            apply_score(posting, ranker, now)
             db.commit()
             return posting
         posting = Posting(
@@ -321,6 +328,7 @@ def paste_confirm(db: Session, data: PasteConfirmIn, now: datetime | None = None
             state_changed_at=now,
             watch_company_id=_watch_company_id(db, ident),
         )
+        apply_score(posting, ranker, now)
         db.add(posting)
         try:
             db.commit()
