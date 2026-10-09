@@ -3,16 +3,22 @@
 every `gmail_sync_minutes` minutes (re-read before each wait). While sync is
 off or Gmail isn't granted a run does nothing but the retention cleanup. A
 run that crashed is retried in ten minutes. Sync now uses the same
-`run_sync`; the advisory lock keeps the two from overlapping."""
+`run_sync`; the advisory lock keeps the two from overlapping. Changes made
+by auto-apply are copied to the backup sheet right after the run, as a
+click in the app would."""
 
 import logging
 import time
 from collections.abc import Callable
 
+from sqlalchemy.orm import Session
+
 from app.db.session import SessionLocal
 from app.jobs import configure_job_logging
 from app.services.gmail.sync import GmailClientFactory, SyncReport, google_gmail_client, run_sync
 from app.services.settings_service import get_settings
+from app.services.sheet_sync_service import ALL_TABS, google_sheets_client, safe_sync
+from app.services.sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +28,16 @@ MIN_MINUTES = 15
 RETRY_DELAY = 600.0  # seconds to wait after a run that crashed
 
 
-def run_once(client_factory: GmailClientFactory = google_gmail_client) -> SyncReport:
+def run_once(
+    client_factory: GmailClientFactory = google_gmail_client,
+    sheets_factory: Callable[[Session], SheetsClient] = google_sheets_client,
+) -> SyncReport:
     db = SessionLocal()
     try:
-        return run_sync(db, client_factory)
+        report = run_sync(db, client_factory)
+        if report.sheet_tabs:
+            safe_sync(db, sheets_factory, [t for t in ALL_TABS if t in report.sheet_tabs])
+        return report
     finally:
         db.close()
 
@@ -44,10 +56,11 @@ def _log(report: SyncReport) -> None:
         logger.info("gmail sync skipped: another sync is running")
     elif report.status == "ok":
         logger.info(
-            "gmail sync done: %d new, %d fetched, %d suggestion(s)%s",
+            "gmail sync done: %d new, %d fetched, %d suggestion(s), %d auto-applied%s",
             report.listed,
             report.fetched,
             report.suggested,
+            report.auto_applied,
             "; more next run" if report.more else "",
         )
     elif report.status == "error":

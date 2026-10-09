@@ -6,6 +6,7 @@ import pytest
 
 from app.jobs import gmail_sync
 from app.services.gmail.sync import SyncReport, google_gmail_client
+from app.services.sheet_sync_service import TAB_APPLICATIONS, TAB_COMPANY, google_sheets_client
 
 
 class StopLoop(Exception):
@@ -108,7 +109,7 @@ def test_errors_and_results_are_logged(caplog):
         gmail_sync._log(SyncReport("busy"))
     messages = [r.getMessage() for r in caplog.records]
     assert messages == [
-        "gmail sync done: 3 new, 3 fetched, 1 suggestion(s); more next run",
+        "gmail sync done: 3 new, 3 fetched, 1 suggestion(s), 0 auto-applied; more next run",
         "gmail retention: deleted 2 old suggestion(s)",
         "gmail sync failed: gmail list rejected (status 500)",
         "gmail sync skipped: another sync is running",
@@ -121,4 +122,25 @@ def test_main_sets_up_logging_and_uses_the_real_client(monkeypatch):
     monkeypatch.setattr(gmail_sync, "run_forever", lambda: seen.append("loop"))
     gmail_sync.main()
     assert seen == ["logging", "loop"]
-    assert gmail_sync.run_once.__defaults__ == (google_gmail_client,)
+    assert gmail_sync.run_once.__defaults__ == (google_gmail_client, google_sheets_client)
+
+
+def test_auto_applied_changes_reach_the_backup_sheet(monkeypatch, fake_sessions):
+    synced = []
+    report = SyncReport("ok", auto_applied=2, sheet_tabs={TAB_COMPANY, TAB_APPLICATIONS})
+    monkeypatch.setattr(gmail_sync, "run_sync", lambda db, factory: report)
+    monkeypatch.setattr(gmail_sync, "safe_sync", lambda db, factory, tabs: synced.append((db, factory, tabs)))
+    sheets = object()
+
+    assert gmail_sync.run_once(object(), sheets) is report
+
+    ((db, factory, tabs),) = synced
+    assert db is fake_sessions[0] and factory is sheets
+    assert tabs == [TAB_APPLICATIONS, TAB_COMPANY]  # in the sheet's tab order
+    assert fake_sessions[0].closed
+
+
+def test_no_sheet_sync_without_auto_applied_changes(monkeypatch, fake_sessions):
+    monkeypatch.setattr(gmail_sync, "run_sync", lambda db, factory: SyncReport("ok", suggested=3))
+    monkeypatch.setattr(gmail_sync, "safe_sync", lambda *a: pytest.fail("no sheet sync expected"))
+    gmail_sync.run_once(object(), object())

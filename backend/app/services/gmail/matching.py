@@ -359,10 +359,45 @@ def match_application(
     return _pick([a for a in active if _names_company(name_tokens, a.company)], text_tokens)
 
 
+# Application updates that a contact's reply can carry ("Re: your Stripe
+# application" from a recruiter you emailed). A confirmation from a contact
+# stays a plain reply.
+_CONTACT_UPGRADE_KINDS = (
+    SuggestionKind.OFFER,
+    SuggestionKind.REJECTION,
+    SuggestionKind.INTERVIEW,
+    SuggestionKind.ASSESSMENT,
+)
+
+
+def _contact_application_update(
+    headers: EmailHeaders, snapshot: Snapshot, reply: Proposal
+) -> Proposal | None:
+    """A contact's reply that is also an application update: the application
+    kind, for the contact's own application (else the sender's company's),
+    with `contact_id` kept so accepting it marks the contact Replied too.
+    The subject or snippet must look job-related, so "Unfortunately I'm out
+    this week" stays a plain reply."""
+    kind = classify(headers.subject, headers.snippet)
+    if kind not in _CONTACT_UPGRADE_KINDS:
+        return None
+    if not _JOB_CONTEXT.search(normalize_text(headers.subject, headers.snippet)):
+        return None
+    own = next(
+        (a for a in snapshot.applications if a.id == reply.application_id and not a.archived), None
+    )
+    application = own or match_application(headers, snapshot.applications)
+    if application is None:
+        return None
+    return Proposal(kind, application_id=application.id, contact_id=reply.contact_id)
+
+
 def propose(headers: EmailHeaders, snapshot: Snapshot) -> Proposal | None:
     """The one suggestion an email produces, or None to drop it untraced."""
     contact = match_contact(headers, snapshot.contacts)
     if contact is not None:
+        if contact.kind == SuggestionKind.CONTACT_REPLY:
+            return _contact_application_update(headers, snapshot, contact) or contact
         return contact
     if headers.direction != Direction.INBOUND:
         return None

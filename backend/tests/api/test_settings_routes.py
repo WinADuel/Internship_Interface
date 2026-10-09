@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_get_and_patch_settings(logged_in_client):
     s = logged_in_client.get("/api/settings").json()
     assert s["nudge_followup_days"] == 10 and s["claude_job_max_items"] == 8 and "id" not in s
@@ -101,3 +104,54 @@ def test_patch_cannot_set_computed_connection_flags(logged_in_client):
     r = logged_in_client.patch("/api/settings", json={"gmail_granted": True, "google_connected": True})
     assert r.status_code == 200
     assert r.json()["gmail_granted"] is False and r.json()["google_connected"] is False
+
+
+GMAIL_DEFAULTS = {
+    "gmail_sync_enabled": False,
+    "gmail_sync_minutes": 30,
+    "gmail_lookback_days": 30,
+    "gmail_auto_apply": False,
+    "gmail_last_sync_at": None,
+    "gmail_last_error": None,
+}
+
+
+def test_settings_expose_gmail_fields_off_by_default(logged_in_client):
+    s = logged_in_client.get("/api/settings").json()
+    assert {k: s[k] for k in GMAIL_DEFAULTS} == GMAIL_DEFAULTS
+    # The sync cursor is server-owned and never exposed.
+    assert "gmail_history_cursor" not in s
+
+
+def test_patch_gmail_settings(logged_in_client):
+    body = {"gmail_sync_enabled": True, "gmail_sync_minutes": 15, "gmail_lookback_days": 90, "gmail_auto_apply": True}
+    r = logged_in_client.patch("/api/settings", json=body)
+    assert r.status_code == 200
+    assert {k: r.json()[k] for k in body} == body
+    r = logged_in_client.patch("/api/settings", json={"gmail_sync_minutes": 240, "gmail_lookback_days": 1})
+    assert (r.json()["gmail_sync_minutes"], r.json()["gmail_lookback_days"]) == (240, 1)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"gmail_sync_minutes": 14},
+        {"gmail_sync_minutes": 241},
+        {"gmail_lookback_days": 0},
+        {"gmail_lookback_days": 91},
+        {"gmail_sync_enabled": None},
+        {"gmail_auto_apply": None},
+        {"gmail_sync_minutes": None},
+    ],
+)
+def test_patch_gmail_settings_validation(logged_in_client, body):
+    assert logged_in_client.patch("/api/settings", json=body).status_code == 422
+
+
+def test_gmail_status_fields_are_server_owned(logged_in_client):
+    r = logged_in_client.patch(
+        "/api/settings",
+        json={"gmail_last_sync_at": "2020-01-01T00:00:00Z", "gmail_last_error": "x", "gmail_history_cursor": "1"},
+    )
+    assert r.status_code == 200
+    assert r.json()["gmail_last_sync_at"] is None and r.json()["gmail_last_error"] is None

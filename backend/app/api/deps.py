@@ -14,6 +14,7 @@ from app.models.claude_token import ClaudeToken
 from app.services import claude_token_service
 from app.services.backup.dump import run_dump
 from app.services.discovery.http import DiscoveryHttp, HttpxDiscoveryHttp
+from app.services.gmail.sync import GmailClientFactory, google_gmail_client
 from app.services.sheet_sync_service import SheetSyncScheduler, google_sheets_client
 from app.services.sheets_client import SheetsClient
 
@@ -75,3 +76,8 @@ def get_scan_session_factory() -> Callable[[], AbstractContextManager[Session]]:
 def get_backup_dump() -> Callable[..., Path]:
     """Takes the dump for Back up now (pg_dump); overridden in tests."""
     return run_dump
+
+
+def get_gmail_client_factory() -> GmailClientFactory:
+    """Builds the Gmail client for Sync now; overridden in tests."""
+    return google_gmail_client
