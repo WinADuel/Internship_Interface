@@ -12,7 +12,7 @@ The Discover Inbox currently shows matching postings newest first. A real scan s
 - the Inbox, the Dashboard widget and a new **Top picks** filter use the best score available.
 
 ### Success criteria
-- With preferences set, the first page of the Inbox is ordered by score, and every row says why ("Title matches 'machine learning' · New York · posted 2 days ago").
+- With preferences set, the first page of the Inbox is ordered by score, and every row says why ("Title matches 'machine learning' · New York · posted in the last 3 days").
 - Changing preferences re-scores every posting within a second or two, with no rescan.
 - The Claude score works once the server is live; before that, the app's own score does the job alone on the Mac and PC.
 - No new Google permission and no in-app Claude API.

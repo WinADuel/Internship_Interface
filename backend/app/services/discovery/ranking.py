@@ -39,8 +39,12 @@ SKILL_EACH = 5
 SKILL_MAX = 15
 LOCATION_POINTS = 15
 COMPANY_POINTS = 15
-# (posted at most this long ago, points), checked in order.
-FRESHNESS = ((timedelta(days=3), 10), (timedelta(days=7), 6), (timedelta(days=14), 3))
+# (posted at most this long ago, points, the band's name), checked in order.
+FRESHNESS = (
+    (timedelta(days=3), 10, "the last 3 days"),
+    (timedelta(days=7), 6, "the last week"),
+    (timedelta(days=14), 3, "the last 2 weeks"),
+)
 
 # Postings re-scored together have the same states (spec §4).
 RESCORED_STATES = (PostingState.NEW, PostingState.SAVED)
@@ -122,13 +126,6 @@ def _quoted(words: Iterable[str]) -> str:
     return ", ".join(f"'{w}'" for w in words)
 
 
-def _days_ago(age: timedelta) -> str:
-    days = max(0, age.days)
-    if days == 0:
-        return "posted today"
-    return "posted 1 day ago" if days == 1 else f"posted {days} days ago"
-
-
 class Ranker:
     """Preferences compiled once, for scoring many postings."""
 
@@ -183,13 +180,17 @@ class Ranker:
             points += COMPANY_POINTS
             reasons.append("Watchlist company")
 
+        # The reason names the band, not a day count: the row already shows
+        # "Posted N days ago" in the viewer's own calendar days, and a stored
+        # count would soon disagree with it.
         posted = p.date_posted or p.first_seen_at
         if posted is not None:
+            verb = "posted" if p.date_posted else "found"
             age = now - posted
-            for limit, fresh in FRESHNESS:
+            for limit, fresh, band in FRESHNESS:
                 if age <= limit:
                     points += fresh
-                    reasons.append(_days_ago(age))
+                    reasons.append(f"{verb} in {band}")
                     break
 
         return LocalScore(min(MAX_SCORE, points), _capped(reasons))
