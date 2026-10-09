@@ -12,8 +12,10 @@ from app.schemas.application import (
     ApplicationUpdate,
     StatusHistoryOut,
 )
-from app.services import application_service
-from app.services.errors import ApplicationNotFoundError
+from app.schemas.prep_brief import PrepBriefOut
+from app.schemas.research_queue import QueueItemOut
+from app.services import application_service, prep_brief_service
+from app.services.errors import AlreadyQueuedError, ApplicationNotFoundError, PrepBriefNotFoundError
 from app.services.sheet_sync_service import TAB_APPLICATIONS, SheetSyncScheduler
 
 router = APIRouter(
@@ -116,3 +118,24 @@ def status_history(application_id: int, db: Session = Depends(get_db)):
     except ApplicationNotFoundError:
         raise _not_found()
     return application_service.get_status_history(db, application_id)
+
+
+@router.get("/{application_id}/brief", response_model=PrepBriefOut)
+def get_brief(application_id: int, db: Session = Depends(get_db)):
+    try:
+        return prep_brief_service.get_brief(db, application_id)
+    except ApplicationNotFoundError:
+        raise _not_found()
+    except PrepBriefNotFoundError:
+        raise HTTPException(status_code=404, detail="brief not found")
+
+
+@router.post("/{application_id}/brief/request", response_model=QueueItemOut, status_code=201)
+def request_brief(application_id: int, db: Session = Depends(get_db)):
+    """Asks the daily Claude job for a company brief (Phase 4 spec §4)."""
+    try:
+        return prep_brief_service.request_brief(db, application_id)
+    except ApplicationNotFoundError:
+        raise _not_found()
+    except AlreadyQueuedError:
+        raise HTTPException(status_code=409, detail="brief already requested")

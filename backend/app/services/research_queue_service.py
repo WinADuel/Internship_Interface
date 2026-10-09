@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -28,6 +29,15 @@ def enqueue_professor(db: Session, data: QueueItemCreate) -> ResearchQueueItem:
     return item
 
 
+def application_request_text(application: Application) -> str:
+    """`Company — Role — job link`: all the Claude job is told about an
+    application. Notes, contacts and other private fields never go out."""
+    request_text = f"{application.company} — {application.role_title}"
+    if application.job_link:
+        request_text += f" — {application.job_link}"
+    return request_text
+
+
 def enqueue_company_contacts(db: Session, application: Application) -> ResearchQueueItem:
     """Queue a find-contacts request; at most one per application, ever."""
     item = add_company_contacts_item(db, application)
@@ -48,18 +58,41 @@ def add_company_contacts_item(db: Session, application: Application) -> Research
     ).first()
     if existing is not None:
         raise AlreadyQueuedError(application.id)
-    request_text = f"{application.company} — {application.role_title}"
-    if application.job_link:
-        request_text += f" — {application.job_link}"
     item = ResearchQueueItem(
         kind=QueueKind.COMPANY_CONTACTS,
-        request_text=request_text,
+        request_text=application_request_text(application),
         application_id=application.id,
         target_count=COMPANY_CONTACTS_TARGET,
         created_at=_now(),
     )
     db.add(item)
     db.flush()
+    return item
+
+
+def enqueue_interview_brief(db: Session, application: Application) -> ResearchQueueItem:
+    """Queue a company brief request (Phase 4 spec §3). One may be pending
+    per application; another can be requested once it is done or failed."""
+    pending = db.scalars(
+        select(ResearchQueueItem.id)
+        .where(
+            ResearchQueueItem.application_id == application.id,
+            ResearchQueueItem.kind == QueueKind.INTERVIEW_BRIEF,
+            ResearchQueueItem.state == QueueState.PENDING,
+        )
+        .limit(1)
+    ).first()
+    if pending is not None:
+        raise AlreadyQueuedError(application.id)
+    item = ResearchQueueItem(
+        kind=QueueKind.INTERVIEW_BRIEF,
+        request_text=application_request_text(application),
+        application_id=application.id,
+        target_count=1,
+        created_at=_now(),
+    )
+    db.add(item)
+    db.commit()
     return item
 
 
@@ -70,12 +103,13 @@ def list_queue(db: Session, state: QueueState | None = None) -> list[ResearchQue
     return list(db.scalars(query))
 
 
-def pending_items(db: Session, limit: int) -> list[ResearchQueueItem]:
-    """Oldest first, so leftovers from a capped run go first next time."""
+def pending_items(db: Session, limit: int, kinds: Iterable[QueueKind]) -> list[ResearchQueueItem]:
+    """Pending items of the given kinds, oldest first, so leftovers from a
+    capped run go first next time."""
     return list(
         db.scalars(
             select(ResearchQueueItem)
-            .where(ResearchQueueItem.state == QueueState.PENDING)
+            .where(ResearchQueueItem.state == QueueState.PENDING, ResearchQueueItem.kind.in_(list(kinds)))
             .order_by(ResearchQueueItem.created_at, ResearchQueueItem.id)
             .limit(limit)
         )

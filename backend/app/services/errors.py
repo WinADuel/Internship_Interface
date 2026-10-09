@@ -122,3 +122,11 @@ class StoryArchivedError(Exception):
 
 class RoundNotScheduledError(Exception):
     """The interview round has no scheduled time (a calendar event needs one)."""
+
+
+class PrepBriefNotFoundError(Exception):
+    """The application has no company brief yet."""
+
+
+class QueueItemWrongKindError(Exception):
+    """The research queue item is of a different kind than the delivery."""
