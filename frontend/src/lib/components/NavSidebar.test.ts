@@ -31,6 +31,8 @@ describe("NavSidebar", () => {
     expect(screen.getByRole("link", { name: "Contacts" }).getAttribute("href")).toBe("#/contacts");
     expect(screen.getByRole("link", { name: "Research Queue" }).getAttribute("href")).toBe("#/research-queue");
     expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("#/settings");
+    expect(screen.getByRole("link", { name: "Interview Prep" }).getAttribute("href")).toBe("#/interviews");
+    expect(screen.queryByText(/Interview Prep\s*Coming soon/)).toBeNull();
   });
 
   it("Logout calls the logout endpoint, clears the session and routes to /login", async () => {

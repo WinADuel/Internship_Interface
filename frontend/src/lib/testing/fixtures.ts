@@ -1,6 +1,13 @@
 import type { Application } from "../types/application";
 import type { Contact } from "../types/contact";
 import type { Posting, ScanStatus, WatchCompany } from "../types/discovery";
+import type {
+  InterviewRound,
+  InterviewRoundDetail,
+  InterviewRoundListItem,
+  PrepBrief,
+  Story,
+} from "../types/interview";
 
 export function fakeApplication(overrides: Partial<Application> = {}): Application {
   return {
@@ -112,4 +119,70 @@ export function fakeWatchCompany(overrides: Partial<WatchCompany> = {}): WatchCo
 
 export function fakeScanStatus(overrides: Partial<ScanStatus> = {}): ScanStatus {
   return { lastScanAt: null, lastScanError: null, scanning: false, inboxCount: 0, ...overrides };
+}
+
+export function fakeRound(overrides: Partial<InterviewRound> = {}): InterviewRound {
+  return {
+    id: 1,
+    applicationId: 1,
+    kind: "technical",
+    title: null,
+    scheduledAt: null,
+    durationMinutes: null,
+    format: null,
+    location: null,
+    interviewers: null,
+    state: "scheduled",
+    outcome: null,
+    prepNotes: null,
+    questionsToAsk: null,
+    reflection: null,
+    checklist: [],
+    thankYouSentAt: null,
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function fakeRoundListItem(overrides: Partial<InterviewRoundListItem> = {}): InterviewRoundListItem {
+  return {
+    ...fakeRound(),
+    company: "Acme",
+    roleTitle: "SWE Intern",
+    checklistDone: 0,
+    checklistTotal: 0,
+    thankYouDue: false,
+    ...overrides,
+  };
+}
+
+export function fakeRoundDetail(overrides: Partial<InterviewRoundDetail> = {}): InterviewRoundDetail {
+  return { ...fakeRoundListItem(), contacts: [], stories: [], ...overrides };
+}
+
+export function fakeStory(overrides: Partial<Story> = {}): Story {
+  return {
+    id: 1,
+    title: "Shipped the search rewrite",
+    situation: null,
+    task: null,
+    action: null,
+    result: null,
+    tags: [],
+    archived: false,
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function fakeBrief(overrides: Partial<PrepBrief> = {}): PrepBrief {
+  return {
+    body: "Acme builds rockets.",
+    sources: [],
+    createdAt: "2026-10-05T00:00:00Z",
+    updatedAt: "2026-10-05T00:00:00Z",
+    ...overrides,
+  };
 }
