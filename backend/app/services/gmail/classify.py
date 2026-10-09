@@ -3,22 +3,11 @@ subject and Gmail snippet. Phrases match whole words, case-insensitively, and
 the first kind that matches wins, in the order offer, rejection, interview,
 assessment, confirmation. Nothing here reads the database or the network."""
 
-import enum
 import re
 import unicodedata
 
+from app.models.email_suggestion import SuggestionKind
 from app.models.interview import InterviewKind
-
-
-class SuggestionKind(str, enum.Enum):
-    CONFIRMATION = "confirmation"
-    REJECTION = "rejection"
-    INTERVIEW = "interview"
-    ASSESSMENT = "assessment"
-    OFFER = "offer"
-    CONTACT_REPLY = "contact_reply"
-    CONTACT_SENT = "contact_sent"
-    NEW_APPLICATION = "new_application"
 
 
 def _phrases(*phrases: str) -> re.Pattern[str]:

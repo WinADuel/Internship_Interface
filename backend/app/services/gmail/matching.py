@@ -7,7 +7,6 @@ application at the sender's company (§4.2) with the classifier's kind (§4.3);
 then a new-application suggestion for applicant-tracking-system mail from a
 company that isn't tracked yet (§4.4)."""
 
-import enum
 import re
 import unicodedata
 from collections.abc import Iterable, Sequence
@@ -15,12 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.models.contact import ContactStatus
+from app.models.email_suggestion import EmailDirection as Direction
 from app.services.gmail.classify import SuggestionKind, classify, normalize_text
-
-
-class Direction(str, enum.Enum):
-    INBOUND = "inbound"
-    SENT = "sent"
 
 
 @dataclass(frozen=True)

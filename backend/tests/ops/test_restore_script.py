@@ -3,7 +3,7 @@ See conftest.py for the fakes."""
 
 import pytest
 
-SERVICES = "backend sheet-sync job-scan db-backup caddy"
+SERVICES = "backend sheet-sync job-scan gmail-sync db-backup caddy"
 SAFETY = "docker compose run --rm -T db-backup python -m app.jobs.db_backup --once --label manual"
 # What a restore prints for undoing it: the fake backup's path for the safety backup.
 UNDO = "to undo, restore the safety backup taken just before:\n      ops/server/restore.sh /backups/manual/tracker-20261008T120000Z.dump\n"

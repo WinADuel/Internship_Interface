@@ -102,3 +102,16 @@ class AppSettings(Base):
     last_backup_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_offsite_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_offsite_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Gmail sync (Phase 6 spec §5). Off until the owner turns it on. The
+    # cursor is the newest Gmail `internalDate` (ms) fully processed; it is
+    # server-owned and not exposed by the API.
+    gmail_sync_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    gmail_sync_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
+    gmail_lookback_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
+    gmail_auto_apply: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    gmail_last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    gmail_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gmail_history_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)

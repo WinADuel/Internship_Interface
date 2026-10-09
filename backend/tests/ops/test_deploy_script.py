@@ -320,7 +320,7 @@ def test_accepts_a_blank_or_real_contact_email(server, deploy_fakes, line):
 
 OLD_DUMP = "backups/pre-deploy/tracker-20261007T120000Z.dump"
 OLD_DUMP_IN_CONTAINER = "/backups/pre-deploy/tracker-20261007T120000Z.dump"
-SERVICES = "backend sheet-sync job-scan db-backup caddy"
+SERVICES = "backend sheet-sync job-scan gmail-sync db-backup caddy"
 CHECK = f"docker compose run --rm -T db-backup python -m app.cli restore {OLD_DUMP_IN_CONTAINER} --check"
 RESTORE = f"docker compose run --rm -T db-backup python -m app.cli restore {OLD_DUMP_IN_CONTAINER} --yes"
 BUILD = "docker compose build"
