@@ -88,9 +88,10 @@
   {:else if selected}
     <label>
       Application
-      <select bind:value={selectedId}>
+      <!-- Show the application Save link writes to: `selected` falls back to the first one. -->
+      <select bind:value={() => selected?.id ?? null, (id) => (selectedId = id)}>
         {#each $applications as app (app.id)}
-          <option value={app.id} selected={app.id === selected.id}>
+          <option value={app.id}>
             {app.company} - {app.roleTitle}
           </option>
         {/each}
