@@ -4,7 +4,13 @@
   import { FORMAT_LABELS, INTERVIEW_FORMATS, INTERVIEW_KINDS, KIND_LABELS } from "../../interviews/format";
   import { showToast } from "../../stores/toast";
   import type { Application } from "../../types/application";
-  import type { InterviewFormat, InterviewKind, InterviewRound, InterviewRoundFields } from "../../types/interview";
+  import type {
+    InterviewFormat,
+    InterviewKind,
+    InterviewRound,
+    InterviewRoundDetail,
+    InterviewRoundFields,
+  } from "../../types/interview";
 
   /**
    * Adds a round (pass `applicationId`, or `applications` to choose one) or
@@ -20,7 +26,7 @@
     round?: InterviewRound | null;
     applicationId?: number | null;
     applications?: Application[];
-    onsaved?: (round: InterviewRound) => void;
+    onsaved?: (round: InterviewRoundDetail) => void;
     oncancel?: () => void;
   } = $props();
 

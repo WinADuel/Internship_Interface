@@ -13,7 +13,7 @@ vi.mock("../lib/stores/applications", async () => {
 import { createRound, listRounds } from "../lib/api/interviews";
 import { createStory, listStories, updateStory } from "../lib/api/stories";
 import { applications } from "../lib/stores/applications";
-import { fakeApplication, fakeRound, fakeRoundListItem, fakeStory } from "../lib/testing/fixtures";
+import { fakeApplication, fakeRoundDetail, fakeRoundListItem, fakeStory } from "../lib/testing/fixtures";
 import Interviews from "./Interviews.svelte";
 
 const at = (day: number, hour = 10) => new Date(2026, 9, day, hour).toISOString();
@@ -96,7 +96,7 @@ describe("Interview Prep page", () => {
   });
 
   it("adds a round for a chosen application and opens its prep page", async () => {
-    vi.mocked(createRound).mockResolvedValue(fakeRound({ id: 33, applicationId: 9 }));
+    vi.mocked(createRound).mockResolvedValue(fakeRoundDetail({ id: 33, applicationId: 9 }));
     render(Interviews);
     await fireEvent.click(screen.getByRole("button", { name: "Add round" }));
     const form = screen.getByRole("form", { name: "New round" });

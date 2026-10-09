@@ -83,3 +83,19 @@ export function formatRoundTime(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+
+const THANK_YOU_WINDOW_MS = 3 * 86_400_000;
+
+/**
+ * Mirrors the backend rule (spec §4): a done round with no thank-you marked
+ * sent, within 3 days of its date. Used where the page changed the round
+ * since the server last computed `thank_you_due`.
+ */
+export function isThankYouDue(
+  round: Pick<InterviewRound, "state" | "thankYouSentAt" | "scheduledAt">,
+  now: Date = new Date(),
+): boolean {
+  if (round.state !== "done" || round.thankYouSentAt || !round.scheduledAt) return false;
+  const t = new Date(round.scheduledAt).getTime();
+  return !Number.isNaN(t) && t >= now.getTime() - THANK_YOU_WINDOW_MS;
+}

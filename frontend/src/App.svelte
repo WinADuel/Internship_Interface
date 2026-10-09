@@ -13,6 +13,7 @@
   import ResearchQueue from "./routes/ResearchQueue.svelte";
   import Settings from "./routes/Settings.svelte";
   import Interviews from "./routes/Interviews.svelte";
+  import InterviewRound from "./routes/InterviewRound.svelte";
 
   const routes = {
     "/": Dashboard,
@@ -23,6 +24,7 @@
     "/contacts": Contacts,
     "/research-queue": ResearchQueue,
     "/interviews": Interviews,
+    "/interviews/:id": InterviewRound,
     "/settings": Settings,
   };
 
