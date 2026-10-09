@@ -1,3 +1,5 @@
+from urllib.parse import parse_qs, urlparse
+
 import httpx
 
 from app.core.security import decrypt_value
@@ -108,3 +110,104 @@ def test_callback_google_failure_logs_scrubbed_warning(logged_in_client, monkeyp
     assert "400" in message
     assert "invalid_grant" not in message
     assert "abc-secret-code" not in message
+
+
+GMAIL = "https://www.googleapis.com/auth/gmail.readonly"
+DRIVE = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file"
+
+
+def _callback(client, state, code="abc"):
+    query = f"state={state}" + (f"&code={code}" if code else "&error=access_denied")
+    return client.get(f"/api/docs/google/callback?{query}", follow_redirects=False)
+
+
+def _stored_scopes(db_session):
+    db_session.expire_all()
+    return db_session.query(OAuthToken).filter_by(provider="google").one().scopes
+
+
+def test_callback_stores_granted_scopes_from_token_response(logged_in_client, db_session, monkeypatch):
+    _authorize(logged_in_client)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    monkeypatch.setattr(httpx, "post", fake_post_returning({**TOKENS, "scope": "only.this"}))
+    assert _callback(logged_in_client, state).status_code == 302
+    assert _stored_scopes(db_session) == "only.this"
+
+
+def test_callback_without_scope_field_stores_requested_scopes(logged_in_client, db_session, monkeypatch):
+    _authorize(logged_in_client)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    monkeypatch.setattr(httpx, "post", fake_post_returning(TOKENS))
+    _callback(logged_in_client, state)
+    assert _stored_scopes(db_session) == DRIVE
+
+
+def test_gmail_authorize_requests_gmail_incrementally(logged_in_client):
+    response = logged_in_client.get("/api/docs/google/authorize?gmail=true", follow_redirects=False)
+    assert response.status_code == 302
+    q = parse_qs(urlparse(response.headers["location"]).query)
+    assert q["scope"] == [f"{DRIVE} {GMAIL}"]
+    assert q["include_granted_scopes"] == ["true"]
+    state = logged_in_client.cookies.get("google_oauth_state")
+    assert state.startswith("gmail.") and q["state"] == [state]
+
+
+def test_gmail_callback_stores_granted_scopes_and_returns_to_settings(
+    logged_in_client, db_session, monkeypatch
+):
+    logged_in_client.get("/api/docs/google/authorize?gmail=1", follow_redirects=False)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    monkeypatch.setattr(httpx, "post", fake_post_returning({**TOKENS, "scope": f"{GMAIL} {DRIVE}"}))
+    response = _callback(logged_in_client, state)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/#/settings?gmail=1"
+    assert "max-age=0" in response.headers["set-cookie"].lower()
+    assert _stored_scopes(db_session) == f"{GMAIL} {DRIVE}"
+    assert logged_in_client.get("/api/settings").json()["gmail_granted"] is True
+
+
+def test_gmail_callback_when_gmail_was_not_granted(logged_in_client, db_session, monkeypatch):
+    logged_in_client.get("/api/docs/google/authorize?gmail=1", follow_redirects=False)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    monkeypatch.setattr(httpx, "post", fake_post_returning({**TOKENS, "scope": DRIVE}))
+    response = _callback(logged_in_client, state)
+    assert response.headers["location"] == "/#/settings?gmail=0"
+    assert logged_in_client.get("/api/settings").json()["gmail_granted"] is False
+
+
+def test_gmail_callback_without_scope_field_falls_back_to_requested(
+    logged_in_client, db_session, monkeypatch
+):
+    logged_in_client.get("/api/docs/google/authorize?gmail=1", follow_redirects=False)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    monkeypatch.setattr(httpx, "post", fake_post_returning(TOKENS))
+    assert _callback(logged_in_client, state).headers["location"] == "/#/settings?gmail=1"
+    assert _stored_scopes(db_session) == f"{DRIVE} {GMAIL}"
+
+
+def test_gmail_marker_cannot_bypass_state_check(logged_in_client, monkeypatch):
+    _authorize(logged_in_client)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    calls = []
+    monkeypatch.setattr(httpx, "post", fake_post_returning(TOKENS, calls=calls))
+    response = _callback(logged_in_client, "gmail." + state)
+    assert response.status_code == 400
+    assert calls == []
+
+
+def test_cancelled_consent_stores_nothing_and_returns(logged_in_client, db_session, monkeypatch):
+    calls = []
+    monkeypatch.setattr(httpx, "post", fake_post_returning(TOKENS, calls=calls))
+    logged_in_client.get("/api/docs/google/authorize?gmail=1", follow_redirects=False)
+    response = _callback(logged_in_client, logged_in_client.cookies.get("google_oauth_state"), code=None)
+    assert response.headers["location"] == "/#/settings?gmail=0"
+    _authorize(logged_in_client)
+    response = _callback(logged_in_client, logged_in_client.cookies.get("google_oauth_state"), code=None)
+    assert response.headers["location"] == "/#/essays?connected=0"
+    assert calls == []
+    assert db_session.query(OAuthToken).count() == 0
+
+
+def test_cancelled_consent_still_checks_state(logged_in_client):
+    _authorize(logged_in_client)
+    assert _callback(logged_in_client, "wrong", code=None).status_code == 400

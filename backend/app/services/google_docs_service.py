@@ -25,6 +25,10 @@ GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/drive.file",
 )
 GOOGLE_SCOPE = " ".join(GOOGLE_SCOPES)
+# Gmail sync (Phase 6 spec §2) is a separate, optional consent on top of the
+# scopes above. gmail.readonly is read-only: the app cannot send, delete or
+# label mail. It is requested only by Connect Gmail, never by default.
+GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GOOGLE_PROVIDER = "google"
 _HTTP_TIMEOUT = 10.0
 _FETCH_TIMEOUT = 15.0
@@ -33,17 +37,34 @@ _DOC_URL_RE = re.compile(r"^https://docs\.google\.com/document/d/([^/?#]+)(?:[/?
 _DOC_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
 
 
-def get_authorization_url(state: str) -> str:
+def requested_scope(gmail: bool = False) -> str:
+    """The space-separated scopes an authorization request asks for."""
+    return f"{GOOGLE_SCOPE} {GMAIL_SCOPE}" if gmail else GOOGLE_SCOPE
+
+
+def get_authorization_url(state: str, gmail: bool = False) -> str:
     params = {
         "response_type": "code",
         "client_id": settings.google_client_id,
         "redirect_uri": settings.google_redirect_uri,
-        "scope": GOOGLE_SCOPE,
+        "scope": requested_scope(gmail),
         "access_type": "offline",  # offline + consent so Google returns a refresh_token
         "prompt": "consent",
         "state": state,
     }
+    if gmail:
+        # Incremental authorization: the new token keeps the scopes already granted.
+        params["include_granted_scopes"] = "true"
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+
+def granted_scopes(token_response: dict, requested: str) -> str:
+    """The scopes Google actually granted (the token response's `scope`),
+    falling back to what was requested when the field is absent or blank."""
+    scope = token_response.get("scope")
+    if isinstance(scope, str) and scope.split():
+        return " ".join(scope.split())
+    return requested
 
 
 def _post_token_request(data: dict) -> dict:
@@ -96,6 +117,12 @@ def store_token(db: Session, token_response: dict, scopes: str) -> None:
 def is_google_connected(db: Session) -> bool:
     """Whether a Google connection is stored (it may still have been revoked)."""
     return _get_token_row(db) is not None
+
+
+def is_gmail_granted(db: Session) -> bool:
+    """Whether the stored Google connection includes the Gmail read scope."""
+    row = _get_token_row(db)
+    return row is not None and GMAIL_SCOPE in row.scopes.split()
 
 
 def get_valid_access_token(db: Session) -> str:

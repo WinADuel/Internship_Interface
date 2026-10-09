@@ -8,9 +8,14 @@ from app.core.security import decrypt_value
 from app.models.oauth_token import OAuthToken
 from app.services.errors import GoogleAuthError
 from app.services.google_docs_service import (
+    GMAIL_SCOPE,
+    GOOGLE_SCOPE,
     exchange_code_for_token,
     get_authorization_url,
     get_valid_access_token,
+    granted_scopes,
+    is_gmail_granted,
+    requested_scope,
     store_token,
 )
 
@@ -130,3 +135,57 @@ def test_get_valid_access_token_raises_when_refresh_fails(db_session, monkeypatc
     monkeypatch.setattr(httpx, "post", fake_post_returning({"error": "invalid_grant"}, 400))
     with pytest.raises(GoogleAuthError):
         get_valid_access_token(db_session)
+
+
+GMAIL = "https://www.googleapis.com/auth/gmail.readonly"
+DRIVE = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file"
+
+
+def test_default_authorization_url_never_asks_for_gmail():
+    q = parse_qs(urlparse(get_authorization_url("s")).query)
+    assert "gmail" not in q["scope"][0]
+    assert "include_granted_scopes" not in q
+
+
+def test_gmail_authorization_url_adds_readonly_scope_incrementally():
+    q = parse_qs(urlparse(get_authorization_url("s", gmail=True)).query)
+    assert q["scope"] == [f"{DRIVE} {GMAIL}"]
+    assert q["include_granted_scopes"] == ["true"]
+    assert q["access_type"] == ["offline"] and q["prompt"] == ["consent"]
+    assert "gmail.send" not in q["scope"][0] and "gmail.modify" not in q["scope"][0]
+
+
+def test_requested_scope():
+    assert requested_scope() == GOOGLE_SCOPE == DRIVE
+    assert requested_scope(gmail=True) == f"{DRIVE} {GMAIL}"
+    assert GMAIL_SCOPE == GMAIL
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        # Google reports what was actually granted, in its own order.
+        ({"scope": f"{GMAIL} {DRIVE}"}, f"{GMAIL} {DRIVE}"),
+        # The user unticked Gmail on the granular consent screen.
+        ({"scope": DRIVE}, DRIVE),
+        ({"scope": f"  {GMAIL}\n"}, GMAIL),
+        ({}, "requested scopes"),
+        ({"scope": ""}, "requested scopes"),
+        ({"scope": "   "}, "requested scopes"),
+        ({"scope": None}, "requested scopes"),
+        ({"scope": ["not", "a", "string"]}, "requested scopes"),
+    ],
+)
+def test_granted_scopes(response, expected):
+    assert granted_scopes(response, "requested scopes") == expected
+
+
+def test_is_gmail_granted(db_session):
+    assert is_gmail_granted(db_session) is False
+    store_token(db_session, {"refresh_token": "rt"}, scopes=DRIVE)
+    assert is_gmail_granted(db_session) is False
+    store_token(db_session, {}, scopes=f"{DRIVE} {GMAIL}")
+    assert is_gmail_granted(db_session) is True
+    # A substring of another scope does not count.
+    store_token(db_session, {}, scopes=f"{GMAIL}.extra")
+    assert is_gmail_granted(db_session) is False
