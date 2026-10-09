@@ -7,6 +7,7 @@
   import KanbanSnapshot from "../lib/components/widgets/KanbanSnapshot.svelte";
   import NeedsAttention from "../lib/components/widgets/NeedsAttention.svelte";
   import NewPostings from "../lib/components/widgets/NewPostings.svelte";
+  import UpcomingInterviews from "../lib/components/widgets/UpcomingInterviews.svelte";
   import { loadLayout, type WidgetLayoutEntry } from "../lib/dashboard/layout";
   import { loadApplications } from "../lib/stores/applications";
   import { showToast } from "../lib/stores/toast";
@@ -18,6 +19,7 @@
     { id: "snapshot", x: 6, y: 4, w: 6, h: 4, settings: {} },
     { id: "needs-attention", x: 0, y: 8, w: 12, h: 4, settings: {} },
     { id: "new-postings", x: 0, y: 12, w: 6, h: 4, settings: {} },
+    { id: "interviews", x: 6, y: 12, w: 6, h: 4, settings: {} },
   ];
 
   const titles: Record<string, string> = {
@@ -27,6 +29,7 @@
     snapshot: "Kanban snapshot",
     "needs-attention": "Needs attention",
     "new-postings": "New postings",
+    interviews: "Upcoming interviews",
   };
 
   let grid: { updateSettings: (id: string, s: Record<string, unknown>) => void } | undefined;
@@ -63,6 +66,8 @@
       <NeedsAttention />
     {:else if id === "new-postings"}
       <NewPostings />
+    {:else if id === "interviews"}
+      <UpcomingInterviews />
     {/if}
   </section>
 {/snippet}

@@ -8,6 +8,7 @@
   import { showToast } from "../stores/toast";
   import ApplicationForm from "./ApplicationForm.svelte";
   import ApplicationContacts from "./contacts/ApplicationContacts.svelte";
+  import ApplicationInterviews from "./interviews/ApplicationInterviews.svelte";
   import GoogleDocViewer from "./GoogleDocViewer.svelte";
 
   let { application }: { application: Application } = $props();
@@ -68,7 +69,7 @@
     ["Location", application.location],
     ["Source", application.source],
     ["Follow-up date", application.followUpDate ? formatDate(application.followUpDate) : null],
-    ["Interview", application.interviewDatetime ? formatDateTime(application.interviewDatetime) : null],
+    ["Next interview", application.interviewDatetime ? formatDateTime(application.interviewDatetime) : null],
     ["Google Doc", application.googleDocLink],
   ]);
 
@@ -125,6 +126,8 @@
       {/each}
     </ol>
   {/if}
+
+  <ApplicationInterviews {application} />
 
   <ApplicationContacts applicationId={application.id} />
 

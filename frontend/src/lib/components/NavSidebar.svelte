@@ -31,7 +31,7 @@
   <a href="#/contacts">Contacts</a>
   <a href="#/research-queue">Research Queue</a>
   <a href="#/essays">Essays</a>
-  <span class="disabled" aria-disabled="true">Interview Prep <small>Coming soon</small></span>
+  <a href="#/interviews">Interview Prep</a>
   <span class="disabled" aria-disabled="true">Email Sync <small>Coming soon</small></span>
   <a href="#/settings" class="settings">Settings</a>
   {#if $session.loggedIn}
