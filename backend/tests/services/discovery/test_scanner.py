@@ -795,7 +795,7 @@ def test_first_scan_of_the_day_rescores_every_posting(db_session):
 
     run_scan(db, FakeDiscoveryHttp({}), now=NOW, pause=Pauses())
     db.refresh(posting)
-    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "posted 2 days ago"])
+    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "posted in the last 3 days"])
 
     # Later the same day: no full pass (ingest still scores what it touches).
     posting.local_score = 99

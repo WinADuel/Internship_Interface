@@ -192,18 +192,21 @@ def test_a_watchlist_company_posting_is_15_and_does_not_stack_with_preferred():
 @pytest.mark.parametrize(
     ("age", "points", "reason"),
     [
-        (timedelta(0), 10, "posted today"),
-        (timedelta(hours=-5), 10, "posted today"),  # a date a little in the future
-        (timedelta(days=1), 10, "posted 1 day ago"),
-        (timedelta(days=3), 10, "posted 3 days ago"),
-        (timedelta(days=3, seconds=1), 6, "posted 3 days ago"),
-        (timedelta(days=7), 6, "posted 7 days ago"),
-        (timedelta(days=7, seconds=1), 3, "posted 7 days ago"),
-        (timedelta(days=14), 3, "posted 14 days ago"),
+        (timedelta(0), 10, "posted in the last 3 days"),
+        (timedelta(hours=-5), 10, "posted in the last 3 days"),  # a date a little in the future
+        (timedelta(days=1), 10, "posted in the last 3 days"),
+        (timedelta(days=3), 10, "posted in the last 3 days"),
+        (timedelta(days=3, seconds=1), 6, "posted in the last week"),
+        (timedelta(days=7), 6, "posted in the last week"),
+        (timedelta(days=7, seconds=1), 3, "posted in the last 2 weeks"),
+        (timedelta(days=14), 3, "posted in the last 2 weeks"),
         (timedelta(days=14, seconds=1), 0, None),
     ],
 )
 def test_freshness_boundaries(age, points, reason):
+    # The reason names the band that earned the points, not a day count: the
+    # row already shows "Posted N days ago" (counted in local calendar days),
+    # and a stored count would contradict it (found in the end-to-end check).
     prefs = roles("nothing-matches-this")
     got = score(prefs, date_posted=NOW - age)
     assert got.score == points
@@ -212,7 +215,8 @@ def test_freshness_boundaries(age, points, reason):
 
 def test_freshness_falls_back_to_first_seen_when_there_is_no_posted_date():
     prefs = roles("nothing-matches-this")
-    assert score(prefs, date_posted=None, first_seen_at=NOW - timedelta(days=2)).score == 10
+    got = score(prefs, date_posted=None, first_seen_at=NOW - timedelta(days=2))
+    assert got == LocalScore(10, ["found in the last 3 days"])
     assert score(prefs, date_posted=OLD, first_seen_at=NOW).score == 0
 
 
@@ -236,7 +240,7 @@ def test_every_signal_together_is_capped_at_100():
         "Skills: python, pytorch, distributed",
         "New York",
         "Preferred company",
-        "posted 1 day ago",
+        "posted in the last 3 days",
     ]
 
 
@@ -319,8 +323,8 @@ def test_ingest_scores_inserted_and_updated_rows_with_the_saved_preferences(db_s
     set_prefs(db, role_keywords=["backend"])
     ingest(db, result([pin("a", title="Backend Intern"), pin("b", title="Frontend Intern")]), NOW)
     rows = {p.source_key: p for p in db.scalars(select(Posting))}
-    assert (rows["a"].local_score, rows["a"].local_reasons) == (50, ["Title matches 'backend'", "posted today"])
-    assert (rows["b"].local_score, rows["b"].local_reasons) == (10, ["posted today"])
+    assert (rows["a"].local_score, rows["a"].local_reasons) == (50, ["Title matches 'backend'", "found in the last 3 days"])
+    assert (rows["b"].local_score, rows["b"].local_reasons) == (10, ["found in the last 3 days"])
 
     # A later scan re-scores the rows it updates (here with an explicit ranker).
     later = NOW + timedelta(days=5)
@@ -397,7 +401,7 @@ def test_pasted_postings_are_scored(db_session):
         PasteConfirmIn(url="https://example.com/jobs/1", company="Acme", title="Backend Intern"),
         now=NOW,
     )
-    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "posted today"])
+    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "found in the last 3 days"])
 
 
 def test_rescore_skips_rows_whose_score_is_unchanged(db_session):
