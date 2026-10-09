@@ -10,9 +10,13 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 
 from app.models.contact import EmailConfidence
 from app.models.research_queue import QueueKind
+from app.services.discovery.parsers import clean_text
 
 MAX_BATCH = 25
 MAX_SOURCES = 20
+# Inbox ranking (Phase 5 spec §5).
+MAX_SCORES = 150
+MAX_CLAUDE_NOTE = 200
 
 
 def _drop_nul(value: str) -> str:
@@ -108,3 +112,66 @@ class WorkOut(BaseModel):
     outreach_profile: str
     known_contacts: list[KnownContact]
     followups_needed: list[FollowupNeeded]
+
+
+
+# --- Inbox ranking (Phase 5 spec §5) ------------------------------------------
+
+
+def _note(value: str) -> str:
+    """One line of plain text: control characters dropped, whitespace runs
+    collapsed, capped at MAX_CLAUDE_NOTE (a longer note is cut, not refused,
+    so one wordy note doesn't lose the whole day's scores)."""
+    return clean_text(value, MAX_CLAUDE_NOTE)
+
+
+class PostingScoreIn(_ClaudeIn):
+    posting_id: int
+    score: int = Field(ge=0, le=100)
+    note: Annotated[str, Field(max_length=MAX_CLAUDE_NOTE * 10), AfterValidator(_note)] = ""
+
+
+class PostingScoresIn(_ClaudeIn):
+    scores: list[PostingScoreIn] = Field(max_length=MAX_SCORES)
+
+
+class ScoresResultOut(BaseModel):
+    updated: int
+    skipped: int
+
+
+class RankingPreferencesOut(BaseModel):
+    role_keywords: list[str]
+    skill_keywords: list[str]
+    preferred_locations: list[str]
+    preferred_companies: list[str]
+    avoid_companies: list[str]
+    dealbreaker_keywords: list[str]
+
+
+class RankingExamplesOut(BaseModel):
+    """`Company — Title` of the most recent saves and dismissals."""
+
+    saved: list[str]
+    dismissed: list[str]
+
+
+class RankingPostingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    company: str
+    title: str
+    locations: list[str]
+    url: str
+    category: str | None
+    terms: list[str]
+    date_posted: datetime | None
+    local_score: int | None
+
+
+class RankingWorkOut(BaseModel):
+    profile: str
+    preferences: RankingPreferencesOut
+    examples: RankingExamplesOut
+    postings: list[RankingPostingOut]

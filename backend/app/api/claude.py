@@ -6,9 +6,18 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_claude_token, get_sheet_sync_scheduler
 from app.db.session import get_db
-from app.schemas.claude import ContactsBatchIn, FollowupsBatchIn, IngestResultOut, QueueResultIn, WorkOut
+from app.schemas.claude import (
+    ContactsBatchIn,
+    FollowupsBatchIn,
+    IngestResultOut,
+    PostingScoresIn,
+    QueueResultIn,
+    RankingWorkOut,
+    ScoresResultOut,
+    WorkOut,
+)
 from app.schemas.research_queue import QueueItemOut
-from app.services import claude_ingest_service
+from app.services import claude_ingest_service, claude_ranking_service
 from app.services.errors import QueueItemNotFoundError, QueueItemNotPendingError
 from app.services.nudges import utc_today
 from app.services.sheet_sync_service import CONTACT_TABS, SheetSyncScheduler
@@ -62,3 +71,16 @@ def complete(item_id: int, body: QueueResultIn, db: Session = Depends(get_db)):
 @router.post("/queue/{item_id}/failed", response_model=QueueItemOut)
 def failed(item_id: int, body: QueueResultIn, db: Session = Depends(get_db)):
     return _finish(claude_ingest_service.fail_queue_item, item_id, body, db)
+
+
+# --- Discover Inbox ranking (Phase 5 spec §5) ----------------------------------
+
+
+@router.get("/postings", response_model=RankingWorkOut)
+def ranking_work(db: Session = Depends(get_db)):
+    return claude_ranking_service.ranking_work(db)
+
+
+@router.post("/postings/scores", response_model=ScoresResultOut)
+def save_scores(batch: PostingScoresIn, db: Session = Depends(get_db)):
+    return claude_ranking_service.save_scores(db, batch)

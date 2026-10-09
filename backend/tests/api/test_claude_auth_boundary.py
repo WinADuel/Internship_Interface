@@ -42,6 +42,27 @@ def test_claude_token_rejected_on_discovery_and_backup_routes(client, db_session
     assert client.request(method, path, json={}).status_code == 401, (method, path)
 
 
+CLAUDE_RANKING_ROUTES = [
+    ("GET", "/api/claude/postings", None),
+    ("POST", "/api/claude/postings/scores", {"scores": []}),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "body"), CLAUDE_RANKING_ROUTES)
+def test_ranking_routes_take_the_claude_token_and_nothing_else(client, logged_in_client, db_session, method, path, body):
+    # A session cookie is not enough.
+    r = logged_in_client.request(method, path, json=body)
+    assert r.status_code == 401 and r.json() == {"detail": "invalid claude token"}
+    jwt = logged_in_client.cookies.get("access_token")
+    logged_in_client.cookies.clear()
+    assert client.request(method, path, json=body, headers={"Authorization": f"Bearer {jwt}"}).status_code == 401
+    assert client.request(method, path, json=body).status_code == 401
+    token, raw = create_token(db_session)
+    assert client.request(method, path, json=body, headers={"Authorization": f"Bearer {raw}"}).status_code == 200
+    revoke_token(db_session, token.id)
+    assert client.request(method, path, json=body, headers={"Authorization": f"Bearer {raw}"}).status_code == 401
+
+
 def test_revoked_token_rejected(client, db_session):
     token, raw = create_token(db_session)
     revoke_token(db_session, token.id)
