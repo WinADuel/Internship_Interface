@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { replace, router } from "svelte-spa-router";
   import { ApiError } from "../lib/api/client";
   import { getSettings, updateSettings } from "../lib/api/settings";
   import BackupSettings from "../lib/components/settings/BackupSettings.svelte";
   import BackupSheetStatus from "../lib/components/settings/BackupSheetStatus.svelte";
   import ClaudeTokens from "../lib/components/settings/ClaudeTokens.svelte";
   import DiscoverySettings from "../lib/components/settings/DiscoverySettings.svelte";
+  import GmailSettings from "../lib/components/settings/GmailSettings.svelte";
   import { showToast } from "../lib/stores/toast";
   import type { AppSettings } from "../lib/types/contact";
 
@@ -43,6 +45,18 @@
 
   onMount(() => {
     void load();
+  });
+
+  // Connect Gmail comes back to #/settings?gmail=1 (granted) or ?gmail=0 (cancelled or not allowed).
+  let gmailHandled = false;
+  $effect(() => {
+    if (gmailHandled) return;
+    const result = new URLSearchParams(router.querystring ?? "").get("gmail");
+    if (result !== "1" && result !== "0") return;
+    gmailHandled = true;
+    if (result === "1") showToast("Gmail connected. Turn on Sync Gmail below to start.", "info");
+    else showToast("Gmail wasn't connected: Google didn't give permission to read mail.");
+    void replace("/settings");
   });
 
   async function save(event: SubmitEvent) {
@@ -105,6 +119,8 @@
 {#if settings}
   <!-- Its own form and Save: sends only the discovery fields. -->
   <DiscoverySettings {settings} onsaved={(saved) => (settings = saved)} />
+  <!-- Likewise for the Gmail fields. -->
+  <GmailSettings {settings} onsaved={(saved) => (settings = saved)} />
 {/if}
 
 <ClaudeTokens />
