@@ -40,8 +40,8 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function page(items: Posting[], total = items.length) {
-  return { items, total };
+function page(items: Posting[], total = items.length, topPicks: number | null = null) {
+  return { items, total, topPicks };
 }
 
 function rowNames(): string[] {
@@ -71,7 +71,7 @@ describe("PostingList — Inbox", () => {
   it("loads the first page of the view", async () => {
     render(PostingList, { view: "inbox" });
     await screen.findByText("Figma");
-    expect(listPostings).toHaveBeenCalledWith("inbox", { offset: 0 });
+    expect(listPostings).toHaveBeenCalledWith("inbox", { offset: 0, sort: "best" });
     expect(rowNames()).toEqual(["Stripe", "Figma"]);
   });
 
@@ -186,7 +186,7 @@ describe("PostingList — Inbox", () => {
     expect(screen.getByText("Showing 1 of 2")).toBeInTheDocument();
     vi.mocked(listPostings).mockResolvedValueOnce(page([figma], 2));
     await fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 1 });
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 1, sort: "best" });
     await screen.findByText("Figma");
     expect(rowNames()).toEqual(["Stripe", "Figma"]);
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
@@ -198,7 +198,7 @@ describe("PostingList — Inbox", () => {
     render(PostingList, { view: "inbox" });
     await fireEvent.click(await screen.findByRole("button", { name: "Save Stripe – SWE Intern" }));
     await screen.findByText("Figma");
-    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0 });
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0, sort: "best" });
     expect(screen.queryByText("No new postings match your filters.")).toBeNull();
   });
 
@@ -219,6 +219,93 @@ describe("PostingList — Inbox", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("Stripe");
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("PostingList — Inbox ranking", () => {
+  const sortButton = (name: string) => screen.getByRole("button", { name });
+  const topPicksChip = () => screen.getByRole("button", { name: /^Top picks/ });
+
+  it("orders by Best match by default; Newest reloads newest first", async () => {
+    render(PostingList, { view: "inbox" });
+    await screen.findByText("Figma");
+    expect(sortButton("Best match")).toHaveAttribute("aria-pressed", "true");
+    expect(sortButton("Newest")).toHaveAttribute("aria-pressed", "false");
+    vi.mocked(listPostings).mockResolvedValueOnce(page([figma, stripe]));
+    await fireEvent.click(sortButton("Newest"));
+    await vi.waitFor(() => expect(rowNames()).toEqual(["Figma", "Stripe"]));
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0, sort: "newest" });
+    expect(sortButton("Newest")).toHaveAttribute("aria-pressed", "true");
+    await fireEvent.click(sortButton("Newest"));
+    expect(listPostings).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the Top picks count and filters to Top picks (score 70+) and back", async () => {
+    vi.mocked(listPostings).mockResolvedValue(page([stripe, figma], 2, 12));
+    render(PostingList, { view: "inbox" });
+    await screen.findByText("Figma");
+    expect(topPicksChip()).toHaveAccessibleName("Top picks 12");
+    expect(topPicksChip()).toHaveAttribute("aria-pressed", "false");
+    await fireEvent.click(topPicksChip());
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0, sort: "best", minScore: 70 });
+    expect(topPicksChip()).toHaveAttribute("aria-pressed", "true");
+    await fireEvent.click(topPicksChip());
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0, sort: "best" });
+  });
+
+  it("keeps the order and Top picks filter when loading more", async () => {
+    vi.mocked(listPostings).mockResolvedValue(page([stripe], 2, 2));
+    render(PostingList, { view: "inbox", sort: "newest", topPicksOnly: true });
+    await screen.findByText("Stripe");
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0, sort: "newest", minScore: 70 });
+    vi.mocked(listPostings).mockResolvedValueOnce(page([figma], 2, 2));
+    await fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByText("Figma");
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 1, sort: "newest", minScore: 70 });
+  });
+
+  it("says when there are no Top picks and keeps the toolbar to turn the filter off", async () => {
+    vi.mocked(listPostings).mockResolvedValue(page([], 0, 0));
+    render(PostingList, { view: "inbox", topPicksOnly: true });
+    expect(await screen.findByText(/No Top picks \(score 70\+\) right now/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "#/settings");
+    expect(topPicksChip()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("drops an older answer when the order changes before it arrives", async () => {
+    const slow = deferred<ReturnType<typeof page>>();
+    vi.mocked(listPostings).mockReturnValueOnce(slow.promise).mockResolvedValueOnce(page([figma]));
+    render(PostingList, { view: "inbox" });
+    await fireEvent.click(sortButton("Newest"));
+    await screen.findByText("Figma");
+    slow.resolve(page([stripe]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(rowNames()).toEqual(["Figma"]);
+  });
+
+  it("counts a Top pick leaving the Inbox, and back if the server refuses", async () => {
+    const pick = fakePosting({ id: 3, company: "Anthropic", title: "ML Intern", claudeScore: 90 });
+    const low = fakePosting({ id: 4, company: "Initech", title: "Intern", localScore: 20 });
+    vi.mocked(listPostings).mockResolvedValue(page([pick, low], 2, 5));
+    render(PostingList, { view: "inbox" });
+    await screen.findByText("Anthropic");
+    vi.mocked(savePosting).mockResolvedValueOnce({ ...low, state: "saved" });
+    await fireEvent.click(screen.getByRole("button", { name: "Save Initech – Intern" }));
+    expect(topPicksChip()).toHaveAccessibleName("Top picks 5");
+    const pending = deferred<Posting>();
+    vi.mocked(dismissPosting).mockReturnValueOnce(pending.promise);
+    await fireEvent.click(screen.getByRole("button", { name: "Dismiss Anthropic – ML Intern" }));
+    expect(topPicksChip()).toHaveAccessibleName("Top picks 4");
+    pending.reject(new ApiError(500, "boom"));
+    await vi.waitFor(() => expect(topPicksChip()).toHaveAccessibleName("Top picks 5"));
+  });
+
+  it("has no ranking toolbar outside the Inbox", async () => {
+    render(PostingList, { view: "saved" });
+    await screen.findByText("Figma");
+    expect(listPostings).toHaveBeenCalledWith("saved", { offset: 0 });
+    expect(screen.queryByRole("button", { name: "Best match" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Top picks/ })).toBeNull();
   });
 });
 

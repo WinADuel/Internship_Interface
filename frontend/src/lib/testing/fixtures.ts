@@ -96,8 +96,12 @@ export function fakePosting(overrides: Partial<Posting> = {}): Posting {
     stateChangedAt: "2026-10-02T00:00:00Z",
     applicationId: null,
     watchCompanyId: null,
+    localScore: null,
+    localReasons: [],
     claudeScore: null,
     claudeNote: null,
+    claudeScoredAt: null,
+    claudeStale: false,
     ...overrides,
   };
 }

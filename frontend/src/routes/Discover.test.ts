@@ -31,7 +31,7 @@ beforeEach(() => {
   discoveryStatus.set(null);
   vi.mocked(listPostings)
     .mockReset()
-    .mockImplementation(async (view = "inbox") => ({ items: [fakePosting({ company: BY_VIEW[view] })], total: 1 }));
+    .mockImplementation(async (view = "inbox") => ({ items: [fakePosting({ company: BY_VIEW[view] })], total: 1, topPicks: null }));
   vi.mocked(getScanStatus).mockReset().mockResolvedValue(fakeScanStatus());
   vi.mocked(listWatchlist).mockReset().mockResolvedValue([fakeWatchCompany({ name: "Anthropic" })]);
   vi.mocked(previewPaste).mockReset();
@@ -53,7 +53,7 @@ describe("Discover page", () => {
     expect(tabs[1]).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("tabpanel", { name: "Inbox" })).toBeInTheDocument();
     expect(await screen.findByText("Stripe")).toBeInTheDocument();
-    expect(listPostings).toHaveBeenCalledWith("inbox", { offset: 0 });
+    expect(listPostings).toHaveBeenCalledWith("inbox", { offset: 0, sort: "best" });
   });
 
   it("switches lists when a tab is clicked", async () => {
@@ -110,6 +110,19 @@ describe("Discover page", () => {
     await vi.waitFor(() => expect(listPostings).toHaveBeenLastCalledWith("saved", { offset: 0 }));
   });
 
+  it("keeps the Inbox order and Top picks filter across tab switches", async () => {
+    render(Discover);
+    await screen.findByText("Stripe");
+    await fireEvent.click(screen.getByRole("button", { name: "Newest" }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Top picks/ }));
+    await fireEvent.click(screen.getByRole("tab", { name: "Saved" }));
+    await screen.findByText("Figma");
+    await fireEvent.click(screen.getByRole("tab", { name: "Inbox" }));
+    await screen.findByText("Stripe");
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0, sort: "newest", minScore: 70 });
+    expect(screen.getByRole("button", { name: "Newest" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("reloads the open list when a running scan finishes", async () => {
     vi.useFakeTimers();
     vi.mocked(getScanStatus)
@@ -120,6 +133,6 @@ describe("Discover page", () => {
     expect(listPostings).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(5000);
     expect(listPostings).toHaveBeenCalledTimes(2);
-    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0 });
+    expect(listPostings).toHaveBeenLastCalledWith("inbox", { offset: 0, sort: "best" });
   });
 });
