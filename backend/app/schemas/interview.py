@@ -109,3 +109,52 @@ class InterviewRoundOut(BaseModel):
     thank_you_sent_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class InterviewRoundSummaryOut(InterviewRoundOut):
+    """A round in a list: its fields plus the application's company and role,
+    checklist progress and whether a thank-you is due."""
+
+    company: str
+    role_title: str
+    checklist_done: int
+    checklist_total: int
+    thank_you_due: bool
+
+
+class RoundContactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    email: str | None
+    title: str | None
+
+
+class RoundStoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+
+
+class InterviewRoundDetailOut(InterviewRoundSummaryOut):
+    """One round with its linked interviewers and planned stories."""
+
+    contacts: list[RoundContactOut]
+    stories: list[RoundStoryOut]
+
+
+MAX_LINKS = 50
+
+
+class RoundContactsIn(BaseModel):
+    """The full set of linked contacts (replaces the current one)."""
+
+    contact_ids: Annotated[list[int], Field(max_length=MAX_LINKS)]
+
+
+class RoundStoriesIn(BaseModel):
+    """The full set of linked stories (replaces the current one)."""
+
+    story_ids: Annotated[list[int], Field(max_length=MAX_LINKS)]

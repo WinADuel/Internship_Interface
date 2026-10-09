@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.application import enum_column
+from app.models.application import Application, enum_column
 from app.models.contact import Contact
 from app.models.story import Story
 
@@ -106,6 +106,8 @@ class InterviewRound(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+    # Read-only: rounds are created against an application id, never moved.
+    application: Mapped[Application] = relationship(viewonly=True)
     contacts: Mapped[list[Contact]] = relationship(
         secondary=interview_round_contacts, order_by=Contact.id, passive_deletes=True
     )

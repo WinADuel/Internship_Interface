@@ -11,20 +11,25 @@ to the application)."""
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from urllib.parse import urlsplit
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, contains_eager
 
+from app.core.config import settings
 from app.models.application import Application
 from app.models.contact import Contact
-from app.models.interview import InterviewRound, InterviewState
+from app.models.interview import InterviewKind, InterviewRound, InterviewState
 from app.models.story import Story
 from app.schemas.interview import ChecklistItem, InterviewRoundCreate, InterviewRoundUpdate
+from app.services import ics
 from app.services.errors import (
     ApplicationNotFoundError,
     ContactNotFoundError,
     ContactNotOnApplicationError,
     InterviewRoundNotFoundError,
+    RoundNotScheduledError,
+    StoryArchivedError,
     StoryNotFoundError,
 )
 from app.services.sheet_sync_service import TAB_APPLICATIONS
@@ -42,6 +47,16 @@ DEFAULT_CHECKLIST = (
 )
 
 THANK_YOU_WINDOW = timedelta(days=3)
+
+KIND_LABELS = {
+    InterviewKind.RECRUITER_SCREEN: "Recruiter screen",
+    InterviewKind.TECHNICAL: "Technical",
+    InterviewKind.BEHAVIORAL: "Behavioral",
+    InterviewKind.CASE: "Case",
+    InterviewKind.ONSITE: "Onsite",
+    InterviewKind.FINAL: "Final",
+    InterviewKind.OTHER: "Interview",
+}
 
 RoundScope = Literal["upcoming", "past", "all"]
 
@@ -134,11 +149,19 @@ def list_rounds(
 ) -> list[InterviewRound]:
     """`upcoming`: still scheduled and not yet started (or no date yet),
     soonest first with undated rounds last. `past`: everything else, most
-    recent first. `all`: by date, undated last."""
+    recent first. `all`: by date, undated last. Without `application_id`,
+    rounds of archived applications are left out; one application's list
+    shows all of its rounds. Each round comes with its application loaded."""
     now = now or _now()
-    query = select(InterviewRound)
+    query = (
+        select(InterviewRound)
+        .join(InterviewRound.application)
+        .options(contains_eager(InterviewRound.application))
+    )
     if application_id is not None:
         query = query.where(InterviewRound.application_id == application_id)
+    else:
+        query = query.where(Application.archived.is_(False))
     if scope == "upcoming":
         query = query.where(_is_upcoming(now))
     elif scope == "past":
@@ -192,13 +215,17 @@ def set_round_contacts(db: Session, round_id: int, contact_ids: list[int]) -> In
 
 
 def set_round_stories(db: Session, round_id: int, story_ids: list[int]) -> InterviewRound:
-    """Replace the stories planned for the round."""
+    """Replace the stories planned for the round. An archived story can't be
+    newly linked; one that is already linked stays."""
     interview_round = get_round(db, round_id)
+    linked = {story.id for story in interview_round.stories}
     stories: list[Story] = []
     for story_id in dict.fromkeys(story_ids):
         story = db.get(Story, story_id)
         if story is None:
             raise StoryNotFoundError(story_id)
+        if story.archived and story.id not in linked:
+            raise StoryArchivedError(f"story {story_id} is archived")
         stories.append(story)
     interview_round.stories = stories
     db.commit()
@@ -221,3 +248,40 @@ def checklist_progress(interview_round: InterviewRound) -> tuple[int, int]:
     """(items done, items total)."""
     items = interview_round.checklist or []
     return sum(1 for item in items if item.get("done")), len(items)
+
+
+def round_label(interview_round: InterviewRound) -> str:
+    """The round's title, or its kind ("Technical") when it has none."""
+    return interview_round.title or KIND_LABELS[interview_round.kind]
+
+
+def prep_page_url(round_id: int) -> str:
+    """The round's prep page in the app. The app and the API share one
+    origin, and GOOGLE_REDIRECT_URI is always a URL on it (deploy:
+    https://<DOMAIN>/api/..., local: the Vite dev server), so its origin is
+    the app's. The request's own host can't be used: behind Caddy the
+    backend sees plain http."""
+    parts = urlsplit(settings.google_redirect_uri)
+    return f"{parts.scheme}://{parts.netloc}/#/interviews/{round_id}"
+
+
+def round_calendar(interview_round: InterviewRound, now: datetime | None = None) -> str:
+    """The round as a one-event .ics file (spec §4). Needs `scheduled_at`."""
+    if interview_round.scheduled_at is None:
+        raise RoundNotScheduledError(interview_round.id)
+    application = interview_round.application
+    url = prep_page_url(interview_round.id)
+    description = [f"Role: {application.role_title}"]
+    if interview_round.interviewers:
+        description.append(f"Interviewers: {interview_round.interviewers}")
+    description.append(f"Prep page: {url}")
+    return ics.event_calendar(
+        uid=f"interview-round-{interview_round.id}@internship-tracker",
+        start=interview_round.scheduled_at,
+        duration_minutes=interview_round.duration_minutes,
+        summary=f"Interview: {application.company} — {round_label(interview_round)}",
+        location=interview_round.location,
+        description="\n".join(description),
+        url=url,
+        now=now,
+    )
