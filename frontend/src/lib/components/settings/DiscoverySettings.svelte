@@ -3,6 +3,7 @@
   import { ApiError } from "../../api/client";
   import { getMatchCount } from "../../api/discovery";
   import { updateSettings } from "../../api/settings";
+  import { splitValidation } from "../../settings/validation";
   import { refreshDiscoveryStatus } from "../../stores/discovery";
   import { showToast } from "../../stores/toast";
   import type { AppSettings } from "../../types/contact";
@@ -98,7 +99,7 @@
   let formError = $state<string | null>(null);
   let fieldErrors = $state<Partial<Record<FieldName, string>>>({});
 
-  const FIELDS: ReadonlySet<string> = new Set<FieldName>([
+  const FIELDS: ReadonlySet<FieldName> = new Set<FieldName>([
     "discovery_list_urls",
     "discovery_terms",
     "discovery_categories",
@@ -109,21 +110,6 @@
     "discovery_hide_no_sponsorship",
     "discovery_scan_hours",
   ]);
-
-  /** FastAPI 422 items for our fields, keyed by field; anything else is returned as text. */
-  function splitValidation(detail: unknown[]): { fields: Partial<Record<FieldName, string>>; other: string[] } {
-    const fields: Partial<Record<FieldName, string>> = {};
-    const other: string[] = [];
-    for (const item of detail) {
-      const { loc, msg } = (item ?? {}) as { loc?: unknown; msg?: unknown };
-      if (typeof msg !== "string") continue;
-      const text = msg.replace(/^Value error, /, "");
-      const field = Array.isArray(loc) && loc[0] === "body" ? loc[1] : undefined;
-      if (typeof field === "string" && FIELDS.has(field)) fields[field as FieldName] ??= text;
-      else other.push(text);
-    }
-    return { fields, other };
-  }
 
   function payload(): Pick<AppSettings, Field> {
     return {
@@ -175,7 +161,7 @@
       onsaved?.(saved);
     } catch (err) {
       if (err instanceof ApiError && err.status === 422 && Array.isArray(err.detail)) {
-        const { fields, other } = splitValidation(err.detail);
+        const { fields, other } = splitValidation(err.detail, FIELDS);
         fieldErrors = fields;
         if (fields.discovery_list_urls) advancedOpen = true;
         const lead = Object.keys(fields).length ? ["Some settings weren't saved. Fix the fields marked below."] : [];

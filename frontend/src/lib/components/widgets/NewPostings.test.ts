@@ -21,15 +21,15 @@ const five = () =>
   );
 
 describe("NewPostings", () => {
-  it("asks for the five newest Inbox postings", async () => {
-    vi.mocked(listPostings).mockResolvedValue({ items: [], total: 0 });
+  it("asks for the top five Inbox postings by Best match", async () => {
+    vi.mocked(listPostings).mockResolvedValue({ items: [], total: 0, topPicks: 0 });
     render(NewPostings);
     await screen.findByText(/No new matches/);
-    expect(listPostings).toHaveBeenCalledWith("inbox", { limit: 5 });
+    expect(listPostings).toHaveBeenCalledWith("inbox", { limit: 5, sort: "best" });
   });
 
   it("shows the Inbox count and five rows linking to Discover", async () => {
-    vi.mocked(listPostings).mockResolvedValue({ items: five(), total: 42 });
+    vi.mocked(listPostings).mockResolvedValue({ items: five(), total: 42, topPicks: 3 });
     render(NewPostings);
     const count = await screen.findByRole("link", { name: "42 new matches" });
     expect(count.getAttribute("href")).toBe("#/discover");
@@ -44,6 +44,7 @@ describe("NewPostings", () => {
     vi.mocked(listPostings).mockResolvedValue({
       items: [fakePosting({ datePosted: null, firstSeenAt: new Date(2026, 9, 7, 9).toISOString() })],
       total: 1,
+      topPicks: 0,
     });
     render(NewPostings);
     expect(await screen.findByRole("link", { name: "1 new match" })).toBeInTheDocument();
@@ -51,7 +52,7 @@ describe("NewPostings", () => {
   });
 
   it("shows the empty state with a link to Settings", async () => {
-    vi.mocked(listPostings).mockResolvedValue({ items: [], total: 0 });
+    vi.mocked(listPostings).mockResolvedValue({ items: [], total: 0, topPicks: 0 });
     const { container } = render(NewPostings);
     const empty = await screen.findByText(/No new matches/);
     expect(empty.textContent).toBe("No new matches. Adjust filters in Settings.");
@@ -62,7 +63,7 @@ describe("NewPostings", () => {
   it("shows a failure state and retries", async () => {
     vi.mocked(listPostings)
       .mockRejectedValueOnce(new Error("down"))
-      .mockResolvedValueOnce({ items: five().slice(0, 2), total: 2 });
+      .mockResolvedValueOnce({ items: five().slice(0, 2), total: 2, topPicks: 0 });
     render(NewPostings);
     expect(await screen.findByText("Couldn't load new postings.")).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -75,6 +76,7 @@ describe("NewPostings", () => {
     vi.mocked(listPostings).mockResolvedValue({
       items: [fakePosting({ title: "<img src=x onerror=alert(1)>" })],
       total: 1,
+      topPicks: 0,
     });
     const { container } = render(NewPostings);
     expect(await screen.findByText("Stripe – <img src=x onerror=alert(1)>")).toBeInTheDocument();

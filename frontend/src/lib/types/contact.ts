@@ -1,5 +1,5 @@
 import type { Priority } from "./application";
-import type { DiscoverySettings } from "./discovery";
+import type { DiscoverySettings, RankingSettings } from "./discovery";
 
 // String unions mirror the backend enums exactly.
 export type ContactKind = "professor" | "company";
@@ -129,7 +129,7 @@ export interface QueueItemInput {
   targetCount: number;
 }
 
-export interface AppSettings extends DiscoverySettings {
+export interface AppSettings extends DiscoverySettings, RankingSettings {
   outreachProfile: string;
   nudgeUnsentDays: number;
   nudgeFollowupDays: number;
@@ -142,6 +142,8 @@ export interface AppSettings extends DiscoverySettings {
   /** Set by the scanner; read-only here. */
   lastScanAt: string | null;
   lastScanError: string | null;
+  /** When the ranking preferences last changed; read-only here. */
+  rankingUpdatedAt: string | null;
   gmailSyncEnabled: boolean;
   gmailSyncMinutes: number;
   gmailLookbackDays: number;
@@ -168,7 +170,8 @@ export type AppSettingsUpdate = Partial<
     | "gmailLookbackDays"
     | "gmailAutoApply"
   > &
-    DiscoverySettings
+    DiscoverySettings &
+    RankingSettings
 >;
 
 export interface ClaudeTokenInfo {

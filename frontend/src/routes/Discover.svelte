@@ -4,7 +4,7 @@
   import PostingList from "../lib/components/discovery/PostingList.svelte";
   import ScanHeader from "../lib/components/discovery/ScanHeader.svelte";
   import Watchlist from "../lib/components/discovery/Watchlist.svelte";
-  import type { PostingView } from "../lib/types/discovery";
+  import type { PostingSort, PostingView } from "../lib/types/discovery";
 
   type Tab = PostingView | "watchlist";
 
@@ -19,6 +19,9 @@
   // Bumped to remount (and so reload) the open list, e.g. after a scan finishes.
   let reloads = $state(0);
   let tabButtons: HTMLButtonElement[] = $state([]);
+  // The Inbox order and Top picks filter, kept across reloads and tab switches.
+  let inboxSort = $state<PostingSort>("best");
+  let topPicksOnly = $state(false);
 
   function reload() {
     reloads += 1;
@@ -73,7 +76,7 @@
     <Watchlist />
   {:else}
     {#key `${tab}:${reloads}`}
-      <PostingList view={tab} />
+      <PostingList view={tab} bind:sort={inboxSort} bind:topPicksOnly />
     {/key}
   {/if}
 </div>

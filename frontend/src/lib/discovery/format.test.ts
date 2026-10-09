@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bestScore,
   isWebUrl,
   postedAgo,
   postingLabel,
@@ -145,5 +146,14 @@ describe("postingWhen", () => {
   it("falls back when the posted date is unparseable, and is empty when nothing parses", () => {
     expect(postingWhen(fakePosting({ datePosted: "soon", firstSeenAt: new Date(2026, 9, 8, 9).toISOString() }), now)).toBe("Found today");
     expect(postingWhen(fakePosting({ datePosted: null, firstSeenAt: "nope" }), now)).toBe("");
+  });
+});
+
+describe("bestScore", () => {
+  it("prefers Claude's score, then the app's, else null", () => {
+    expect(bestScore({ claudeScore: 82, localScore: 40 })).toBe(82);
+    expect(bestScore({ claudeScore: 0, localScore: 40 })).toBe(0);
+    expect(bestScore({ claudeScore: null, localScore: 40 })).toBe(40);
+    expect(bestScore({ claudeScore: null, localScore: null })).toBeNull();
   });
 });

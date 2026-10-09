@@ -2,25 +2,29 @@
 scoring rules, then storing scores (ingest, actions, preference changes, the
 daily scan pass) against the test database. No network."""
 
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import count
 
 import pytest
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, text
 
 from app.models.app_settings import AppSettings
 from app.models.posting import Posting, PostingSource, PostingState
+from app.schemas.claude import PostingScoresIn
 from app.schemas.discovery import PasteConfirmIn
 from app.schemas.settings import SettingsUpdate
 from app.services import settings_service
 from app.services.discovery import actions
-from app.services.discovery.ingest import ingest
+from app.services.claude_ranking_service import save_scores
+from app.services.discovery.ingest import housekeep, ingest, refresh_unchanged
 from app.services.discovery.ranking import (
     MAX_REASON_LENGTH,
     MAX_REASONS,
     NEUTRAL_SCORE,
+    SCORES_LOCK_KEY,
     LocalScore,
     Ranker,
     RankingPrefs,
@@ -152,7 +156,7 @@ def test_skill_keywords_in_title_or_category_are_5_each_up_to_15():
 # --- location ----------------------------------------------------------------------
 
 
-def test_a_preferred_location_substring_of_any_location_is_15():
+def test_a_preferred_location_matching_a_whole_word_of_any_location_is_15():
     prefs = RankingPrefs(preferred_locations=("New York", "Chicago"))
     hit = score(prefs, locations=["Boston, MA", "New York, NY"])
     assert hit == LocalScore(15, ["New York"])
@@ -163,10 +167,28 @@ def test_a_preferred_location_substring_of_any_location_is_15():
     assert score(prefs, locations=["Chicago, IL", "New York, NY"]).score == 15
 
 
-def test_remote_also_matches_remote_anywhere_in_the_title():
+@pytest.mark.parametrize(
+    ("wanted", "location", "expected"),
+    [
+        ("NY", "Sunnyvale, CA", 0),
+        ("NY", "New York, NY", 15),
+        ("CA", "Chicago, IL", 0),
+        ("CA", "Sunnyvale, CA", 15),
+        ("SF", "SF Bay Area", 15),
+        ("Remote", "Remotely possible", 0),
+        ("Washington, D.C.", "Washington, D.C. (Hybrid)", 15),
+    ],
+)
+def test_a_preferred_location_never_matches_inside_another_word(wanted, location, expected):
+    assert score(RankingPrefs(preferred_locations=(wanted,)), locations=[location]).score == expected
+
+
+def test_remote_also_matches_the_word_remote_in_the_title():
     prefs = RankingPrefs(preferred_locations=("Remote",))
     assert score(prefs, locations=["Remote in USA"]).score == 15
     assert score(prefs, locations=[], title="Software Intern (Remote)") == LocalScore(15, ["Remote"])
+    assert score(prefs, locations=[], title="Remote-first Software Intern").score == 15
+    assert score(prefs, locations=[], title="Remoteness Research Intern").score == 0
     assert score(RankingPrefs(preferred_locations=("Boston",)), locations=[], title="Boston Intern").score == 0
 
 
@@ -192,18 +214,21 @@ def test_a_watchlist_company_posting_is_15_and_does_not_stack_with_preferred():
 @pytest.mark.parametrize(
     ("age", "points", "reason"),
     [
-        (timedelta(0), 10, "posted today"),
-        (timedelta(hours=-5), 10, "posted today"),  # a date a little in the future
-        (timedelta(days=1), 10, "posted 1 day ago"),
-        (timedelta(days=3), 10, "posted 3 days ago"),
-        (timedelta(days=3, seconds=1), 6, "posted 3 days ago"),
-        (timedelta(days=7), 6, "posted 7 days ago"),
-        (timedelta(days=7, seconds=1), 3, "posted 7 days ago"),
-        (timedelta(days=14), 3, "posted 14 days ago"),
+        (timedelta(0), 10, "posted in the last 3 days"),
+        (timedelta(hours=-5), 10, "posted in the last 3 days"),  # a date a little in the future
+        (timedelta(days=1), 10, "posted in the last 3 days"),
+        (timedelta(days=3), 10, "posted in the last 3 days"),
+        (timedelta(days=3, seconds=1), 6, "posted in the last week"),
+        (timedelta(days=7), 6, "posted in the last week"),
+        (timedelta(days=7, seconds=1), 3, "posted in the last 2 weeks"),
+        (timedelta(days=14), 3, "posted in the last 2 weeks"),
         (timedelta(days=14, seconds=1), 0, None),
     ],
 )
 def test_freshness_boundaries(age, points, reason):
+    # The reason names the band that earned the points, not a day count: the
+    # row already shows "Posted N days ago" (counted in local calendar days),
+    # and a stored count would contradict it (found in the end-to-end check).
     prefs = roles("nothing-matches-this")
     got = score(prefs, date_posted=NOW - age)
     assert got.score == points
@@ -212,7 +237,8 @@ def test_freshness_boundaries(age, points, reason):
 
 def test_freshness_falls_back_to_first_seen_when_there_is_no_posted_date():
     prefs = roles("nothing-matches-this")
-    assert score(prefs, date_posted=None, first_seen_at=NOW - timedelta(days=2)).score == 10
+    got = score(prefs, date_posted=None, first_seen_at=NOW - timedelta(days=2))
+    assert got == LocalScore(10, ["found in the last 3 days"])
     assert score(prefs, date_posted=OLD, first_seen_at=NOW).score == 0
 
 
@@ -236,7 +262,7 @@ def test_every_signal_together_is_capped_at_100():
         "Skills: python, pytorch, distributed",
         "New York",
         "Preferred company",
-        "posted 1 day ago",
+        "posted in the last 3 days",
     ]
 
 
@@ -319,8 +345,8 @@ def test_ingest_scores_inserted_and_updated_rows_with_the_saved_preferences(db_s
     set_prefs(db, role_keywords=["backend"])
     ingest(db, result([pin("a", title="Backend Intern"), pin("b", title="Frontend Intern")]), NOW)
     rows = {p.source_key: p for p in db.scalars(select(Posting))}
-    assert (rows["a"].local_score, rows["a"].local_reasons) == (50, ["Title matches 'backend'", "posted today"])
-    assert (rows["b"].local_score, rows["b"].local_reasons) == (10, ["posted today"])
+    assert (rows["a"].local_score, rows["a"].local_reasons) == (50, ["Title matches 'backend'", "found in the last 3 days"])
+    assert (rows["b"].local_score, rows["b"].local_reasons) == (10, ["found in the last 3 days"])
 
     # A later scan re-scores the rows it updates (here with an explicit ranker).
     later = NOW + timedelta(days=5)
@@ -397,7 +423,7 @@ def test_pasted_postings_are_scored(db_session):
         PasteConfirmIn(url="https://example.com/jobs/1", company="Acme", title="Backend Intern"),
         now=NOW,
     )
-    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "posted today"])
+    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "found in the last 3 days"])
 
 
 def test_rescore_skips_rows_whose_score_is_unchanged(db_session):
@@ -406,6 +432,108 @@ def test_rescore_skips_rows_whose_score_is_unchanged(db_session):
     stale = make(db, title="Backend Intern", local_score=1)
     assert rescore(db, roles("backend"), NOW) == 1
     assert stale.local_score == 40
+
+
+def test_a_preferences_change_also_records_the_daily_rescore(db_session):
+    s = settings_service.update_settings(db_session, SettingsUpdate(ranking_role_keywords=["backend"]), now=NOW)
+    assert s.last_rescore_at == NOW
+    later = NOW + timedelta(hours=1)
+    s = settings_service.update_settings(db_session, SettingsUpdate(nudge_unsent_days=6), now=later)
+    assert s.last_rescore_at == NOW  # nothing was re-scored
+
+
+# --- the postings write lock (review: preferences change vs. a scan's ingest) -------
+
+
+@pytest.fixture()
+def other_connection(_engine):
+    """A second database session, standing in for a scan's ingest."""
+    conn = _engine.connect()
+    yield conn
+    conn.rollback()
+    conn.close()
+
+
+def _lock_is_free(conn) -> bool:
+    """Whether another session could take the postings write lock now (it is
+    taken and released within `conn`'s own transaction)."""
+    free = conn.execute(text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": SCORES_LOCK_KEY}).scalar_one()
+    conn.rollback()
+    return free
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        pytest.param(lambda db, p: rescore(db, roles("backend"), NOW), id="rescore"),
+        pytest.param(lambda db, p: ingest(db, result([pin("a")]), NOW), id="ingest"),
+        pytest.param(lambda db, p: refresh_unchanged(db, result([]), NOW), id="refresh_unchanged"),
+        pytest.param(lambda db, p: housekeep(db, NOW), id="housekeep"),
+        pytest.param(lambda db, p: actions.dismiss_many(db, [p.id], now=NOW), id="dismiss_many"),
+        pytest.param(
+            lambda db, p: save_scores(db, PostingScoresIn(scores=[{"posting_id": p.id, "score": 1}]), now=NOW),
+            id="save_scores",
+        ),
+        pytest.param(
+            lambda db, p: settings_service.update_settings(db, SettingsUpdate(ranking_role_keywords=["x"]), now=NOW),
+            id="preferences_change",
+        ),
+    ],
+)
+def test_every_bulk_postings_writer_takes_the_write_lock(db_session, other_connection, write):
+    p = make(db_session)
+    db_session.commit()
+    assert _lock_is_free(other_connection)
+    write(db_session, p)
+    # The test's outer transaction is still open, so the lock is still held.
+    assert not _lock_is_free(other_connection)
+
+
+def test_other_settings_changes_do_not_take_the_write_lock(db_session, other_connection):
+    settings_service.update_settings(db_session, SettingsUpdate(nudge_unsent_days=6), now=NOW)
+    assert _lock_is_free(other_connection)
+
+
+def test_a_preferences_change_waits_for_an_ingest_in_progress(db_session, other_connection):
+    """Without the lock the two could take the same row locks in different
+    orders and deadlock; with it the change waits, then re-scores what the
+    ingest wrote."""
+    db = db_session
+    p = make(db, title="Backend Intern", local_score=50)
+    db.commit()
+    other_connection.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": SCORES_LOCK_KEY})
+    done = threading.Event()
+    errors: list[BaseException] = []
+
+    def change() -> None:
+        try:
+            settings_service.update_settings(db, SettingsUpdate(ranking_role_keywords=["backend"]), now=NOW)
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=change)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 5
+        waiting = False
+        while time.monotonic() < deadline and not waiting:
+            waiting = other_connection.execute(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                    " AND objid = :objid)"
+                ),
+                {"objid": SCORES_LOCK_KEY & 0xFFFF_FFFF},
+            ).scalar_one()
+        assert waiting and not done.is_set()
+    finally:
+        other_connection.rollback()  # the "ingest" commits
+    assert done.wait(10)
+    worker.join()
+    assert errors == []
+    db.refresh(p)
+    assert p.local_score == 40
 
 
 def test_rescoring_5000_postings_takes_a_second_or_two(db_session):

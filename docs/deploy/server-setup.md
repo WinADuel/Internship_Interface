@@ -415,6 +415,8 @@ The routine researches your Research Queue every morning: people to contact, and
    In that environment's network access settings, allow your domain (`yourdomain.com`), or its requests to the tracker are blocked.
 3. Run it once by hand and check the Research Queue page. To test a brief, press **Ask Claude for a brief** on any interview round's prep page first; after the run, the brief shows on that page.
 
+The routine's last step ranks your Discover Inbox: it reviews the highest-scoring Inbox postings it hasn't reviewed yet (40 a day by default) and gives each its own score and note (marked **C** in the Inbox). Change the number, or set 0 to turn ranking off, in **Settings → Ranking → Postings Claude reviews per day**.
+
 ---
 
 ## 10. Uptime alert

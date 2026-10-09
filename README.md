@@ -70,6 +70,14 @@ Google, Microsoft, Apple, Meta and Amazon use their own careers sites, so they c
 - **Scanning:** `docker compose up -d --build` also starts the `job-scan` service, which runs its first scan about a minute after it starts, then every 6 hours by default. **Scan now** on the Discover page runs one immediately.
 - Saved postings are also mirrored to a "Saved postings" tab in the backup sheet. Discovery needs no Google permissions or secrets of its own.
 
+### Inbox ranking
+
+The Inbox opens on **Best match**: every posting gets a 0–100 match score from your ranking preferences, so the likeliest fits come first instead of being buried among thousands of new postings.
+
+- **Preferences** live in **Settings → Ranking**: role keywords (a match in the title counts most), skill keywords, preferred locations ("Remote" works), preferred companies (watchlist companies count too), companies to avoid and dealbreaker keywords. Fresher postings score a little higher. An avoided company or a dealbreaker in the title scores 0 and sinks to the bottom, still shown; to hide postings, use the exclude keywords in **Settings → Job discovery**. The card counts your Top picks live as you edit, and saving re-scores every posting at once. With nothing set, every posting scores 50 and the Inbox stays newest first.
+- **In the Inbox** each row shows its score, and **Why?** lists the reasons ("Title matches 'machine learning'", "New York", "posted in the last 3 days"). **Newest** switches to date order. The **Top picks** chip shows only postings scoring 70 or more, with their count. The Dashboard's **New postings** widget lists the top five.
+- **Claude's second opinion:** the last step of the daily Claude job (see above) reviews the highest-scoring Inbox postings it hasn't reviewed yet, 40 a day by default. It can open each posting's page, then writes its own score and a one-line note. Its score, marked **C**, orders the Inbox in place of the app's, and both show under **Why?**. Change the number, or set 0 to turn this off, in **Settings → Ranking**. When you change your preferences, Claude's scores turn grey with "preferences changed since", and those postings go back into its queue. The job reads your outreach profile, your ranking preferences and the titles of your 20 most recent saves (applications included) and 20 most recent dismissals; it never sends them to job sites. This part needs the server; until then the app's own score works alone.
+
 The board formats were written from vendor documentation, because the build environment could not reach those sites. The first real scan is their live check: if a watched company shows an error, compare its response with [`backend/tests/fixtures/discovery/README.md`](backend/tests/fixtures/discovery/README.md).
 
 ## Interview prep

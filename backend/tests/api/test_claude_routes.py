@@ -1,5 +1,7 @@
 import pytest
 
+from app.schemas.settings import SettingsUpdate
+
 from app.models.contact import Contact
 from app.services.claude_token_service import create_token
 
@@ -105,7 +107,8 @@ def _posting(db_session, key="1", **kw):
 def test_ranking_work_shape(claude, db_session):
     p = _posting(db_session)
     body = claude.get("/api/claude/postings").json()
-    assert set(body) == {"profile", "preferences", "examples", "postings"}
+    assert set(body) == {"profile", "preferences", "preferences_as_of", "examples", "postings"}
+    assert body["preferences_as_of"] is None
     assert body["examples"] == {"saved": [], "dismissed": []}
     assert set(body["preferences"]) == {
         "role_keywords", "skill_keywords", "preferred_locations",
@@ -143,6 +146,35 @@ def test_scores_route_writes_and_counts(claude, db_session):
     assert new.claude_score == 91 and new.claude_scored_at is not None
     # Scored postings are not handed out again.
     assert [p["id"] for p in claude.get("/api/claude/postings").json()["postings"]] == []
+
+
+def test_scores_echo_preferences_as_of_and_read_stale_after_a_change(claude, db_session):
+    from app.services import settings_service
+
+    p = _posting(db_session)
+    settings_service.update_settings(db_session, SettingsUpdate(ranking_role_keywords=["ml"]))
+    as_of = claude.get("/api/claude/postings").json()["preferences_as_of"]
+    assert as_of is not None
+
+    # Echoed unchanged with no change in between: fresh, not offered again.
+    r = claude.post(
+        "/api/claude/postings/scores",
+        json={"preferences_as_of": as_of, "scores": [{"posting_id": p.id, "score": 91}]},
+    )
+    assert r.status_code == 200 and r.json() == {"updated": 1, "skipped": 0}
+    assert claude.get("/api/claude/postings").json()["postings"] == []
+
+    # The user changes the preferences while the routine is scoring: what it
+    # sends back was made against the old ones, so it reads stale.
+    settings_service.update_settings(db_session, SettingsUpdate(ranking_role_keywords=["ai"]))
+    r = claude.post(
+        "/api/claude/postings/scores",
+        json={"preferences_as_of": as_of, "scores": [{"posting_id": p.id, "score": 93}]},
+    )
+    assert r.json() == {"updated": 1, "skipped": 0}
+    db_session.refresh(p)
+    assert p.claude_score == 93
+    assert [q["id"] for q in claude.get("/api/claude/postings").json()["postings"]] == [p.id]
 
 
 def test_oversized_score_batch_is_422_and_writes_nothing(claude, db_session):

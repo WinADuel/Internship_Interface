@@ -95,6 +95,9 @@ class AppSettings(Base):
         Integer, nullable=False, default=40, server_default="40"
     )
     ranking_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The last full re-score of the Inbox and Saved postings (a preferences
+    # change, or the daily pass that ages freshness points). Server-owned.
+    last_rescore_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Database backups (Phase 3 spec §4.4): last success and last error of the
     # local dump and of the off-site copy. An error is cleared by the next success.

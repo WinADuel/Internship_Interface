@@ -8,6 +8,7 @@ import {
   dismissPosting,
   getMatchCount,
   getScanStatus,
+  getTopPicksCount,
   listPostings,
   listWatchlist,
   mapPostingFromApi,
@@ -25,7 +26,8 @@ const rawPosting = {
   url: "https://stripe.com/jobs/1", terms: ["Summer 2027"], category: "Software", sponsorship: null,
   date_posted: "2026-10-01T00:00:00Z", first_seen_at: "2026-10-02T00:00:00Z", last_seen_at: "2026-10-03T00:00:00Z",
   closed: false, state: "new", state_changed_at: "2026-10-02T00:00:00Z", application_id: null,
-  watch_company_id: null, claude_score: null, claude_note: null,
+  watch_company_id: null, local_score: null, local_reasons: [], claude_score: null, claude_note: null,
+  claude_scored_at: null, claude_stale: false,
 };
 
 const rawWatch = {
@@ -63,6 +65,23 @@ describe("discovery api mapping", () => {
     expect(mapPostingFromApi(rawPosting)).toEqual(fakePosting());
   });
 
+  it("maps the ranking fields", () => {
+    const p = mapPostingFromApi({
+      ...rawPosting, local_score: 64, local_reasons: ["Title matches 'ml'", "Remote"], claude_score: 82,
+      claude_note: "Strong fit", claude_scored_at: "2026-10-09T06:00:00Z", claude_stale: true,
+    });
+    expect(p).toEqual(fakePosting({
+      localScore: 64, localReasons: ["Title matches 'ml'", "Remote"], claudeScore: 82, claudeNote: "Strong fit",
+      claudeScoredAt: "2026-10-09T06:00:00Z", claudeStale: true,
+    }));
+  });
+
+  it("defaults missing ranking fields", () => {
+    const { local_score: _s, local_reasons: _r, claude_scored_at: _c, claude_stale: _st, ...rest } = rawPosting;
+    const p = mapPostingFromApi(rest);
+    expect(p).toMatchObject({ localScore: null, localReasons: [], claudeScoredAt: null, claudeStale: false });
+  });
+
   it("defaults missing location and term arrays to empty", () => {
     const { locations: _l, terms: _t, ...rest } = rawPosting;
     const p = mapPostingFromApi(rest);
@@ -76,7 +95,14 @@ describe("discovery api postings", () => {
     const fn = mockFetch({ items: [rawPosting], total: 7 });
     const page = await listPostings("saved", { limit: 20, offset: 40 });
     expect(call(fn)).toEqual({ url: "/api/discovery/postings?view=saved&limit=20&offset=40", method: "GET", body: undefined });
-    expect(page).toEqual({ items: [fakePosting()], total: 7 });
+    expect(page).toEqual({ items: [fakePosting()], total: 7, topPicks: null });
+  });
+
+  it("sends the Inbox sort and Top picks minimum and reads the Top picks count", async () => {
+    const fn = mockFetch({ items: [], total: 0, top_picks: 12 });
+    const page = await listPostings("inbox", { offset: 50, sort: "newest", minScore: 70 });
+    expect(call(fn).url).toBe("/api/discovery/postings?view=inbox&limit=50&offset=50&sort=newest&min_score=70");
+    expect(page.topPicks).toBe(12);
   });
 
   it("lists the inbox by default with 50 per page", async () => {
@@ -236,6 +262,27 @@ describe("discovery api scan, status and match count", () => {
   });
 });
 
+describe("discovery api top picks count", () => {
+  it("posts only the ranking lists in snake_case and returns the count", async () => {
+    const fn = mockFetch({ count: 9 });
+    const prefs = {
+      rankingRoleKeywords: ["machine learning"], rankingSkillKeywords: ["python"], rankingPreferredLocations: ["NYC"],
+      rankingPreferredCompanies: ["Stripe"], rankingAvoidCompanies: [], rankingDealbreakerKeywords: ["unpaid"],
+      rankingClaudeDailyLimit: 40,
+    };
+    expect(await getTopPicksCount(prefs)).toBe(9);
+    expect(call(fn)).toEqual({
+      url: "/api/discovery/top-picks-count",
+      method: "POST",
+      body: {
+        ranking_role_keywords: ["machine learning"], ranking_skill_keywords: ["python"],
+        ranking_preferred_locations: ["NYC"], ranking_preferred_companies: ["Stripe"], ranking_avoid_companies: [],
+        ranking_dealbreaker_keywords: ["unpaid"],
+      },
+    });
+  });
+});
+
 describe("settings api discovery fields", () => {
   it("maps discovery settings from the API", async () => {
     mockFetch({
@@ -245,6 +292,9 @@ describe("settings api discovery fields", () => {
       discovery_categories: ["Software"], discovery_include_keywords: [], discovery_watchlist_keywords: ["intern"],
       discovery_exclude_keywords: ["senior"], discovery_locations: [], discovery_hide_no_sponsorship: true,
       discovery_scan_hours: 6, last_scan_at: "2026-10-08T10:00:00Z", last_scan_error: null,
+      ranking_role_keywords: ["ml"], ranking_skill_keywords: [], ranking_preferred_locations: ["NYC"],
+      ranking_preferred_companies: [], ranking_avoid_companies: [], ranking_dealbreaker_keywords: ["unpaid"],
+      ranking_claude_daily_limit: 40, ranking_updated_at: "2026-10-09T08:00:00Z",
     });
     const s = await getSettings();
     expect(s.discoveryListUrls).toEqual(["https://a.example/l.json"]);
@@ -256,6 +306,11 @@ describe("settings api discovery fields", () => {
     expect(s.discoveryScanHours).toBe(6);
     expect(s.lastScanAt).toBe("2026-10-08T10:00:00Z");
     expect(s.lastScanError).toBeNull();
+    expect(s.rankingRoleKeywords).toEqual(["ml"]);
+    expect(s.rankingPreferredLocations).toEqual(["NYC"]);
+    expect(s.rankingDealbreakerKeywords).toEqual(["unpaid"]);
+    expect(s.rankingClaudeDailyLimit).toBe(40);
+    expect(s.rankingUpdatedAt).toBe("2026-10-09T08:00:00Z");
   });
 
   it("saves discovery settings in snake_case", async () => {
@@ -271,6 +326,14 @@ describe("settings api discovery fields", () => {
         discovery_terms: ["Fall 2027"], discovery_include_keywords: ["ml"], discovery_locations: ["Remote"],
         discovery_hide_no_sponsorship: false, discovery_scan_hours: 12, discovery_list_urls: [],
       },
+    });
+  });
+
+  it("saves ranking settings in snake_case", async () => {
+    const fn = mockFetch({});
+    await updateSettings({ rankingRoleKeywords: ["backend"], rankingAvoidCompanies: ["Initech"], rankingClaudeDailyLimit: 0 });
+    expect(call(fn).body).toEqual({
+      ranking_role_keywords: ["backend"], ranking_avoid_companies: ["Initech"], ranking_claude_daily_limit: 0,
     });
   });
 });

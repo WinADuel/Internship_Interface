@@ -6,7 +6,7 @@ string is stripped and length-capped and every list is size-capped."""
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 from app.models.contact import EmailConfidence
 from app.models.research_queue import QueueKind
@@ -134,14 +134,26 @@ def _note(value: str) -> str:
     return clean_text(value, MAX_CLAUDE_NOTE)
 
 
+def _no_note(value: object) -> object:
+    # `"note": null` means no note, as null does for the other optional fields.
+    return "" if value is None else value
+
+
 class PostingScoreIn(_ClaudeIn):
     posting_id: int
     score: int = Field(ge=0, le=100)
-    note: Annotated[str, Field(max_length=MAX_CLAUDE_NOTE * 10), AfterValidator(_note)] = ""
+    note: Annotated[
+        str, BeforeValidator(_no_note), Field(max_length=MAX_CLAUDE_NOTE * 10), AfterValidator(_note)
+    ] = ""
 
 
 class PostingScoresIn(_ClaudeIn):
     scores: list[PostingScoreIn] = Field(max_length=MAX_SCORES)
+    # `preferences_as_of` from the GET these scores were made from, echoed
+    # back. Older than the current preferences means they changed while
+    # Claude was scoring, so the scores are stored stale. Left out (an older
+    # routine), the scores count as made against the current preferences.
+    preferences_as_of: datetime | None = None
 
 
 class ScoresResultOut(BaseModel):
@@ -159,7 +171,8 @@ class RankingPreferencesOut(BaseModel):
 
 
 class RankingExamplesOut(BaseModel):
-    """`Company — Title` of the most recent saves and dismissals."""
+    """`Company — Title` of the most recent saves (applied postings included)
+    and dismissals."""
 
     saved: list[str]
     dismissed: list[str]
@@ -182,5 +195,8 @@ class RankingPostingOut(BaseModel):
 class RankingWorkOut(BaseModel):
     profile: str
     preferences: RankingPreferencesOut
+    # When the preferences last changed (null: never), for the routine to
+    # echo back with its scores.
+    preferences_as_of: datetime | None
     examples: RankingExamplesOut
     postings: list[RankingPostingOut]
