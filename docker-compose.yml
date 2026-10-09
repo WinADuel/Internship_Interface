@@ -76,6 +76,20 @@ services:
       db:
         condition: service_healthy
 
+  # Gmail sync (Phase 6 spec §6): every gmail_sync_minutes minutes, only once the owner
+  # connects Gmail and turns sync on in Settings. Reads message metadata, never bodies.
+  gmail-sync:
+    build: ./backend
+    restart: unless-stopped
+    logging: *default-logging
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+    command: python -m app.jobs.gmail_sync
+    depends_on:
+      db:
+        condition: service_healthy
+
   # Database backups (Phase 3 spec §4.4): pg_dump nightly at 02:30 in TZ, kept in ./backups.
   # deploy.sh runs `python -m app.jobs.db_backup --once --label pre-deploy` in this service.
   db-backup:
