@@ -8,6 +8,9 @@ MAX_LIST_ITEMS = 30
 MAX_LIST_ITEM_LENGTH = 100
 MAX_LIST_URLS = 10
 MAX_LIST_URL_LENGTH = 500
+# Ranking preference lists (Phase 5 spec §3).
+MAX_RANKING_ITEM_LENGTH = 60
+MAX_CLAUDE_DAILY_LIMIT = 150
 
 
 def _normalize(items: list[str], *, max_items: int, max_length: int) -> list[str]:
@@ -32,6 +35,10 @@ def _keyword_list(items: list[str]) -> list[str]:
     return _normalize(items, max_items=MAX_LIST_ITEMS, max_length=MAX_LIST_ITEM_LENGTH)
 
 
+def _ranking_list(items: list[str]) -> list[str]:
+    return _normalize(items, max_items=MAX_LIST_ITEMS, max_length=MAX_RANKING_ITEM_LENGTH)
+
+
 def _url_list(items: list[str]) -> list[str]:
     urls = _normalize(items, max_items=MAX_LIST_URLS, max_length=MAX_LIST_URL_LENGTH)
     for url in urls:
@@ -43,6 +50,7 @@ def _url_list(items: list[str]) -> list[str]:
 
 KeywordList = Annotated[list[str], AfterValidator(_keyword_list)]
 UrlList = Annotated[list[str], AfterValidator(_url_list)]
+RankingList = Annotated[list[str], AfterValidator(_ranking_list)]
 
 
 class SettingsOut(BaseModel):
@@ -68,6 +76,14 @@ class SettingsOut(BaseModel):
     discovery_scan_hours: int
     last_scan_at: datetime | None
     last_scan_error: str | None
+    ranking_role_keywords: list[str]
+    ranking_skill_keywords: list[str]
+    ranking_preferred_locations: list[str]
+    ranking_preferred_companies: list[str]
+    ranking_avoid_companies: list[str]
+    ranking_dealbreaker_keywords: list[str]
+    ranking_claude_daily_limit: int
+    ranking_updated_at: datetime | None
 
 
 class SettingsUpdate(BaseModel):
@@ -86,6 +102,13 @@ class SettingsUpdate(BaseModel):
     discovery_locations: KeywordList | None = None
     discovery_hide_no_sponsorship: bool | None = None
     discovery_scan_hours: int | None = Field(default=None, ge=1, le=48)
+    ranking_role_keywords: RankingList | None = None
+    ranking_skill_keywords: RankingList | None = None
+    ranking_preferred_locations: RankingList | None = None
+    ranking_preferred_companies: RankingList | None = None
+    ranking_avoid_companies: RankingList | None = None
+    ranking_dealbreaker_keywords: RankingList | None = None
+    ranking_claude_daily_limit: int | None = Field(default=None, ge=0, le=MAX_CLAUDE_DAILY_LIMIT)
 
     @model_validator(mode="after")
     def _reject_explicit_nulls(self) -> "SettingsUpdate":

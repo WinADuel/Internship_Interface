@@ -1,7 +1,10 @@
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session
 
 from app.models.app_settings import AppSettings
 from app.schemas.settings import SettingsUpdate
+from app.services.discovery.ranking import prefs_from_settings, rescore
 from app.services.nudges import NudgeSettings
 
 SETTINGS_ID = 1
@@ -17,10 +20,19 @@ def get_settings(db: Session) -> AppSettings:
     return settings
 
 
-def update_settings(db: Session, data: SettingsUpdate) -> AppSettings:
+def update_settings(db: Session, data: SettingsUpdate, now: datetime | None = None) -> AppSettings:
+    """Apply the supplied fields. A change to the ranking preferences also
+    stamps `ranking_updated_at` (older Claude scores become stale) and
+    re-scores the Inbox and Saved postings, in the same transaction."""
     settings = get_settings(db)
+    before = prefs_from_settings(settings)
     for name, value in data.model_dump(exclude_unset=True).items():
         setattr(settings, name, value)
+    after = prefs_from_settings(settings)
+    if after != before:
+        now = now or datetime.now(UTC)
+        settings.ranking_updated_at = now
+        rescore(db, after, now)
     db.commit()
     return settings
 

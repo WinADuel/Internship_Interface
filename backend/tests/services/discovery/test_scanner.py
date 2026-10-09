@@ -758,3 +758,68 @@ def test_scan_status_reports_scanning_while_the_lock_is_held_and_leaves_it_held(
     assert scan_status(db_session)["scanning"] is False
     # And scan_status does not leave the lock held either.
     assert try_lock(other_connection)
+
+
+# --- daily re-score (Phase 5 spec §4) ----------------------------------------
+
+
+def _stale_posting(db) -> Posting:
+    """An Inbox posting no source lists, with a score from long ago."""
+    posting = Posting(
+        source=PostingSource.LIST,
+        source_key="https://x.test/list.json:old",
+        company="Old Co",
+        title="Backend Intern",
+        locations=[],
+        url="https://jobs.example.com/old",
+        url_key="https://jobs.example.com/old",
+        terms=[],
+        date_posted=NOW - timedelta(days=2),
+        first_seen_at=NOW - timedelta(days=2),
+        last_seen_at=NOW - timedelta(days=2),
+        state=PostingState.NEW,
+        local_score=99,
+    )
+    db.add(posting)
+    db.commit()
+    return posting
+
+
+def test_first_scan_of_the_day_rescores_every_posting(db_session):
+    db = db_session
+    s = configure(db, list_urls=())
+    s.ranking_role_keywords = ["backend"]
+    s.last_scan_at = NOW - timedelta(days=1)
+    db.commit()
+    posting = _stale_posting(db)
+
+    run_scan(db, FakeDiscoveryHttp({}), now=NOW, pause=Pauses())
+    db.refresh(posting)
+    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "posted 2 days ago"])
+
+    # Later the same day: no full pass (ingest still scores what it touches).
+    posting.local_score = 99
+    db.commit()
+    run_scan(db, FakeDiscoveryHttp({}), now=NOW + timedelta(hours=6), pause=Pauses())
+    db.refresh(posting)
+    assert posting.local_score == 99
+
+
+def test_the_very_first_scan_rescores_too(db_session):
+    db = db_session
+    configure(db, list_urls=())
+    posting = _stale_posting(db)
+    run_scan(db, FakeDiscoveryHttp({}), now=NOW, pause=Pauses())
+    db.refresh(posting)
+    assert posting.local_score == 50
+
+
+def test_scanned_list_rows_are_scored(db_session):
+    db = db_session
+    s = configure(db, list_urls=(SIMPLIFY_URL,))
+    s.ranking_role_keywords = ["software engineer"]
+    db.commit()
+    run_scan(db, FakeDiscoveryHttp({("GET", SIMPLIFY_URL): json_result([list_row(1)])}), now=NOW, pause=Pauses())
+    (row,) = postings(db)
+    assert row.local_score >= 40
+    assert row.local_reasons[0] == "Title matches 'software engineer'"
