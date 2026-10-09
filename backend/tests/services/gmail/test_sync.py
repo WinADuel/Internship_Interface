@@ -21,6 +21,7 @@ from app.services.gmail.sync import (
     parse_message,
     run_sync,
 )
+from app.services.sheet_sync_service import CONTACT_TABS
 from tests.services.gmail.fakes import FakeGmailClient, grant_gmail, message, ms
 
 NOW = datetime(2026, 10, 9, 12, tzinfo=UTC)
@@ -364,3 +365,47 @@ def test_the_real_client_factory_uses_a_fresh_access_token(db_session, monkeypat
         assert client._client.headers["authorization"] == "Bearer fresh-token"
     finally:
         client.close()
+
+
+def test_auto_apply_in_a_run_and_the_snapshot_follows_it(db_session, settings):
+    settings.gmail_auto_apply = True
+    db_session.commit()
+    contact = Contact(kind=ContactKind.COMPANY, name="Sam", organization="Ramp", email="sam@ramp.com")
+    db_session.add(contact)
+    db_session.commit()
+    gmail = FakeGmailClient(
+        [
+            message("s1", _ago(days=2), from_="Me <me@gmail.com>", to="sam@ramp.com", labels=("SENT",)),
+            message("r1", _ago(days=1), from_="Sam <sam@ramp.com>", subject="Re: hello", snippet="Happy to chat"),
+        ]
+    )
+
+    report = run_sync(db_session, gmail.factory, now=NOW)
+
+    assert (report.suggested, report.auto_applied) == (2, 2)
+    assert report.sheet_tabs == set(CONTACT_TABS)
+    assert [(s.kind, s.state) for s in _suggestions(db_session)] == [
+        (SuggestionKind.CONTACT_SENT, SuggestionState.AUTO_APPLIED),
+        (SuggestionKind.CONTACT_REPLY, SuggestionState.AUTO_APPLIED),
+    ]
+    db_session.refresh(contact)
+    assert contact.status == ContactStatus.REPLIED
+    assert contact.sent_at == _ago(days=2) and contact.replied_at == _ago(days=1)
+
+
+def test_unsafe_kinds_wait_even_with_auto_apply(db_session, settings, stripe):
+    settings.gmail_auto_apply = True
+    db_session.commit()
+    report = run_sync(db_session, FakeGmailClient([_rejection("a1", _ago(days=1))]).factory, now=NOW)
+    assert (report.suggested, report.auto_applied) == (1, 0)
+    assert _suggestions(db_session)[0].state == SuggestionState.PENDING
+    db_session.refresh(stripe)
+    assert stripe.status == ApplicationStatus.APPLIED
+
+
+def test_a_suggestion_that_already_does_not_apply_is_kept_as_stale(db_session, settings, stripe):
+    stripe.status = ApplicationStatus.REJECTED
+    db_session.commit()
+    run_sync(db_session, FakeGmailClient([_rejection("a1", _ago(days=1))]).factory, now=NOW)
+    (row,) = _suggestions(db_session)
+    assert row.state == SuggestionState.STALE  # kept so the message isn't fetched again

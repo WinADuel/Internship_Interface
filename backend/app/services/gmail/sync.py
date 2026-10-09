@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from app.models.application import Application
 from app.models.contact import Contact
 from app.models.email_suggestion import EmailDirection, EmailSuggestion, SuggestionKind, SuggestionState
+from app.services import email_suggestion_service
 from app.services.backup.lock import advisory_lock
 from app.services.errors import GoogleAuthError
 from app.services.gmail.client import (
@@ -82,10 +83,12 @@ class SyncReport:
     listed: int = 0  # ids Gmail returned that were not stored already
     fetched: int = 0  # messages fetched (metadata only)
     suggested: int = 0  # suggestions stored
+    auto_applied: int = 0  # of those, applied at once (auto-apply)
     deleted: int = 0  # decided suggestions removed by retention
     error: str | None = None
     more: bool = False  # mail was left for the next run (MAX_FETCH reached)
     created: list[EmailSuggestion] = field(default_factory=list)
+    sheet_tabs: set[str] = field(default_factory=set)  # touched by auto-apply
 
 
 def google_gmail_client(db: Session) -> GmailClient:
@@ -248,12 +251,22 @@ def _process(db: Session, client: GmailClient, report: SyncReport, now: datetime
             report.fetched += 1
             headers = parse_message(message)
             proposal = propose(headers, snapshot)
-            if proposal is not None and not _repeats_pending_new_application(db, proposal):
-                report.created.append(store_suggestion(db, message, headers, proposal))
-                report.suggested += 1
             cursor = int(settings.gmail_history_cursor or 0)
             if message.internal_date > cursor:
                 settings.gmail_history_cursor = str(message.internal_date)
+            if proposal is not None and not _repeats_pending_new_application(db, proposal):
+                suggestion = store_suggestion(db, message, headers, proposal)
+                report.created.append(suggestion)
+                report.suggested += 1
+                # May commit (stale or auto-applied); the cursor goes with it.
+                applied = email_suggestion_service.on_new_suggestion(
+                    db, suggestion, auto_apply=settings.gmail_auto_apply, now=now
+                )
+                if applied is not None:
+                    report.auto_applied += 1
+                    report.sheet_tabs |= applied.sheet_tabs
+                    # A contact marked Sent can now be matched as replying.
+                    snapshot = build_snapshot(db)
         # The suggestion and the cursor move together.
         db.commit()
 

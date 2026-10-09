@@ -48,6 +48,8 @@ CONTACTS = (
     ContactRef(25, None, "sent", None),
     ContactRef(26, "dup@acme.com", "to_contact", None),
     ContactRef(27, "dup@acme.com", "sent", None),
+    ContactRef(28, "ann@stripe.com", "sent", None),
+    ContactRef(29, "bo@box.com", "sent", 8),
 )
 SNAPSHOT = Snapshot(applications=APPS, contacts=CONTACTS)
 
@@ -70,6 +72,26 @@ CASES = [
      Proposal(K.CONTACT_REPLY, contact_id=22)),
     ("contact reply beats classification", inbound("Jane", "jane.recruiter@stripe.com", "Re: chat", "Unfortunately I'm out this week"),
      Proposal(K.CONTACT_REPLY, application_id=1, contact_id=21)),
+    # A contact's reply that is an application update becomes that kind, for
+    # the contact's application, keeping the contact (progress-log ruling).
+    ("contact sends a rejection", inbound("Jane", "jane.recruiter@stripe.com", "Re: your application", "Unfortunately we will not be moving forward"),
+     Proposal(K.REJECTION, application_id=1, contact_id=21)),
+    ("contact invites to interview", inbound("Jane", "jane.recruiter@stripe.com", "Re: coffee chat", "Could you share your availability for an interview?"),
+     Proposal(K.INTERVIEW, application_id=1, contact_id=21)),
+    ("contact sends an offer", inbound("Jane", "jane.recruiter@stripe.com", "Offer letter", "We're pleased to offer you the internship"),
+     Proposal(K.OFFER, application_id=1, contact_id=21)),
+    ("contact sends an assessment", inbound("Jane", "jane.recruiter@stripe.com", "Re: next steps", "Here is the HackerRank coding challenge"),
+     Proposal(K.ASSESSMENT, application_id=1, contact_id=21)),
+    ("contact confirmation stays a reply", inbound("Jane", "jane.recruiter@stripe.com", "Re: hi", "Thanks for applying! We received your application"),
+     Proposal(K.CONTACT_REPLY, application_id=1, contact_id=21)),
+    ("contact asking availability for coffee stays a reply", inbound("Jane", "jane.recruiter@stripe.com", "Re: coffee chat", "Sure, what's your availability next week?"),
+     Proposal(K.CONTACT_REPLY, application_id=1, contact_id=21)),
+    ("unattached contact: the sender's company", inbound("Ann", "ann@stripe.com", "Re: Data Science Intern role", "Unfortunately we will not be moving forward"),
+     Proposal(K.REJECTION, application_id=2, contact_id=28)),
+    ("unattached contact at an untracked place stays a reply", inbound("Prof. Lee", "prof.lee@mit.edu", "Re: research position", "Unfortunately the position is filled"),
+     Proposal(K.CONTACT_REPLY, contact_id=22)),
+    ("contact of an archived application: the sender's company", inbound("Bo", "bo@box.com", "Re: Box internship", "Unfortunately we will not be moving forward"),
+     Proposal(K.REJECTION, application_id=3, contact_id=29)),
     ("sent to to_contact", sent(["Sam@Ramp.com"]), Proposal(K.CONTACT_SENT, contact_id=23)),
     ("sent with contact on cc", sent(["someone@else.com"], cc=["sam@ramp.com"]), Proposal(K.CONTACT_SENT, contact_id=23)),
     ("sent to contact already sent", sent(["jane.recruiter@stripe.com"]), None),
