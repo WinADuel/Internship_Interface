@@ -8,6 +8,7 @@ from app.models.application import Application
 from app.models.research_queue import QueueKind, QueueState, ResearchQueueItem
 from app.schemas.research_queue import QueueItemCreate
 from app.services.errors import AlreadyQueuedError, QueueItemNotFoundError, QueueItemNotPendingError
+from app.services.interview_service import lock_application
 
 COMPANY_CONTACTS_TARGET = 3
 
@@ -72,7 +73,10 @@ def add_company_contacts_item(db: Session, application: Application) -> Research
 
 def enqueue_interview_brief(db: Session, application: Application) -> ResearchQueueItem:
     """Queue a company brief request (Phase 4 spec §3). One may be pending
-    per application; another can be requested once it is done or failed."""
+    per application; another can be requested once it is done or failed.
+    The application row is locked first, so two requests at once take turns
+    and the second sees the first's pending item."""
+    lock_application(db, application.id)
     pending = db.scalars(
         select(ResearchQueueItem.id)
         .where(
@@ -118,6 +122,15 @@ def pending_items(db: Session, limit: int, kinds: Iterable[QueueKind]) -> list[R
 
 def get_item(db: Session, item_id: int) -> ResearchQueueItem:
     item = db.get(ResearchQueueItem, item_id)
+    if item is None:
+        raise QueueItemNotFoundError(item_id)
+    return item
+
+
+def lock_item(db: Session, item_id: int) -> ResearchQueueItem:
+    """`get_item`, row-locked until commit and read fresh under the lock, so a
+    concurrent writer that finishes the item first is seen."""
+    item = db.get(ResearchQueueItem, item_id, with_for_update=True, populate_existing=True)
     if item is None:
         raise QueueItemNotFoundError(item_id)
     return item

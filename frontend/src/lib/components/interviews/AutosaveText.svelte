@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import { ApiError } from "../../api/client";
 
   /**
    * A text area that saves itself: shortly after typing stops, when it loses
@@ -29,9 +30,10 @@
   let text = $state(value ?? "");
   /* svelte-ignore state_referenced_locally */
   let saved = value ?? "";
-  let status = $state<"idle" | "pending" | "saving" | "saved" | "error">("idle");
+  let status = $state<"idle" | "pending" | "saving" | "saved" | "error" | "missing">("idle");
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let inFlight: Promise<void> | null = null;
+  // One save loop at a time; a flush while it runs leaves the newer text to it.
+  let looping = false;
 
   function schedule() {
     status = "pending";
@@ -42,38 +44,42 @@
   async function flush(): Promise<void> {
     clearTimeout(timer);
     timer = undefined;
-    if (inFlight) {
-      await inFlight; // one save at a time; then save whatever is newer
-    }
-    if (text === saved) {
-      if (status === "pending") status = "saved";
-      return;
-    }
-    const sending = text;
-    status = "saving";
-    let typedSince = false;
-    inFlight = save(sending.trim() ? sending : null).then(
-      () => {
+    if (looping) return;
+    looping = true;
+    try {
+      // Text typed during a save goes out as soon as that save is back.
+      while (text !== saved) {
+        const sending = text;
+        status = "saving";
+        try {
+          await save(sending.trim() ? sending : null);
+        } catch (err) {
+          status = err instanceof ApiError && err.status === 404 ? "missing" : "error";
+          return;
+        }
         saved = sending;
-        typedSince = text !== sending;
-        status = typedSince ? "pending" : "saved";
-      },
-      () => {
-        status = "error";
-      },
-    );
-    await inFlight;
-    inFlight = null;
-    // Text typed during the save normally has its own timer; make sure it is saved.
-    if (typedSince && timer === undefined) schedule();
+      }
+      if (status === "saving" || status === "pending") status = timer === undefined ? "saved" : "pending";
+    } finally {
+      looping = false;
+    }
   }
 
   onDestroy(() => {
     clearTimeout(timer);
-    if (text !== saved) void save(text.trim() ? text : null).catch(() => {});
+    timer = undefined;
+    // A running loop saves the newest text itself once its save is back.
+    if (!looping && text !== saved) void flush();
   });
 
-  const STATUS_TEXT = { idle: "", pending: "Unsaved changes…", saving: "Saving…", saved: "Saved", error: "Couldn't save. Keep typing to try again." };
+  const STATUS_TEXT = {
+    idle: "",
+    pending: "Unsaved changes…",
+    saving: "Saving…",
+    saved: "Saved",
+    error: "Couldn't save. Keep typing to try again.",
+    missing: "This round no longer exists.",
+  };
 </script>
 
 <div class="autosave">
@@ -88,7 +94,7 @@
     onblur={() => void flush()}
     aria-describedby="{id}-status"
   ></textarea>
-  <span class="status" class:error={status === "error"} id="{id}-status" role="status">{STATUS_TEXT[status]}</span>
+  <span class="status" class:error={status === "error" || status === "missing"} id="{id}-status" role="status">{STATUS_TEXT[status]}</span>
 </div>
 
 <style>
