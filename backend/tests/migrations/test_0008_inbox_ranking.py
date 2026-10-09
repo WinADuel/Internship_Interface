@@ -15,6 +15,7 @@ RANKING_COLUMNS = {
     "ranking_dealbreaker_keywords",
     "ranking_claude_daily_limit",
     "ranking_updated_at",
+    "last_rescore_at",
 }
 POSTING_COLUMNS = {"local_score", "local_reasons", "claude_scored_at"}
 
@@ -56,10 +57,11 @@ def test_upgrade_adds_ranking_fields_and_scores_existing_postings_neutral(scratc
         assert "ix_postings_inbox_best" in _indexes(conn)
         settings = conn.execute(
             text(
-                "SELECT ranking_role_keywords, ranking_claude_daily_limit, ranking_updated_at FROM app_settings"
+                "SELECT ranking_role_keywords, ranking_claude_daily_limit, ranking_updated_at, last_rescore_at"
+                " FROM app_settings"
             )
         ).one()
-        assert tuple(settings) == ([], 40, None)
+        assert tuple(settings) == ([], 40, None, None)
         rows = conn.execute(text("SELECT local_score, local_reasons, claude_scored_at FROM postings")).all()
         assert [tuple(r) for r in rows] == [(50, [], None)] * 3
 

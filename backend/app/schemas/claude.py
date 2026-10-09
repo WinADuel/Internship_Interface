@@ -149,6 +149,11 @@ class PostingScoreIn(_ClaudeIn):
 
 class PostingScoresIn(_ClaudeIn):
     scores: list[PostingScoreIn] = Field(max_length=MAX_SCORES)
+    # `preferences_as_of` from the GET these scores were made from, echoed
+    # back. Older than the current preferences means they changed while
+    # Claude was scoring, so the scores are stored stale. Left out (an older
+    # routine), the scores count as made against the current preferences.
+    preferences_as_of: datetime | None = None
 
 
 class ScoresResultOut(BaseModel):
@@ -190,5 +195,8 @@ class RankingPostingOut(BaseModel):
 class RankingWorkOut(BaseModel):
     profile: str
     preferences: RankingPreferencesOut
+    # When the preferences last changed (null: never), for the routine to
+    # echo back with its scores.
+    preferences_as_of: datetime | None
     examples: RankingExamplesOut
     postings: list[RankingPostingOut]

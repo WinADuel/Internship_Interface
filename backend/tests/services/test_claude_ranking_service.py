@@ -79,7 +79,7 @@ def test_a_daily_limit_of_0_turns_claude_ranking_off(db_session):
     make(db_session)
     work = ranking_work(db_session)
     assert work["postings"] == []
-    assert set(work) == {"profile", "preferences", "examples", "postings"}
+    assert set(work) == {"profile", "preferences", "preferences_as_of", "examples", "postings"}
 
 
 def test_only_inbox_postings_passing_the_saved_filters_are_given(db_session):
@@ -190,6 +190,60 @@ def test_scores_are_written_to_new_and_saved_postings_only(db_session):
     assert dismissed.claude_score is None and applied.claude_score is None
     # Only the Claude columns change.
     assert new.state is PostingState.NEW and new.local_score == 50
+
+
+def test_work_says_which_preferences_it_was_made_from(db_session):
+    db = db_session
+    settings(db, ranking_updated_at=None)
+    assert ranking_work(db)["preferences_as_of"] is None
+    changed = NOW - timedelta(hours=3)
+    settings(db, ranking_updated_at=changed)
+    assert ranking_work(db)["preferences_as_of"] == changed
+
+
+def test_scores_made_against_the_current_preferences_are_fresh(db_session):
+    db = db_session
+    changed = NOW - timedelta(hours=3)
+    settings(db, ranking_updated_at=changed)
+    p = make(db)
+    save_scores(db, PostingScoresIn(scores=[{"posting_id": p.id, "score": 70}], preferences_as_of=changed), now=NOW)
+    assert p.claude_scored_at == NOW
+    assert p.id not in work_ids(db)
+
+
+def test_scores_made_before_a_preference_change_are_stored_stale(db_session):
+    """The routine read the work, then the user changed the preferences, then
+    the scores arrived: they were made against the old preferences, so they
+    must read as stale (and the postings be offered again)."""
+    db = db_session
+    read_at = NOW - timedelta(hours=3)
+    p = make(db)
+    settings(db, ranking_updated_at=NOW - timedelta(hours=1))  # changed meanwhile
+    result = save_scores(
+        db, PostingScoresIn(scores=[{"posting_id": p.id, "score": 70}], preferences_as_of=read_at), now=NOW
+    )
+    assert result.updated == 1
+    assert (p.claude_score, p.claude_scored_at) == (70, read_at)
+    assert p.id in work_ids(db)
+
+
+def test_scores_made_before_the_first_preferences_were_set_are_stored_stale(db_session):
+    db = db_session
+    changed = NOW - timedelta(hours=1)
+    p = make(db)
+    settings(db, ranking_updated_at=changed)
+    save_scores(db, PostingScoresIn(scores=[{"posting_id": p.id, "score": 70}], preferences_as_of=None), now=NOW)
+    assert p.claude_scored_at < changed
+    assert p.id in work_ids(db)
+
+
+def test_scores_without_preferences_as_of_count_as_fresh(db_session):
+    # A routine still following the older instructions sends no time.
+    db = db_session
+    settings(db, ranking_updated_at=NOW - timedelta(hours=1))
+    p = make(db)
+    save_scores(db, scores((p.id, 70, "")), now=NOW)
+    assert p.claude_scored_at == NOW
 
 
 def test_a_posting_listed_twice_takes_the_last_score(db_session):
