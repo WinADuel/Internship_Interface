@@ -145,8 +145,14 @@ def pending_count(db: Session, now: datetime | None = None) -> int:
     )
 
 
-def get_suggestion(db: Session, suggestion_id: int) -> EmailSuggestion:
-    suggestion = db.get(EmailSuggestion, suggestion_id)
+def get_suggestion(db: Session, suggestion_id: int, *, lock: bool = False) -> EmailSuggestion:
+    """`lock` takes the row lock (until the next commit) and re-reads the
+    row, so two decisions on one suggestion run one after the other and the
+    second sees the first's outcome."""
+    if lock:
+        suggestion = db.get(EmailSuggestion, suggestion_id, with_for_update=True, populate_existing=True)
+    else:
+        suggestion = db.get(EmailSuggestion, suggestion_id)
     if suggestion is None:
         raise EmailSuggestionNotFoundError(suggestion_id)
     return suggestion
@@ -194,7 +200,7 @@ def related(db: Session, suggestions: list[EmailSuggestion]) -> tuple[dict[int, 
 
 
 def dismiss(db: Session, suggestion_id: int, now: datetime | None = None) -> EmailSuggestion:
-    suggestion = get_suggestion(db, suggestion_id)
+    suggestion = get_suggestion(db, suggestion_id, lock=True)
     if suggestion.state != SuggestionState.PENDING:
         raise SuggestionNotPendingError(suggestion_id)
     suggestion.state = SuggestionState.DISMISSED
@@ -221,7 +227,7 @@ def accept(
     Returns the sheet tabs the change touched."""
     now = now or _now()
     data = data or AcceptIn()
-    suggestion = get_suggestion(db, suggestion_id)
+    suggestion = get_suggestion(db, suggestion_id, lock=True)
     if suggestion.state != SuggestionState.PENDING:
         raise SuggestionNotPendingError(suggestion_id)
     if not is_valid(db, suggestion):
@@ -300,8 +306,20 @@ def on_new_suggestion(
 ) -> AcceptResult | None:
     """The sync's step for a suggestion it just stored: one that already
     doesn't apply is stale from the start; with auto-apply on, the safe
-    kinds are applied at once. Returns the accept result when applied."""
+    kinds are applied at once. Returns the accept result when applied.
+
+    A contact's mail stored as an application update that no longer applies
+    (a rejection for an application already rejected) is still their reply:
+    it becomes a contact reply while the contact can be marked Replied."""
     now = now or _now()
+    if (
+        suggestion.kind in APPLICATION_KINDS
+        and not is_valid(db, suggestion)
+        and _contact_allows(contact := _contact(db, suggestion.contact_id), ContactAction.REPLIED)
+    ):
+        suggestion.kind = K.CONTACT_REPLY
+        suggestion.application_id = contact.application_id
+        db.flush()
     if not is_valid(db, suggestion):
         _mark_stale(suggestion, now)
         db.commit()

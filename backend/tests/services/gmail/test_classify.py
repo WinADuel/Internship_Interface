@@ -21,6 +21,19 @@ CASES = [
     ("UNFORTUNATELY", "", K.REJECTION),
     # Rejection outranks the confirmation phrase it usually contains.
     ("Thank you for your application", "Unfortunately the position has been filled", K.REJECTION),
+    # Common rejections that open with a confirmation phrase (review fix).
+    ("Thank you for your interest in Stripe", "Thank you for your interest in Stripe. We have decided not to move forward with your application", K.REJECTION),
+    ("Your application to Rivian", "We regret to inform you that we will not be proceeding with your application at this time", K.REJECTION),
+    ("Thank you for applying", "After careful consideration we have decided to move forward with candidates whose experience more closely aligns with the role", K.REJECTION),
+    ("Re: Data Science Intern", "Thank you for your application. We are unable to offer you a position at this time", K.REJECTION),
+    ("Update from Notion", "Thank you for applying. You have not been selected for the next round of our process", K.REJECTION),
+    ("Ramp application update", "Thanks for your interest in Ramp. We will not be progressing your application further", K.REJECTION),
+    ("Your application", "Thank you for applying. On this occasion your application was unsuccessful", K.REJECTION),
+    ("Software Engineering Intern", "We wanted to let you know that the position has been filled. We appreciate your interest", K.REJECTION),
+    ("Thank you from Figma", "We have chosen to proceed with other applicants for this internship", K.REJECTION),
+    ("Re: Summer internship", "Thanks for interviewing. We've decided to go with another candidate whose background is a closer fit", K.REJECTION),
+    ("Stripe interview update", "Thank you for your time. We are not in a position to extend an offer for this role", K.REJECTION),
+    ("Thank you for applying", "We regret that we are not able to move forward with your candidacy", K.REJECTION),
     # --- interviews
     ("Interview invitation - Rivian", "We'd like to invite you to interview for the Software Intern role", K.INTERVIEW),
     ("Next steps with Ramp", "Could you share your availability for a 30 minute call next week?", K.INTERVIEW),
@@ -38,6 +51,19 @@ CASES = [
     ("Thank you for applying to Stripe", "We'll review your application and if you're selected for an interview, a recruiter will reach out.", K.CONFIRMATION),
     ("Application received", "Should your background match, we will contact you to arrange an interview. Thanks!", K.CONFIRMATION),
     ("Thanks for applying!", "Next steps: our team reviews every application within two weeks.", K.CONFIRMATION),
+    # Confirmations promise interviews in general; only a strong cue counts.
+    ("Thank you for applying to Rivian", "We have received your application. Selected candidates will be contacted for an interview.", K.CONFIRMATION),
+    ("Application received", "Thank you for applying! If your profile is a fit we will reach out to you to schedule interviews.", K.CONFIRMATION),
+    ("Thanks for your interest in Ramp", "Our recruiting team will review your application and we will reach out to qualified candidates to schedule interviews", K.CONFIRMATION),
+    ("Thank you for your application", "Shortlisted applicants will be invited to interview in November.", K.CONFIRMATION),
+    ("Thank you for applying to Stripe", "Due to the volume of applications we will only contact candidates whose qualifications match the role", K.CONFIRMATION),
+    ("Thank you for applying!", "If we decide not to move forward, we will let you know by email.", K.CONFIRMATION),
+    ("Thanks for applying to Figma", "Interviews for this role begin in January; we review every application.", K.CONFIRMATION),
+    # ... and a strong cue in a confirmation is still an invitation.
+    ("Thank you for applying to Notion", "We'd like to invite you to interview. Please share your availability for next week", K.INTERVIEW),
+    ("Thanks for your interest in Ramp", "We'd love to schedule a call with you; pick a time at calendly.com/ramp-recruiting", K.INTERVIEW),
+    ("Thank you for your application", "I would like to schedule a time with you to talk about the internship", K.INTERVIEW),
+    ("Thanks for applying to Rivian", "We were impressed and would like to schedule a 30 minute phone screen", K.INTERVIEW),
     # --- assessments (the interview process mention doesn't make it an interview)
     ("Stripe Online Assessment", "Please complete the online assessment within 7 days", K.ASSESSMENT),
     ("Your CodeSignal invitation", "Rivian has invited you to take a CodeSignal General Coding Assessment as the next step in our interview process", K.ASSESSMENT),
@@ -51,6 +77,9 @@ CASES = [
     ("Thanks for your interest in Ramp", "Our team will review your application.", K.CONFIRMATION),
     ("Your application has been submitted", "", K.CONFIRMATION),
     ("Stripe", "Thank you for your application to the Summer 2027 internship", K.CONFIRMATION),
+    # A refused offer is a rejection, not an offer.
+    ("Offer update", "We are unable to extend an offer to you at this time", K.REJECTION),
+    ("Your application", "Unfortunately we cannot offer you the internship this season", K.REJECTION),
     # --- nothing job-related
     ("Your weekly summary", "You have 3 new followers", None),
     ("Verify your email", "Click below to verify your candidate account", None),
