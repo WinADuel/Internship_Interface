@@ -143,7 +143,8 @@ def test_downgrade_drops_the_new_tables_and_restores_past_dates(scratch_db, alem
         conn.execute(
             text(
                 "INSERT INTO research_queue (kind, request_text, application_id, state)"
-                " VALUES ('interview_brief', 'x', :id, 'pending'), ('company_contacts', 'y', :id, 'pending')"
+                " VALUES ('interview_brief', 'x', :id, 'pending'), ('interview_brief', 'z', :id, 'done'),"
+                " ('company_contacts', 'y', :id, 'pending')"
             ),
             {"id": ids["future"]},
         )
@@ -161,8 +162,9 @@ def test_downgrade_drops_the_new_tables_and_restores_past_dates(scratch_db, alem
             assert _enum_values(conn, name) == []
         assert "interview_brief" in _enum_values(conn, "queue_kind")  # left in place
         assert _interview_datetimes(conn) == {ids["future"]: FUTURE, ids["past"]: PAST, ids["none"]: None}
-        queue = dict(conn.execute(text("SELECT kind::text, state::text FROM research_queue")).all())
-        assert queue == {"interview_brief": "failed", "company_contacts": "pending"}
+        # Brief requests of any state go: Phase 3's QueueKind can't load them.
+        queue = conn.execute(text("SELECT kind::text, state::text FROM research_queue")).all()
+        assert [tuple(row) for row in queue] == [("company_contacts", "pending")]
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0006"
 
     # Upgrading again works with the enum value already present.
