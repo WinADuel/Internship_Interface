@@ -9,6 +9,7 @@
     roundName,
     sortByDate,
   } from "../../interviews/format";
+  import { clock } from "../../stores/clock";
   import type { InterviewRoundListItem } from "../../types/interview";
 
   let { scope }: { scope: "upcoming" | "past" } = $props();
@@ -32,7 +33,7 @@
     void load();
   });
 
-  const now = $derived(new Date());
+  const now = $derived($clock);
   const sorted = $derived(sortByDate(rounds, scope === "past"));
   const dated = $derived(sorted.filter((r) => r.scheduledAt));
   const undated = $derived(sorted.filter((r) => !r.scheduledAt));

@@ -20,12 +20,15 @@
     round = null,
     applicationId = null,
     applications = [],
+    save,
     onsaved,
     oncancel,
   }: {
     round?: InterviewRound | null;
     applicationId?: number | null;
     applications?: Application[];
+    /** Sends an edit instead of a plain PATCH, for a parent that orders its round writes. */
+    save?: (fields: Partial<InterviewRoundFields>) => Promise<InterviewRoundDetail>;
     onsaved?: (round: InterviewRoundDetail) => void;
     oncancel?: () => void;
   } = $props();
@@ -83,7 +86,7 @@
     saving = true;
     try {
       const saved = initial
-        ? await updateRound(initial.id, fields)
+        ? await (save ? save(fields) : updateRound(initial.id, fields))
         : await createRound({ applicationId: appId, ...fields });
       onsaved?.(saved);
     } catch (err) {

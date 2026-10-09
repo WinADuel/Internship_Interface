@@ -106,6 +106,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (err: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const checked = (label: string) => (screen.getByLabelText(label) as HTMLInputElement).checked;
+
 async function open(id = "5") {
   const view = render(InterviewRound, { props: { params: { id } } });
   await screen.findByRole("heading", { level: 1 });
@@ -370,3 +382,117 @@ describe("after the interview", () => {
     await vi.waitFor(() => expect(updateRound).toHaveBeenCalledWith(5, { reflection: "Went well" }));
   });
 });
+
+describe("out-of-order saves", () => {
+  it("drops an older answer that comes back after a newer one", async () => {
+    const first = deferred<InterviewRoundDetail>();
+    const second = deferred<InterviewRoundDetail>();
+    vi.mocked(updateRound).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await open();
+    await fireEvent.click(screen.getByLabelText("Pick stories")); // tick
+    await fireEvent.click(screen.getByLabelText("Research the company")); // untick
+    const [, sent2] = vi.mocked(updateRound).mock.calls[1];
+    second.resolve(round({ checklist: sent2.checklist as typeof CHECKLIST }));
+    await vi.waitFor(() => expect(updateRound).toHaveBeenCalledTimes(2));
+    first.resolve(round({ checklist: [{ ...CHECKLIST[0] }, { ...CHECKLIST[1], done: true }] }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(checked("Research the company")).toBe(false);
+    expect(checked("Pick stories")).toBe(true);
+  });
+
+  it("keeps a newer checklist edit on screen while an older save's answer arrives", async () => {
+    const first = deferred<InterviewRoundDetail>();
+    const second = deferred<InterviewRoundDetail>();
+    vi.mocked(updateRound).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await open();
+    await fireEvent.click(screen.getByLabelText("Pick stories"));
+    await fireEvent.click(screen.getByLabelText("Research the company"));
+    first.resolve(round({ checklist: [{ ...CHECKLIST[0] }, { ...CHECKLIST[1], done: true }] }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(checked("Research the company")).toBe(false);
+    expect(checked("Pick stories")).toBe(true);
+    const [, sent2] = vi.mocked(updateRound).mock.calls[1];
+    second.resolve(round({ checklist: sent2.checklist as typeof CHECKLIST }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(checked("Research the company")).toBe(false);
+    expect(checked("Pick stories")).toBe(true);
+  });
+
+  it("drops an older notes answer that arrives after a newer interviewer change", async () => {
+    const notes = deferred<InterviewRoundDetail>();
+    vi.mocked(updateRound).mockReturnValueOnce(notes.promise);
+    vi.mocked(setRoundContacts).mockResolvedValue(round({ contacts: [] }));
+    await open();
+    const box = screen.getByLabelText("Prep notes");
+    await fireEvent.input(box, { target: { value: "More SQL" } });
+    await fireEvent.blur(box);
+    await fireEvent.click(screen.getByRole("button", { name: "Remove interviewer Ana Lee" }));
+    await vi.waitFor(() => expect(screen.getByText(/No interviewers linked\. Add them/)).toBeInTheDocument());
+    notes.resolve(round({ prepNotes: "More SQL" }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText(/No interviewers linked\. Add them/)).toBeInTheDocument();
+  });
+});
+
+describe("moving to another round", () => {
+  it("saves the old round's unsaved notes to it and ignores its late answers", async () => {
+    const late = deferred<InterviewRoundDetail>();
+    vi.mocked(updateRound).mockReturnValueOnce(late.promise);
+    const view = await open();
+    await fireEvent.input(screen.getByLabelText("Prep notes"), { target: { value: "Unsaved for round 5" } });
+    vi.mocked(getRound).mockResolvedValue(round({ id: 6, company: "Initech", prepNotes: "Round 6 notes" }));
+    await view.rerender({ params: { id: "6" } });
+    expect(updateRound).toHaveBeenCalledWith(5, { prepNotes: "Unsaved for round 5" });
+    await vi.waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Initech — Data Intern"));
+    expect(getRound).toHaveBeenLastCalledWith(6);
+    late.resolve(round({ prepNotes: "Unsaved for round 5" }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Initech — Data Intern");
+    expect((screen.getByLabelText("Prep notes") as HTMLTextAreaElement).value).toBe("Round 6 notes");
+  });
+});
+
+describe("after the interview: failures", () => {
+  it("shows the saved outcome again when setting it fails", async () => {
+    vi.mocked(getRound).mockResolvedValue(round({ state: "done", outcome: "waiting" }));
+    vi.mocked(updateRound).mockRejectedValue(new Error("offline"));
+    await open();
+    const select = screen.getByLabelText("Outcome") as HTMLSelectElement;
+    expect(select.value).toBe("waiting");
+    await fireEvent.change(select, { target: { value: "passed" } });
+    await vi.waitFor(() => expect(get(toasts).map((t) => t.text)).toEqual(["offline"]));
+    expect(select.value).toBe("waiting");
+  });
+
+  it("offers a draft too long for a Gmail link for copying", async () => {
+    const long = "Very Long Company Name ".repeat(100).trim();
+    vi.mocked(getRound).mockResolvedValue(round({ state: "done", company: long }));
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    await open();
+    await fireEvent.click(screen.getByRole("button", { name: "Draft thank-you" }));
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(get(toasts).map((t) => t.text)).toEqual(["Too long for a Gmail link — copy the draft and paste it into Gmail."]);
+    const draft = thankYouDraft({ company: long, roleTitle: "Data Intern", contactName: "Ana Lee" });
+    expect((screen.getByLabelText("Thank-you draft") as HTMLTextAreaElement).value).toBe(`Subject: ${draft.subject}\n\n${draft.body}`);
+    await fireEvent.click(screen.getByRole("button", { name: "Copy draft" }));
+    await vi.waitFor(() => expect(clipboard).toHaveBeenCalledWith(`Subject: ${draft.subject}\n\n${draft.body}`));
+  });
+
+  it("retries only the link after a new interviewer was created but not linked", async () => {
+    vi.mocked(createContact).mockResolvedValue(fakeContact({ id: 11, name: "Cy Park" }));
+    vi.mocked(setRoundContacts).mockRejectedValueOnce(new Error("offline")).mockResolvedValue(round());
+    await open();
+    await fireEvent.click(screen.getByRole("button", { name: "Add interviewer" }));
+    const form = screen.getByRole("form", { name: "New interviewer" });
+    await fireEvent.input(within(form).getByLabelText("Name"), { target: { value: "Cy Park" } });
+    await fireEvent.submit(form);
+    await vi.waitFor(() => expect(get(toasts).map((t) => t.text)).toEqual(["offline"]));
+    expect(within(form).getByRole("status").textContent).toMatch(/not linked to this round yet/);
+    await fireEvent.submit(form);
+    await vi.waitFor(() => expect(setRoundContacts).toHaveBeenCalledTimes(2));
+    expect(createContact).toHaveBeenCalledTimes(1);
+    expect(setRoundContacts).toHaveBeenLastCalledWith(5, [3, 11]);
+    await vi.waitFor(() => expect(screen.queryByRole("form", { name: "New interviewer" })).toBeNull());
+  });
+});
+

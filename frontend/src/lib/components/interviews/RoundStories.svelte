@@ -1,17 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { setRoundStories } from "../../api/interviews";
   import { listStories } from "../../api/stories";
   import { showToast } from "../../stores/toast";
-  import type { InterviewRoundDetail, RoundStory, Story } from "../../types/interview";
+  import type { RoundStory, Story } from "../../types/interview";
   import StoryForm from "./StoryForm.svelte";
 
-  /** `onchanged` gets the round as saved after the linked set changes. */
-  let {
-    roundId,
-    linked,
-    onchanged,
-  }: { roundId: number; linked: RoundStory[]; onchanged: (round: InterviewRoundDetail) => Promise<void> } = $props();
+  /** `save` replaces the round's linked stories; it rejects when that fails. */
+  let { linked, save }: { linked: RoundStory[]; save: (storyIds: number[]) => Promise<void> } = $props();
 
   let bank = $state<Story[]>([]);
   let writing = $state(false);
@@ -31,7 +26,7 @@
   async function replace(ids: number[]) {
     busy = true;
     try {
-      await onchanged(await setRoundStories(roundId, ids));
+      await save(ids);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Couldn't update this round's stories.");
     } finally {
