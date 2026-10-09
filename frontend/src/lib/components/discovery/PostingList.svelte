@@ -134,29 +134,49 @@
     }
   }
 
+  /**
+   * After a reload (the order or filter changed, say) answered while an action
+   * was out, the list on screen is the reload's: it may still show postings the
+   * action has since moved out of this view. Drops those, with their counts.
+   */
+  function dropFromReload(gone: Set<number>) {
+    const back = items.filter((p) => gone.has(p.id));
+    if (!back.length) return;
+    items = items.filter((p) => !gone.has(p.id));
+    total = Math.max(0, total - back.length);
+    countTopPicks(back, -1);
+  }
+
   /** Removes the row at once; puts it back where it was if the server refuses. */
   async function act(posting: Posting, action: PostingAction) {
     const label = postingLabel(posting);
     if (action === "apply" && !window.confirm(`Add ${label} to your tracker as Applied today?`)) return;
     const index = items.findIndex((p) => p.id === posting.id);
     if (index === -1) return;
+    // A reload started meanwhile replaces the list this removal (and any rollback) belongs to.
+    const request = generation;
     items = items.filter((p) => p.id !== posting.id);
     total = Math.max(0, total - 1);
     countTopPicks([posting], -1);
     try {
       await call(action, posting);
     } catch (err) {
-      const at = Math.min(index, items.length);
-      items = [...items.slice(0, at), posting, ...items.slice(at)];
-      total += 1;
-      countTopPicks([posting], 1);
+      // After a reload the list already shows what the server has, this posting included.
+      if (request === generation && !items.some((p) => p.id === posting.id)) {
+        const at = Math.min(index, items.length);
+        items = [...items.slice(0, at), posting, ...items.slice(at)];
+        total += 1;
+        countTopPicks([posting], 1);
+      }
       const message = errorText(err);
       showToast(message ? `Couldn't ${VERBS[action]} ${label}: ${message}` : `Couldn't ${VERBS[action]} ${label}.`);
       return;
     }
     void refreshDiscoveryStatus();
+    // Every action moves the posting out of this view; a reload may have brought it back.
+    dropFromReload(new Set([posting.id]));
     // Emptied a page while more remain: fetch the next ones instead of claiming the list is empty.
-    if (items.length === 0 && total > 0) void load();
+    if (request === generation && items.length === 0 && total > 0) void load();
   }
 
   /** The backend takes at most this many ids per dismiss-all request. */
@@ -166,6 +186,8 @@
   async function dismissAllShown() {
     const shown = items;
     if (!shown.length || !window.confirm(`Dismiss all ${shown.length} ${shown.length === 1 ? "posting" : "postings"} shown?`)) return;
+    // A reload started meanwhile (the order changed, say) owns the list from then on.
+    const request = generation;
     items = [];
     dismissing = shown.length;
     try {
@@ -182,24 +204,29 @@
           failure ??= err;
         }
       }
+      const message = errorText(failure);
       if (failed.length === shown.length) {
-        items = shown;
-        const message = errorText(failure);
+        if (request === generation) items = shown;
         showToast(message ? `Couldn't dismiss the postings: ${message}` : "Couldn't dismiss the postings.");
         return;
       }
       void refreshDiscoveryStatus();
-      if (failed.length) {
-        const gone = new Set(failed.map((p) => p.id));
-        countTopPicks(shown.filter((p) => !gone.has(p.id)), -1);
+      const stillThere = new Set(failed.map((p) => p.id));
+      const gone = shown.filter((p) => !stillThere.has(p.id));
+      if (request !== generation) {
+        // Keep the reload's list, less what was dismissed after it was fetched.
+        dropFromReload(new Set(gone.map((p) => p.id)));
+      } else if (failed.length) {
+        countTopPicks(gone, -1);
         items = failed;
-        total = Math.max(failed.length, total - (shown.length - failed.length));
-        const message = errorText(failure);
+        total = Math.max(failed.length, total - gone.length);
+      }
+      if (failed.length) {
         const lead = `Dismissed ${dismissed} of ${shown.length} postings. Couldn't dismiss the other ${failed.length}`;
         showToast(message ? `${lead}: ${message}` : `${lead}.`);
         return;
       }
-      await load();
+      if (request === generation) await load();
     } finally {
       dismissing = 0;
     }

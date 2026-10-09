@@ -300,6 +300,78 @@ describe("PostingList — Inbox ranking", () => {
     await vi.waitFor(() => expect(topPicksChip()).toHaveAccessibleName("Top picks 5"));
   });
 
+  describe("a reload while an action is out", () => {
+    const anthropic = fakePosting({ id: 3, company: "Anthropic", title: "ML Intern", claudeScore: 90 });
+
+    it("a refused action does not put a second copy of the row back", async () => {
+      vi.mocked(listPostings).mockResolvedValue(page([anthropic, stripe, figma], 3, 5));
+      render(PostingList, { view: "inbox" });
+      await screen.findByText("Anthropic");
+      const pending = deferred<Posting>();
+      vi.mocked(dismissPosting).mockReturnValueOnce(pending.promise);
+      await fireEvent.click(screen.getByRole("button", { name: "Dismiss Anthropic – ML Intern" }));
+      // The reload is answered before the dismissal: the server still lists it.
+      await fireEvent.click(sortButton("Newest"));
+      await vi.waitFor(() => expect(rowNames()).toEqual(["Anthropic", "Stripe", "Figma"]));
+      pending.reject(new ApiError(500, "boom"));
+      await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Couldn't dismiss Anthropic – ML Intern: boom"));
+      expect(rowNames()).toEqual(["Anthropic", "Stripe", "Figma"]);
+      expect(screen.getByText("Showing 3 of 3")).toBeInTheDocument();
+      expect(topPicksChip()).toHaveAccessibleName("Top picks 5");
+    });
+
+    it("an action that went through drops the row the reload brought back", async () => {
+      vi.mocked(listPostings).mockResolvedValue(page([anthropic, stripe, figma], 3, 5));
+      render(PostingList, { view: "inbox" });
+      await screen.findByText("Anthropic");
+      const pending = deferred<Posting>();
+      vi.mocked(dismissPosting).mockReturnValueOnce(pending.promise);
+      await fireEvent.click(screen.getByRole("button", { name: "Dismiss Anthropic – ML Intern" }));
+      await fireEvent.click(sortButton("Newest"));
+      await vi.waitFor(() => expect(rowNames()).toEqual(["Anthropic", "Stripe", "Figma"]));
+      pending.resolve({ ...anthropic, state: "dismissed" });
+      await vi.waitFor(() => expect(rowNames()).toEqual(["Stripe", "Figma"]));
+      expect(screen.getByText("Showing 2 of 2")).toBeInTheDocument();
+      expect(topPicksChip()).toHaveAccessibleName("Top picks 4");
+      expect(listPostings).toHaveBeenCalledTimes(2);
+    });
+
+    it("a refused Dismiss all shown keeps the reload's list instead of the old one", async () => {
+      vi.mocked(listPostings).mockResolvedValueOnce(page([stripe, figma], 2, 0));
+      render(PostingList, { view: "inbox" });
+      await screen.findByText("Figma");
+      const pending = deferred<number>();
+      vi.mocked(dismissAllPostings).mockReturnValueOnce(pending.promise);
+      await fireEvent.click(screen.getByRole("button", { name: "Dismiss all shown" }));
+      vi.mocked(listPostings).mockResolvedValueOnce(page([anthropic, stripe, figma], 3, 1));
+      await fireEvent.click(sortButton("Newest"));
+      await vi.waitFor(() => expect(rowNames()).toEqual(["Anthropic", "Stripe", "Figma"]));
+      pending.reject(new ApiError(500, "boom"));
+      await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Couldn't dismiss the postings: boom"));
+      expect(rowNames()).toEqual(["Anthropic", "Stripe", "Figma"]);
+      expect(screen.getByText("Showing 3 of 3")).toBeInTheDocument();
+    });
+
+    it("Dismiss all shown that went through drops its rows from the reload's list", async () => {
+      vi.mocked(listPostings).mockResolvedValueOnce(page([stripe, figma], 2, 0));
+      render(PostingList, { view: "inbox" });
+      await screen.findByText("Figma");
+      const pending = deferred<number>();
+      vi.mocked(dismissAllPostings).mockReturnValueOnce(pending.promise);
+      await fireEvent.click(screen.getByRole("button", { name: "Dismiss all shown" }));
+      vi.mocked(listPostings).mockResolvedValueOnce(page([anthropic, stripe, figma], 3, 1));
+      await fireEvent.click(sortButton("Newest"));
+      await vi.waitFor(() => expect(rowNames()).toEqual(["Anthropic", "Stripe", "Figma"]));
+      pending.resolve(2);
+      await vi.waitFor(() => expect(rowNames()).toEqual(["Anthropic"]));
+      expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument();
+      expect(topPicksChip()).toHaveAccessibleName("Top picks 1");
+      // The reload's list is kept, not fetched a third time.
+      expect(listPostings).toHaveBeenCalledTimes(2);
+      expect(refreshDiscoveryStatus).toHaveBeenCalled();
+    });
+  });
+
   it("has no ranking toolbar outside the Inbox", async () => {
     render(PostingList, { view: "saved" });
     await screen.findByText("Figma");
