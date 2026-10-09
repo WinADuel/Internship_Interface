@@ -41,6 +41,18 @@ describe("UpcomingInterviews widget", () => {
     expect(items[1].textContent).toContain("Checklist 2/6");
   });
 
+  it("keeps the countdown current on a page left open", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(2026, 9, 9, 9, 0));
+    vi.mocked(listRounds).mockResolvedValue([
+      fakeRoundListItem({ id: 1, company: "Soon", scheduledAt: new Date(2026, 9, 9, 9, 5).toISOString() }),
+    ]);
+    render(UpcomingInterviews);
+    expect(await screen.findByText(/in 5 minutes/)).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(screen.getByText(/in 4 minutes/)).toBeInTheDocument();
+  });
+
   it("lists rounds whose thank-you is due above the upcoming ones", async () => {
     vi.mocked(listRounds).mockResolvedValue([
       fakeRoundListItem({ id: 7, company: "Soon", scheduledAt: at(12) }),
