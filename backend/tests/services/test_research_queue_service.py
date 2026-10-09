@@ -67,6 +67,16 @@ def test_already_queued_counts_items_in_any_state(db_session):
         enqueue_company_contacts(db_session, app)
 
 
+def test_interview_brief_item_does_not_block_company_contacts(db_session):
+    app = _stripe(db_session)
+    db_session.add(
+        ResearchQueueItem(kind=QueueKind.INTERVIEW_BRIEF, request_text="Stripe — SWE Intern", application_id=app.id)
+    )
+    db_session.flush()
+    item = enqueue_company_contacts(db_session, app)
+    assert item.kind == QueueKind.COMPANY_CONTACTS
+
+
 def test_non_applied_status_does_not_enqueue(db_session):
     app = _stripe(db_session)
     change_status(db_session, app.id, ApplicationStatus.INTERVIEW)

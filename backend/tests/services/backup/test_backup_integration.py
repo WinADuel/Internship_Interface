@@ -30,6 +30,7 @@ from app.services.backup.crypto import encrypt_file
 from app.services.backup.dump import BackupError, list_dump, pg_env, run_dump
 from app.services.backup.restore import restore_backup
 from app.services.backup.service import run_backup
+from tests.scratch_db import drop_database
 
 NOW = datetime(2026, 10, 8, 7, 30, tzinfo=timezone.utc)
 TEST_DATABASE_URL = os.environ["TEST_DATABASE_URL"]  # loaded from backend/.env by conftest
@@ -60,9 +61,8 @@ def scratch_databases():
                 created.append(name)
         yield [base.set(database=name).render_as_string(hide_password=False) for name in names]
     finally:
-        with admin.connect() as conn:
-            for name in created:
-                conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        for name in created:
+            drop_database(admin, name)
         admin.dispose()
 
 

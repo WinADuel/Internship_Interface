@@ -94,3 +94,19 @@ class UnsupportedCareersSiteError(Exception):
 
 class DuplicateWatchCompanyError(Exception):
     """That job board is already on the watchlist."""
+
+
+class InterviewRoundNotFoundError(Exception):
+    """No interview round exists with the requested id."""
+
+
+class StoryNotFoundError(Exception):
+    """No story-bank story exists with the requested id."""
+
+
+class ContactNotOnApplicationError(Exception):
+    """The contact belongs to a different application than the interview round."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
