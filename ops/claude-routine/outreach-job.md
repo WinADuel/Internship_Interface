@@ -223,6 +223,7 @@ The app gives every Discover Inbox posting its own 0–100 match score from the 
     "avoid_companies": [],
     "dealbreaker_keywords": ["unpaid"]
   },
+  "preferences_as_of": "2026-10-09T08:15:02.123456Z",
   "examples": {
     "saved": ["Stripe — Software Engineer Intern, Infrastructure"],
     "dismissed": ["Initech — Sales Engineering Intern"]
@@ -234,6 +235,7 @@ The app gives every Discover Inbox posting its own 0–100 match score from the 
 ```
 
 - `profile` is the same outreach profile as in §2; `preferences` are the user's ranking settings.
+- `preferences_as_of` is when those preferences last changed (`null` if never). Keep it exactly as given and send it back with the scores (below).
 - `examples` are the user's 20 most recent saves (applied postings count as saves) and 20 most recent dismissals (`Company — Title`). Use them to learn what the user likes and skips.
 - `postings` holds the postings to review today, already capped at the user's daily limit and ordered by the app's own score. If it is empty, skip this step.
 
@@ -248,8 +250,10 @@ For each posting:
 Send the scores with `POST $APP_BASE_URL/api/claude/postings/scores`:
 
 ```json
-{"scores": [{"posting_id": 812, "score": 88, "note": "Strong fit: ML infra in Python; NYC"}]}
+{"preferences_as_of": "2026-10-09T08:15:02.123456Z", "scores": [{"posting_id": 812, "score": 88, "note": "Strong fit: ML infra in Python; NYC"}]}
 ```
+
+- `preferences_as_of` is the value from the GET above, echoed back unchanged (including `null`). If the user changed their preferences while you were scoring, the app keeps your scores but marks them stale, and offers those postings again next run.
 
 - `posting_id` and `score` (a whole number from 0 to 100) are required; `note` is optional (leave it out or send `null`).
 - `note` is cut to 200 characters on one line; keep it shorter. A note over 2,000 characters is refused (422).

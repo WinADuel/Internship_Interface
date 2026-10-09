@@ -22,7 +22,7 @@ from app.services.application_service import add_application
 from app.services.discovery.http import DiscoveryHttp
 from app.services.discovery.ingest import ranker_from_settings
 from app.services.discovery.labels import application_source
-from app.services.discovery.ranking import RESCORED_STATES, apply_score
+from app.services.discovery.ranking import RESCORED_STATES, apply_score, lock_scores
 from app.services.discovery.sources import fetch_pasted
 from app.services.discovery.urls import normalize_url, parse_job_url, safe_http_url
 from app.services.errors import InvalidPostingStateError, PostingNotFoundError
@@ -115,6 +115,7 @@ def dismiss_many(db: Session, ids: list[int], now: datetime | None = None) -> in
     wanted = sorted(set(ids))
     if not wanted:
         return 0
+    lock_scores(db)  # many rows at once: serialised with re-scoring
     result = db.execute(
         update(Posting)
         .where(Posting.id.in_(wanted), Posting.state == PostingState.NEW)
