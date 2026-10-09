@@ -17,10 +17,14 @@ vi.mock("../lib/api/email", () => ({
   getEmailStatus: vi.fn().mockResolvedValue({ pendingCount: 0 }),
   syncEmailNow: vi.fn(),
 }));
-const routerState = vi.hoisted(() => ({ querystring: "" as string | undefined }));
-vi.mock("svelte-spa-router", () => ({ router: routerState, replace: vi.fn() }));
+vi.mock("svelte-spa-router", async () => ({
+  router: (await import("../lib/testing/routerState.svelte")).routerState,
+  replace: vi.fn(),
+}));
 
+import { flushSync } from "svelte";
 import { replace } from "svelte-spa-router";
+import { routerState } from "../lib/testing/routerState.svelte";
 import { getBackupStatus } from "../lib/api/backups";
 import { getMatchCount } from "../lib/api/discovery";
 import { getSettings, listClaudeTokens, updateSettings } from "../lib/api/settings";
@@ -183,6 +187,18 @@ describe("Settings page", () => {
       expect(showToast).toHaveBeenCalledWith("Gmail wasn't connected: Google didn't give permission to read mail."),
     );
     expect(replace).toHaveBeenCalledWith("/settings");
+  });
+
+  it("handles a later return to the same open page", async () => {
+    routerState.querystring = "gmail=1";
+    render(Settings);
+    await vi.waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+    routerState.querystring = ""; // what replace("/settings") does
+    flushSync();
+    routerState.querystring = "gmail=0";
+    flushSync();
+    expect(showToast).toHaveBeenLastCalledWith("Gmail wasn't connected: Google didn't give permission to read mail.");
+    expect(replace).toHaveBeenCalledTimes(2);
   });
 
   it("ignores other query values", async () => {
