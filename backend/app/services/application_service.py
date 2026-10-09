@@ -7,6 +7,7 @@ from app.models.application import Application, ApplicationStatus
 from app.models.status_history import StatusHistory
 from app.schemas.application import ApplicationCreate, ApplicationUpdate
 from app.services.errors import AlreadyQueuedError, ApplicationNotFoundError
+from app.services.interview_service import add_round_for_datetime
 from app.services.research_queue_service import add_company_contacts_item
 
 
@@ -37,9 +38,12 @@ def create_application(db: Session, data: ApplicationCreate) -> Application:
 def add_application(db: Session, data: ApplicationCreate) -> Application:
     """`create_application` without the commit, for callers that must save
     other rows in the same transaction (Discover's Apply). Writes the
-    initial history row and the contacts queue item exactly as
-    `create_application` does; the caller commits."""
-    application = Application(**data.model_dump())
+    initial history row, the contacts queue item and, for an interview
+    date, the first interview round exactly as `create_application` does;
+    the caller commits."""
+    fields = data.model_dump()
+    interview_datetime = fields.pop("interview_datetime")
+    application = Application(**fields)
     db.add(application)
     db.flush()  # assign application.id for the history row
     db.add(
@@ -51,6 +55,8 @@ def add_application(db: Session, data: ApplicationCreate) -> Application:
         )
     )
     _enqueue_contacts_if_applied(db, application)
+    if interview_datetime is not None:
+        add_round_for_datetime(db, application, interview_datetime)
     return application
 
 

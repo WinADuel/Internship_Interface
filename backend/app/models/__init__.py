@@ -13,3 +13,6 @@ from app.models.app_settings import AppSettings  # noqa: F401
 from app.models.claude_token import ClaudeToken  # noqa: F401
 from app.models.watch_company import WatchCompany  # noqa: F401
 from app.models.posting import Posting  # noqa: F401
+from app.models.story import Story  # noqa: F401
+from app.models.interview import InterviewRound  # noqa: F401
+from app.models.prep_brief import PrepBrief  # noqa: F401

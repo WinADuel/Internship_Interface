@@ -39,7 +39,12 @@ def add_company_contacts_item(db: Session, application: Application) -> Research
     """`enqueue_company_contacts` without the commit, so the application
     service can save a status change and its queue item atomically."""
     existing = db.scalars(
-        select(ResearchQueueItem.id).where(ResearchQueueItem.application_id == application.id).limit(1)
+        select(ResearchQueueItem.id)
+        .where(
+            ResearchQueueItem.application_id == application.id,
+            ResearchQueueItem.kind == QueueKind.COMPANY_CONTACTS,
+        )
+        .limit(1)
     ).first()
     if existing is not None:
         raise AlreadyQueuedError(application.id)

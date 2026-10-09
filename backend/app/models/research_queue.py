@@ -12,6 +12,7 @@ class QueueKind(str, enum.Enum):
     PROFESSOR_PERSON = "professor_person"
     PROFESSOR_SEARCH = "professor_search"
     COMPANY_CONTACTS = "company_contacts"
+    INTERVIEW_BRIEF = "interview_brief"  # Phase 4: a company brief for an interview
 
 
 class QueueState(str, enum.Enum):
