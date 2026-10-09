@@ -40,7 +40,7 @@ So the plan is: the app stays a published personal-use app, Gmail is an **option
 | How far back on the first sync? | 30 days (setting: 1–90). |
 | Which mail? | Inbox and Sent, excluding Promotions, Social and chats: `-category:promotions -category:social -in:chats`. |
 | Auto-apply | Off. A setting turns on auto-apply for confirmations and contact replies/sent only; rejections, interviews, assessments and offers always wait for you. |
-| What is stored | For matched emails only: Gmail message and thread id, date, sender name and address, subject (≤ 300 chars), snippet (≤ 300 chars). Unmatched emails leave no trace except the sync cursor. |
+| What is stored | For matched emails only (mail about a tracked application or from/to a tracked contact, and applicant-tracking-system mail from an untracked company, kept for the "new application" suggestion): Gmail message and thread id, date, sender name and address, subject (≤ 300 chars), snippet (≤ 300 chars). Unmatched emails leave no trace except the sync cursor. |
 | How long | Decided suggestions are deleted after 90 days; pending ones stay until decided. |
 | Claude | No email data ever goes to the Claude routine. |
 
@@ -92,6 +92,10 @@ The callback now stores the scopes **Google actually granted** (the `scope` fiel
 - New Compose service `gmail-sync` (`python -m app.jobs.gmail_sync`), same pattern as `job-scan`: a loop every `gmail_sync_minutes`, skipping quietly while sync is disabled or the scope isn't granted. An advisory lock prevents overlap with **Sync now**.
 - Each run: `messages.list` with `q = <filters> after:<cursor seconds − 1 hour overlap>` (first run: `newer_than:<lookback>d`), paging up to 500 messages per run; then `messages.get?format=metadata&metadataHeaders=From,To,Cc,Subject,Date` for each new id (skipping ids already in `email_suggestions` or below the cursor). Bodies are never requested.
 - Errors: 401/403 → "reconnect Google and allow Gmail" in Settings; 429/5xx → retry next run; the cursor only advances past fully processed messages.
+- Cursor (review fix): never later than the run's start time (a future-dated message can't hide later mail). After each message it moves to that message's date, the last one handled in list order, so a run that stops early (an error, the 500-fetch cap, sync turned off) doesn't jump past mail it hasn't handled; a run that handled everything it listed moves it to the newest date seen, as does a capped run that couldn't move it at all (so out-of-order dates can't make it handle the same messages forever).
+- A message that fails to process for any reason other than a Gmail/Google error is rolled back, logged by exception type and Gmail id only, counted as skipped, and passed over. The database engine hides SQL parameters in error messages.
+- A run re-checks after each message that sync is still on and Gmail still granted, and stops if not. Sync on without the Gmail permission (Google revoked it, or a Drive-only reconnect dropped it) records "Gmail permission missing: use Reconnect Gmail in Settings".
+- Limits: at most 500 message fetches per run (the rest wait for the next run), and at most 5,000 ids listed per run, newest first: if one query window holds more than 5,000 messages, the older ones beyond that are never looked at.
 - Client `GmailClient(access_token, transport)` with `httpx.MockTransport` fakes in tests, like the Drive client. Error messages carry no response bodies or tokens.
 
 ## 7. UI

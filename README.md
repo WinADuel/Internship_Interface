@@ -101,8 +101,8 @@ Gmail sync watches your mail for application updates so you don't have to move c
 - **What it finds:** confirmations, rejections, interview invitations, online assessments and offers from companies you track (directly or through applicant-tracking systems like Greenhouse or Lever), replies from contacts you emailed, emails you sent to contacts, and application emails from companies you don't track yet.
 - **Email updates** (menu, with a count) lists each one with the sender, subject, preview and what it would do: mark applied, move to Rejected or Offer, add an interview round (the round form opens prefilled), add an assessment note with a 7-day follow-up, mark a contact replied or sent, or add a new application (edit the company and role first). **Accept** applies it through the same steps as clicking in the app; **Dismiss** drops it; **Open in Gmail** shows the thread. The Dashboard's Needs Attention widget and each application's panel show them too.
 - **Auto-apply** (off by default) applies confirmations and contact replies/sent mail without asking; rejections, interviews, assessments and offers always wait for you.
-- **What it keeps:** for matched emails only, the Gmail IDs, date, sender, subject and preview (300 characters each). Unmatched mail leaves no trace, and decided updates are deleted after 90 days.
-- Changing your Google password disconnects it (Google's rule for mail access); Settings then offers **Reconnect Gmail**.
+- **What it keeps:** only for emails it suggests an update from (mail about an application or contact you track, and applicant-tracking-system mail from a company you don't track yet), the Gmail IDs, date, sender, subject and preview (300 characters each). Unmatched mail leaves no trace, and decided updates are deleted after 90 days.
+- Changing your Google password disconnects the whole Google connection, not just Gmail: Drive backups, Essays and Gmail sync share one sign-in (Google's rule for mail access). If you use Gmail sync, reconnect with **Reconnect Gmail** in Settings, which brings back all three. **Connect Google Docs** on the Essays page reconnects only Drive and Docs and leaves Gmail off (Settings then says "Gmail permission missing").
 
 ## Backups
 
@@ -123,7 +123,7 @@ Keep a copy of `.env` in a password manager (see below): a dump alone is not eno
 1. On the old server, in the repo folder, stop the app so nothing changes after the last backup, then take it:
 
    ```
-   docker compose stop backend caddy job-scan sheet-sync
+   docker compose stop backend caddy job-scan sheet-sync gmail-sync
    docker compose run --rm db-backup python -m app.jobs.db_backup --once --label manual
    ```
 

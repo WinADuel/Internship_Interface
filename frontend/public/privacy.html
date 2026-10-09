@@ -27,8 +27,10 @@
       drafts, essay prompts and saved job postings. It also stores the owner's login (a
       username, a hashed password and an encrypted two-factor secret) and an encrypted Google
       access token. If the owner turns on Gmail sync, it also stores a few details of the emails
-      that match a tracked application or contact (see below). All of this is kept in a database
-      on the owner's own server.
+      it suggests an update from: mail about a tracked application or from a tracked contact,
+      mail the owner sent to a tracked contact, and job-application mail from a company the
+      owner doesn't track yet (see below). All of this is kept in a database on the owner's own
+      server.
     </p>
 
     <h2>Google permissions and why</h2>
@@ -45,8 +47,9 @@
       </li>
       <li>
         <code>gmail.readonly</code> (optional, off by default): to notice application updates
-        (confirmations, interview invitations, assessments, offers and rejections) and replies
-        from tracked contacts, and suggest the matching change in the tracker. It is asked for
+        (confirmations, interview invitations, assessments, offers and rejections), replies from
+        tracked contacts, emails the owner sent to a tracked contact, and applications to
+        companies not yet in the tracker, and suggest the matching change. It is asked for
         only when the owner presses <strong>Connect Gmail</strong> in Settings, separately from
         the Drive permissions.
       </li>
@@ -61,16 +64,21 @@
         downloaded.
       </li>
       <li>
-        <strong>What is kept:</strong> only for an email that matches a tracked application or
-        contact: its Gmail message and thread IDs, date, sender name and address, subject and
-        preview (each shortened to 300 characters). Mail that matches nothing is not stored;
-        the app keeps only the date up to which it has checked. Decided suggestions are deleted
-        after 90 days.
+        <strong>What is kept:</strong> only for an email the app suggests an update from: its
+        Gmail message and thread IDs, date, sender name and address, subject and preview (each
+        shortened to 300 characters). Those are emails that match a tracked application or
+        contact (including mail the owner sent to a tracked contact), and confirmations or
+        invitations sent through a job-application system (such as Greenhouse or Lever) by a
+        company the owner doesn't track yet, so it can be offered as a new application.
+        Mail that matches nothing is not stored; the app keeps only the date up to which it
+        has checked. Decided suggestions are deleted after 90 days.
       </li>
       <li>
         <strong>What it is used for:</strong> showing the owner suggested updates on the
-        Email updates page, which the owner accepts or dismisses. The app never sends, changes
-        or deletes email.
+        Email updates page, which the owner accepts or dismisses: a change to a tracked
+        application, marking a contact as replied, marking a contact as emailed (from the
+        recipients of mail the owner sent), or adding a company not yet tracked. The app never
+        sends, changes or deletes email.
       </li>
       <li>
         <strong>How to turn it off:</strong> untick <strong>Sync Gmail</strong> in Settings to
