@@ -6,6 +6,7 @@
   import BackupSheetStatus from "../lib/components/settings/BackupSheetStatus.svelte";
   import ClaudeTokens from "../lib/components/settings/ClaudeTokens.svelte";
   import DiscoverySettings from "../lib/components/settings/DiscoverySettings.svelte";
+  import RankingSettings from "../lib/components/settings/RankingSettings.svelte";
   import { showToast } from "../lib/stores/toast";
   import type { AppSettings } from "../lib/types/contact";
 
@@ -105,6 +106,8 @@
 {#if settings}
   <!-- Its own form and Save: sends only the discovery fields. -->
   <DiscoverySettings {settings} onsaved={(saved) => (settings = saved)} />
+  <!-- Its own form and Save too: sends only the ranking fields. -->
+  <RankingSettings {settings} onsaved={(saved) => (settings = saved)} />
 {/if}
 
 <ClaudeTokens />
