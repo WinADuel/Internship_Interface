@@ -110,3 +110,23 @@ class ContactNotOnApplicationError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
+
+
+class StoryArchivedError(Exception):
+    """An archived story can't be newly linked to an interview round."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class RoundNotScheduledError(Exception):
+    """The interview round has no scheduled time (a calendar event needs one)."""
+
+
+class PrepBriefNotFoundError(Exception):
+    """The application has no company brief yet."""
+
+
+class QueueItemWrongKindError(Exception):
+    """The research queue item is of a different kind than the delivery."""

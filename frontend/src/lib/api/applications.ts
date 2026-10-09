@@ -80,14 +80,17 @@ export async function createApplication(data: ApplicationInput): Promise<Applica
   return mapApplicationFromApi(raw);
 }
 
+/** `interviewDatetime` can't be edited: it is derived from the interview rounds (Phase 4). */
 export async function updateApplication(
   id: number,
-  data: Partial<ApplicationInput>,
+  data: Partial<Omit<ApplicationInput, "interviewDatetime">>,
 ): Promise<Application> {
+  const body = mapApplicationInputToApi(data);
+  delete body.interview_datetime;
   const raw = await apiFetch<Raw>(`/api/applications/${id}`, {
     method: "PATCH",
     headers: JSON_HEADERS,
-    body: JSON.stringify(mapApplicationInputToApi(data)),
+    body: JSON.stringify(body),
   });
   return mapApplicationFromApi(raw);
 }

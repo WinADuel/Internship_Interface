@@ -16,6 +16,8 @@ vi.mock("../lib/stores/applications", async () => {
 });
 vi.mock("../lib/api/applications", () => ({ getStatusHistory: vi.fn().mockResolvedValue([]) }));
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../lib/api/interviews", () => ({ listRounds: vi.fn().mockResolvedValue([]) }));
+vi.mock("../lib/api/contacts", () => ({ listContacts: vi.fn().mockResolvedValue([]) }));
 
 import Applications from "./Applications.svelte";
 
@@ -37,5 +39,20 @@ describe("Applications route", () => {
     expect(screen.getByLabelText("Application details")).toBeTruthy();
     await fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByLabelText("Application details")).toBeNull();
+  });
+
+  it("shows the Interviews section above Contacts in the panel, with the next interview", async () => {
+    store.current.set([
+      fakeApplication({ id: 3, company: "Initech", roleTitle: "Intern", interviewDatetime: "2026-10-12T15:00:00Z" }),
+    ]);
+    render(Applications);
+    await fireEvent.click(screen.getByText("Initech"));
+    const interviews = screen.getByRole("region", { name: "Interviews" });
+    const contacts = screen.getByRole("region", { name: "Contacts" });
+    expect(interviews.compareDocumentPosition(contacts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Next interview").nextElementSibling?.textContent).toBe(
+      new Date("2026-10-12T15:00:00Z").toLocaleString(),
+    );
+    expect(await screen.findByText("No interview rounds yet.")).toBeInTheDocument();
   });
 });
