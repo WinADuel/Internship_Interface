@@ -8,7 +8,9 @@ import type {
   PastePreview,
   Posting,
   PostingPage,
+  PostingSort,
   PostingView,
+  RankingPrefs,
   ScanStarted,
   ScanStatus,
   WatchCompany,
@@ -33,6 +35,22 @@ const FILTER_KEYS: ReadonlyArray<keyof DiscoveryFilters> = [
   "discoveryHideNoSponsorship",
 ];
 
+/** The ranking lists the Top picks count sends; anything else on the argument is left out. */
+const RANKING_KEYS: ReadonlyArray<keyof RankingPrefs> = [
+  "rankingRoleKeywords",
+  "rankingSkillKeywords",
+  "rankingPreferredLocations",
+  "rankingPreferredCompanies",
+  "rankingAvoidCompanies",
+  "rankingDealbreakerKeywords",
+];
+
+function pick<T extends object>(source: T, keys: ReadonlyArray<keyof T>): Partial<T> {
+  const out: Partial<T> = {};
+  for (const key of keys) if (key in source) out[key] = source[key];
+  return out;
+}
+
 function post(body?: unknown): RequestInit {
   return body === undefined
     ? { method: "POST" }
@@ -45,7 +63,15 @@ function stringList(value: unknown): string[] {
 
 export function mapPostingFromApi(raw: Raw): Posting {
   const posting = keysToCamel<Posting>(raw);
-  return { ...posting, locations: stringList(raw.locations), terms: stringList(raw.terms) };
+  return {
+    ...posting,
+    locations: stringList(raw.locations),
+    terms: stringList(raw.terms),
+    localScore: typeof raw.local_score === "number" ? raw.local_score : null,
+    localReasons: stringList(raw.local_reasons),
+    claudeScoredAt: typeof raw.claude_scored_at === "string" ? raw.claude_scored_at : null,
+    claudeStale: raw.claude_stale === true,
+  };
 }
 
 function mapWatchCompanyFromApi(raw: Raw): WatchCompany {
@@ -54,17 +80,25 @@ function mapWatchCompanyFromApi(raw: Raw): WatchCompany {
 
 // --- postings -------------------------------------------------------------------
 
+/**
+ * One page of a view. `sort` (the server's default is best match) and
+ * `minScore` (Top picks) apply to the Inbox only.
+ */
 export async function listPostings(
   view: PostingView = "inbox",
-  opts: { limit?: number; offset?: number } = {},
+  opts: { limit?: number; offset?: number; sort?: PostingSort; minScore?: number } = {},
 ): Promise<PostingPage> {
   const params = new URLSearchParams({
     view,
     limit: String(opts.limit ?? POSTINGS_PAGE_SIZE),
     offset: String(opts.offset ?? 0),
   });
-  const raw = await apiFetch<{ items: Raw[]; total: number }>(`/api/discovery/postings?${params}`);
-  return { items: raw.items.map(mapPostingFromApi), total: raw.total };
+  if (opts.sort) params.set("sort", opts.sort);
+  if (opts.minScore !== undefined) params.set("min_score", String(opts.minScore));
+  const raw = await apiFetch<{ items: Raw[]; total: number; top_picks?: number | null }>(
+    `/api/discovery/postings?${params}`,
+  );
+  return { items: raw.items.map(mapPostingFromApi), total: raw.total, topPicks: raw.top_picks ?? null };
 }
 
 export async function savePosting(id: number): Promise<Posting> {
@@ -131,10 +165,14 @@ export async function getScanStatus(): Promise<ScanStatus> {
 
 /** How many Inbox postings the given (unsaved) filters would show. */
 export async function getMatchCount(filters: DiscoveryFilters): Promise<number> {
-  const body: Partial<DiscoveryFilters> = {};
-  for (const key of FILTER_KEYS) {
-    if (key in filters) (body as Record<string, unknown>)[key] = filters[key];
-  }
+  const body = pick(filters, FILTER_KEYS);
   const raw = await apiFetch<{ count: number }>("/api/discovery/match-count", post(keysToSnake(body)));
+  return raw.count;
+}
+
+/** How many Inbox postings (saved filters) would be Top picks with the given (unsaved) ranking lists. */
+export async function getTopPicksCount(prefs: RankingPrefs): Promise<number> {
+  const body = pick(prefs, RANKING_KEYS);
+  const raw = await apiFetch<{ count: number }>("/api/discovery/top-picks-count", post(keysToSnake(body)));
   return raw.count;
 }

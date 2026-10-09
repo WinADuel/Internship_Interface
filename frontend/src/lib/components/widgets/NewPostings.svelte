@@ -4,6 +4,7 @@
   import { postingLabel, postingWhen } from "../../discovery/format";
   import type { Posting } from "../../types/discovery";
 
+  // The top of the Inbox by Best match (Phase 5 spec §6).
   const SHOWN = 5;
 
   let items = $state<Posting[]>([]);
@@ -15,7 +16,7 @@
   async function load() {
     loading = true;
     try {
-      const page = await listPostings("inbox", { limit: SHOWN });
+      const page = await listPostings("inbox", { limit: SHOWN, sort: "best" });
       items = page.items;
       total = page.total;
       failed = false;
