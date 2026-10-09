@@ -48,12 +48,14 @@
   });
 
   // Connect Gmail comes back to #/settings?gmail=1 (granted) or ?gmail=0 (cancelled or not allowed).
-  let gmailHandled = false;
+  // Each new query is handled once; clearing it lets a later return (same page) be handled too.
+  let handledQuery: string | null = null;
   $effect(() => {
-    if (gmailHandled) return;
-    const result = new URLSearchParams(router.querystring ?? "").get("gmail");
+    const query = router.querystring ?? "";
+    if (query === handledQuery) return;
+    handledQuery = query;
+    const result = new URLSearchParams(query).get("gmail");
     if (result !== "1" && result !== "0") return;
-    gmailHandled = true;
     if (result === "1") showToast("Gmail connected. Turn on Sync Gmail below to start.", "info");
     else showToast("Gmail wasn't connected: Google didn't give permission to read mail.");
     void replace("/settings");
