@@ -234,7 +234,7 @@ The app gives every Discover Inbox posting its own 0–100 match score from the 
 ```
 
 - `profile` is the same outreach profile as in §2; `preferences` are the user's ranking settings.
-- `examples` are the user's 20 most recent saves and dismissals (`Company — Title`). Use them to learn what the user likes and skips.
+- `examples` are the user's 20 most recent saves (applied postings count as saves) and 20 most recent dismissals (`Company — Title`). Use them to learn what the user likes and skips.
 - `postings` holds the postings to review today, already capped at the user's daily limit and ordered by the app's own score. If it is empty, skip this step.
 
 For each posting:

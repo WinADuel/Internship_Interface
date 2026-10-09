@@ -159,7 +159,8 @@ class RankingPreferencesOut(BaseModel):
 
 
 class RankingExamplesOut(BaseModel):
-    """`Company — Title` of the most recent saves and dismissals."""
+    """`Company — Title` of the most recent saves (applied postings included)
+    and dismissals."""
 
     saved: list[str]
     dismissed: list[str]
