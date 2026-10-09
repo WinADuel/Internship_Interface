@@ -4,9 +4,9 @@ the thank-you-due rule.
 
 Every round write re-derives the application's `interview_datetime` before
 committing. Sheet sync needs FastAPI's BackgroundTasks, so, as for
-application writes, the route schedules it: `ROUND_SYNC_TABS` after a round
-write, plus `CONTACT_TABS` after `set_round_contacts` (it can link a contact
-to the application)."""
+application writes, the route schedules it: `sheet_sync_service.ROUND_SYNC_TABS`
+after a round write, `CONTACT_TABS` after `set_round_contacts` (it can link a
+contact to the application)."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -32,10 +32,6 @@ from app.services.errors import (
     StoryArchivedError,
     StoryNotFoundError,
 )
-from app.services.sheet_sync_service import TAB_APPLICATIONS
-
-# A round write can change the application's derived interview_datetime.
-ROUND_SYNC_TABS = (TAB_APPLICATIONS,)
 
 DEFAULT_CHECKLIST = (
     "Research the company and team",

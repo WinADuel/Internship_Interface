@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -6,11 +6,13 @@ import pytest
 from app.models.posting import Posting, PostingSource, PostingState
 from app.schemas.application import ApplicationCreate
 from app.schemas.contact import ContactCreate
+from app.schemas.interview import InterviewRoundCreate
 from app.services import sheets_client
 from app.services.application_service import archive_application, create_application
 from app.services.contact_service import apply_action, create_contact
 from app.services.contact_transitions import ContactAction
 from app.services.errors import GoogleAuthError, SheetSyncError
+from app.services.interview_service import create_round
 from app.services.settings_service import get_settings
 from app.services.sheet_sync_service import (
     ALL_TABS,
@@ -19,6 +21,7 @@ from app.services.sheet_sync_service import (
     SHEET_TITLE,
     TAB_APPLICATIONS,
     TAB_COMPANY,
+    TAB_INTERVIEWS,
     TAB_PROFESSORS,
     TAB_SAVED_POSTINGS,
     safe_sync,
@@ -125,8 +128,8 @@ def test_needs_attention_column_filled(db_session):
     assert rows[2][rows[1].index("sent_at")].startswith((now - timedelta(days=12)).date().isoformat())
 
 
-def test_all_tabs_include_saved_postings():
-    assert ALL_TABS == (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY, TAB_SAVED_POSTINGS)
+def test_all_tabs_include_saved_postings_and_interviews():
+    assert ALL_TABS == (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY, TAB_SAVED_POSTINGS, TAB_INTERVIEWS)
 
 
 def test_new_sheet_is_created_with_every_tab_and_needs_no_ensure(db_session):
@@ -144,12 +147,12 @@ def test_old_three_tab_sheet_gains_saved_postings_tab_once(db_session):
     sync_tabs(db_session, fake, ALL_TABS)
     assert fake.created == []
     assert fake.ensure_calls == [("old", list(ALL_TABS))]
-    assert fake.added == [TAB_SAVED_POSTINGS]
+    assert fake.added == [TAB_SAVED_POSTINGS, TAB_INTERVIEWS]
     assert set(fake.replaced) == set(ALL_TABS)
     fake.replaced.clear()
     sync_tabs(db_session, fake, [TAB_SAVED_POSTINGS, TAB_SAVED_POSTINGS])
     assert fake.ensure_calls[-1] == ("old", [TAB_SAVED_POSTINGS])
-    assert fake.added == [TAB_SAVED_POSTINGS]  # not added a second time
+    assert fake.added == [TAB_SAVED_POSTINGS, TAB_INTERVIEWS]  # not added a second time
     assert set(fake.replaced) == {TAB_SAVED_POSTINGS}
 
 
@@ -193,6 +196,59 @@ def test_saved_posting_rows(db_session):
          "2026-10-06", ""],
         ["Beta", "Data Intern", "", "https://jobs.example.com/old", "2026-10-03", "yes"],
     ]
+    assert all(isinstance(v, str) for r in rows for v in r)
+
+
+def test_four_tab_sheet_gains_interviews_tab(db_session):
+    get_settings(db_session).backup_sheet_id = "old"
+    db_session.flush()
+    fake = FakeSheetsClient()
+    fake.sheets["old"] = [TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY, TAB_SAVED_POSTINGS]
+    sync_tabs(db_session, fake, [TAB_APPLICATIONS, TAB_INTERVIEWS])
+    assert fake.added == [TAB_INTERVIEWS]
+    assert set(fake.replaced) == {TAB_APPLICATIONS, TAB_INTERVIEWS}
+
+
+def test_interview_rows(db_session):
+    acme = create_application(db_session, ApplicationCreate(company="Acme", role_title="SWE Intern"))
+    beta = create_application(db_session, ApplicationCreate(company="Beta", role_title='=HYPERLINK("x")'))
+    archive_application(db_session, beta.id)
+    pacific = timezone(timedelta(hours=-7))
+    create_round(
+        db_session,
+        InterviewRoundCreate(
+            application_id=acme.id,
+            kind="technical",
+            scheduled_at=datetime(2026, 10, 20, 9, 0, tzinfo=pacific),
+            prep_notes="PRIVATE NOTES",
+            questions_to_ask="PRIVATE QUESTIONS",
+        ),
+    )
+    create_round(
+        db_session,
+        InterviewRoundCreate(
+            application_id=beta.id,
+            title="Final loop",
+            scheduled_at=NOW,
+            state="done",
+            outcome="passed",
+            thank_you_sent_at=NOW + timedelta(hours=20),
+            reflection="PRIVATE REFLECTION",
+        ),
+    )
+    create_round(db_session, InterviewRoundCreate(application_id=acme.id))
+    fake = FakeSheetsClient()
+    sync_tabs(db_session, fake, [TAB_INTERVIEWS])
+    rows = fake.replaced[TAB_INTERVIEWS]
+    assert rows[0] == [HEADER_NOTE]
+    assert rows[1] == ["Company", "Role", "Round", "Scheduled", "State", "Outcome", "Thank-you sent"]
+    assert rows[2:] == [
+        ["Beta", '=HYPERLINK("x")', "Final loop", "2026-10-06T12:00:00+00:00", "done", "passed",
+         "2026-10-07T08:00:00+00:00"],
+        ["Acme", "SWE Intern", "Technical", "2026-10-20T16:00:00+00:00", "scheduled", "", ""],
+        ["Acme", "SWE Intern", "Interview", "", "scheduled", "", ""],
+    ]
+    assert "PRIVATE" not in str(rows)
     assert all(isinstance(v, str) for r in rows for v in r)
 
 

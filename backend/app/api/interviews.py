@@ -30,8 +30,8 @@ from app.services.errors import (
     StoryArchivedError,
     StoryNotFoundError,
 )
-from app.services.interview_service import ROUND_SYNC_TABS, RoundScope
-from app.services.sheet_sync_service import CONTACT_TABS, SheetSyncScheduler
+from app.services.interview_service import RoundScope
+from app.services.sheet_sync_service import CONTACT_TABS, ROUND_SYNC_TABS, SheetSyncScheduler
 
 router = APIRouter(
     prefix="/api/interviews",

@@ -62,4 +62,4 @@ def test_run_once_uses_a_fresh_session_and_closes_it(monkeypatch):
     monkeypatch.setattr(nightly_sheet_sync, "SessionLocal", FakeSession)
     monkeypatch.setattr(nightly_sheet_sync, "safe_sync", lambda db, factory, tabs: calls.append(tuple(tabs)) or True)
     assert nightly_sheet_sync.run_once() is True
-    assert calls == [("Applications", "Professors", "Company Contacts", "Saved postings"), "closed"]
+    assert calls == [("Applications", "Professors", "Company Contacts", "Saved postings", "Interviews"), "closed"]
