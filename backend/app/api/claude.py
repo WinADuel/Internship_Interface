@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_claude_token, get_sheet_sync_scheduler
 from app.db.session import get_db
 from app.schemas.claude import (
+    BriefIn,
     ContactsBatchIn,
     FollowupsBatchIn,
     IngestResultOut,
@@ -16,9 +17,15 @@ from app.schemas.claude import (
     ScoresResultOut,
     WorkOut,
 )
+from app.schemas.prep_brief import PrepBriefOut
 from app.schemas.research_queue import QueueItemOut
 from app.services import claude_ingest_service, claude_ranking_service
-from app.services.errors import QueueItemNotFoundError, QueueItemNotPendingError
+from app.services.errors import (
+    ApplicationNotFoundError,
+    QueueItemNotFoundError,
+    QueueItemNotPendingError,
+    QueueItemWrongKindError,
+)
 from app.services.nudges import utc_today
 from app.services.sheet_sync_service import CONTACT_TABS, SheetSyncScheduler
 
@@ -52,6 +59,21 @@ def apply_followups(
     result = claude_ingest_service.apply_followups(db, batch)
     sync.schedule(background_tasks, CONTACT_TABS)
     return result
+
+
+@router.post("/briefs", response_model=PrepBriefOut)
+def save_brief(body: BriefIn, db: Session = Depends(get_db)):
+    """Writes only the application's brief and the queue item (Phase 4 §6)."""
+    try:
+        return claude_ingest_service.save_brief(db, body)
+    except QueueItemNotFoundError:
+        raise HTTPException(status_code=404, detail="queue item not found")
+    except QueueItemWrongKindError:
+        raise HTTPException(status_code=409, detail="queue item is not an interview brief")
+    except QueueItemNotPendingError:
+        raise HTTPException(status_code=409, detail="queue item not pending")
+    except ApplicationNotFoundError:
+        raise HTTPException(status_code=409, detail="application no longer exists")
 
 
 def _finish(finisher, item_id: int, body: QueueResultIn, db: Session):
