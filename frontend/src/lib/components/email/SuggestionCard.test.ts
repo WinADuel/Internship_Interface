@@ -170,6 +170,111 @@ describe("SuggestionCard", () => {
     expect(acceptSuggestion).toHaveBeenCalledWith(1, { company: "Rivian Automotive", roleTitle: "Software Intern" });
   });
 
+  it("disables Accept and Dismiss while a decision is in flight, and keeps them disabled after it", async () => {
+    let resolve!: (s: ReturnType<typeof fakeSuggestion>) => void;
+    vi.mocked(acceptSuggestion).mockReturnValue(new Promise((r) => (resolve = r)));
+    const onchanged = vi.fn();
+    render(SuggestionCard, { suggestion: fakeSuggestion(), onchanged });
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
+    resolve(fakeSuggestion({ state: "accepted" }));
+    await vi.waitFor(() => expect(onchanged).toHaveBeenCalled());
+    // Decided: no second Accept while the list catches up.
+    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
+  });
+
+  it("disables both while a Dismiss is in flight, and keeps them disabled after it", async () => {
+    let resolve!: (s: ReturnType<typeof fakeSuggestion>) => void;
+    vi.mocked(dismissSuggestion).mockReturnValue(new Promise((r) => (resolve = r)));
+    const onchanged = vi.fn();
+    render(SuggestionCard, { suggestion: fakeSuggestion(), onchanged });
+    await fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
+    resolve(fakeSuggestion({ state: "dismissed" }));
+    await vi.waitFor(() => expect(onchanged).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
+  });
+
+  it("a failed Dismiss enables the buttons again; a stale one refreshes the count and reloads", async () => {
+    vi.mocked(dismissSuggestion).mockRejectedValueOnce(new ApiError(500, "boom"));
+    const onchanged = vi.fn();
+    render(SuggestionCard, { suggestion: fakeSuggestion(), onchanged });
+    await fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Couldn't dismiss: boom"));
+    expect(screen.getByRole("button", { name: "Dismiss" })).not.toBeDisabled();
+    expect(onchanged).not.toHaveBeenCalled();
+    expect(refreshEmailStatus).not.toHaveBeenCalled();
+
+    vi.mocked(dismissSuggestion).mockRejectedValueOnce(new ApiError(404, "email suggestion not found"));
+    await fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await vi.waitFor(() => expect(onchanged).toHaveBeenCalledWith(null));
+    expect(refreshEmailStatus).toHaveBeenCalled();
+  });
+
+  it("names the email on Accept, Dismiss and Open in Gmail for screen readers", () => {
+    render(SuggestionCard, { suggestion: fakeSuggestion({ id: 7 }) });
+    const heading = screen.getByText("Thank you for applying to Acme");
+    for (const control of [
+      screen.getByRole("button", { name: "Accept" }),
+      screen.getByRole("button", { name: "Dismiss" }),
+      screen.getByRole("link", { name: "Open in Gmail" }),
+    ]) {
+      expect(control.getAttribute("aria-describedby")).toBe(heading.id);
+      expect(control).toHaveAccessibleDescription("Thank you for applying to Acme");
+    }
+  });
+
+  it.each([
+    [422, "round title is too long"],
+    [500, "boom"],
+  ])("a failed interview accept (%i) keeps the form and what was typed", async (status, message) => {
+    vi.mocked(acceptSuggestion).mockRejectedValue(new ApiError(status, message));
+    const onchanged = vi.fn();
+    render(SuggestionCard, { suggestion: fakeSuggestion({ kind: "interview", roundKind: "technical" }), onchanged });
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    const form = screen.getByRole("form", { name: "New round" });
+    await fireEvent.input(within(form).getByLabelText("Title"), { target: { value: "Coding round" } });
+    await fireEvent.click(within(form).getByRole("button", { name: "Accept and add round" }));
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith(`Couldn't accept: ${message}`));
+    const still = screen.getByRole("form", { name: "New round" });
+    expect((within(still).getByLabelText("Title") as HTMLInputElement).value).toBe("Coding round");
+    await vi.waitFor(() =>
+      expect(within(still).getByRole("button", { name: "Accept and add round" })).not.toBeDisabled(),
+    );
+    expect(onchanged).not.toHaveBeenCalled();
+  });
+
+  it("a stale interview accept (409) asks for a reload, which removes the card", async () => {
+    vi.mocked(acceptSuggestion).mockRejectedValue(new ApiError(409, "this suggestion no longer applies"));
+    const onchanged = vi.fn();
+    render(SuggestionCard, { suggestion: fakeSuggestion({ kind: "interview" }), onchanged });
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Accept and add round" }));
+    await vi.waitFor(() => expect(onchanged).toHaveBeenCalledWith(null));
+    expect(refreshEmailStatus).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["   ", "Software Intern"],
+    ["Rivian", "  "],
+    ["", ""],
+  ])("a new application with a blank company or role (%j, %j) sends nothing", async (company, role) => {
+    render(SuggestionCard, {
+      suggestion: fakeSuggestion({ kind: "new_application", application: null, applicationId: null, proposedCompany: "Rivian" }),
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    const form = screen.getByRole("form", { name: "New application from email" });
+    await fireEvent.input(within(form).getByLabelText("Company"), { target: { value: company } });
+    await fireEvent.input(within(form).getByLabelText("Role"), { target: { value: role } });
+    await fireEvent.click(within(form).getByRole("button", { name: "Add to tracker" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter the company and the role.");
+    expect(acceptSuggestion).not.toHaveBeenCalled();
+    expect(within(form).getByRole("button", { name: "Add to tracker" })).not.toBeDisabled();
+  });
+
   it("a decided suggestion shows its outcome and no Accept or Dismiss", () => {
     render(SuggestionCard, {
       suggestion: fakeSuggestion({ state: "auto_applied", decidedAt: "2026-10-09T10:00:00Z" }),
@@ -193,5 +298,16 @@ describe("SuggestionCard", () => {
       compact: true,
     });
     expect(screen.getByText("Matched: Dana Lee, Acme")).toBeInTheDocument();
+  });
+
+  it("an application update from a contact names the application first", () => {
+    render(SuggestionCard, {
+      suggestion: fakeSuggestion({
+        kind: "interview",
+        contactId: 5,
+        contact: { id: 5, name: "Dana Lee", organization: "Acme", status: "sent" },
+      }),
+    });
+    expect(screen.getByText("Matched: Acme — SWE Intern via Dana Lee")).toBeInTheDocument();
   });
 });

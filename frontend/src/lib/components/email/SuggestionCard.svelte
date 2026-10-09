@@ -17,7 +17,10 @@
     suggestion: EmailSuggestion;
     /** Inside the application panel: the application is already known, so leave it out. */
     compact?: boolean;
-    /** After Accept or Dismiss (the decided suggestion), or after a 404/409 (null): reload the list. */
+    /**
+     * After Accept or Dismiss (the decided suggestion: show it decided or
+     * drop it at once, then reload), or after a 404/409 (null: reload).
+     */
     onchanged?: (updated: EmailSuggestion | null) => void;
   } = $props();
 
@@ -32,18 +35,24 @@
 
   const pending = $derived(suggestion.state === "pending");
   const gmailUrl = $derived(safeGmailUrl(suggestion.gmailUrl));
-  const match = $derived(compact && suggestion.kind !== "new_application" && !suggestion.contact ? null : matchLabel(suggestion));
+  // Inside the application panel the application is already known.
+  const match = $derived(matchLabel(suggestion, { withApplication: !compact }));
   const needsForm = $derived(suggestion.kind === "interview" || suggestion.kind === "new_application");
   const headingId = $derived(`email-subject-${suggestion.id}${compact ? "-c" : ""}`);
 
-  /** Accept; a 404/409 means the list is out of date, so it is reloaded. Throws nothing. */
+  /**
+   * Accept; a 404/409 means the list is out of date, so it is reloaded.
+   * Throws nothing. After a success the buttons stay disabled: the card is
+   * decided, and the list replaces or drops it.
+   */
   async function accept(data: AcceptInput = {}): Promise<boolean> {
+    busy = true;
     try {
       const updated = await acceptSuggestion(suggestion.id, data);
       showToast(`Accepted: ${ACTION_LABELS[suggestion.kind]}.`, "info");
       editing = false;
-      await afterAccept(updated);
       onchanged?.(updated);
+      await afterAccept(updated);
       return true;
     } catch (err) {
       showToast(err instanceof ApiError ? `Couldn't accept: ${err.message}` : "Couldn't accept this update.");
@@ -51,6 +60,7 @@
         void refreshEmailStatus();
         onchanged?.(null);
       }
+      busy = false;
       return false;
     }
   }
@@ -63,9 +73,7 @@
       editing = true;
       return;
     }
-    busy = true;
     await accept();
-    busy = false;
   }
 
   /** The round form's submit: Accept with the round's fields (the round goes to this application). */
@@ -82,9 +90,7 @@
       return;
     }
     editError = "";
-    busy = true;
     await accept({ company: c, roleTitle: r });
-    busy = false;
   }
 
   async function onDismiss() {
@@ -92,11 +98,13 @@
     try {
       const updated = await dismissSuggestion(suggestion.id);
       void refreshEmailStatus();
-      onchanged?.(updated);
+      onchanged?.(updated); // busy stays: the card is decided
     } catch (err) {
       showToast(err instanceof ApiError ? `Couldn't dismiss: ${err.message}` : "Couldn't dismiss this update.");
-      if (err instanceof ApiError && (err.status === 404 || err.status === 409)) onchanged?.(null);
-    } finally {
+      if (err instanceof ApiError && (err.status === 404 || err.status === 409)) {
+        void refreshEmailStatus();
+        onchanged?.(null);
+      }
       busy = false;
     }
   }
@@ -142,11 +150,11 @@
 
   <div class="actions">
     {#if pending && !editing}
-      <button type="button" disabled={busy} onclick={onAccept}>Accept</button>
-      <button type="button" disabled={busy} onclick={onDismiss}>Dismiss</button>
+      <button type="button" disabled={busy} aria-describedby={headingId} onclick={onAccept}>Accept</button>
+      <button type="button" disabled={busy} aria-describedby={headingId} onclick={onDismiss}>Dismiss</button>
     {/if}
     {#if gmailUrl}
-      <a href={gmailUrl} target="_blank" rel="noopener noreferrer">Open in Gmail</a>
+      <a href={gmailUrl} target="_blank" rel="noopener noreferrer" aria-describedby={headingId}>Open in Gmail</a>
     {/if}
   </div>
 </article>

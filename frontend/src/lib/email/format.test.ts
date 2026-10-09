@@ -50,4 +50,25 @@ describe("matchLabel", () => {
     ).toBe("Rivian — Software Intern");
     expect(matchLabel(fakeSuggestion({ application: null, applicationId: null }))).toBeNull();
   });
+
+  it("names the application first and the contact after it for an application update", () => {
+    const contact = { id: 4, name: "Dana Lee", organization: "Acme", status: "sent" as const };
+    expect(matchLabel(fakeSuggestion({ kind: "rejection", contact, contactId: 4 }))).toBe("Acme — SWE Intern via Dana Lee");
+    // Without the application, the contact.
+    expect(matchLabel(fakeSuggestion({ kind: "interview", contact, contactId: 4, application: null }))).toBe(
+      "Dana Lee, Acme",
+    );
+    expect(matchLabel(fakeSuggestion({ kind: "offer", contact, contactId: 4 }), { withApplication: false })).toBe(
+      "Dana Lee, Acme",
+    );
+    expect(matchLabel(fakeSuggestion({ kind: "offer" }), { withApplication: false })).toBeNull();
+    // A contact's own reply names the contact even when it has an application.
+    expect(matchLabel(fakeSuggestion({ kind: "contact_reply", contact, contactId: 4 }))).toBe("Dana Lee, Acme");
+  });
+
+  it("leaves out a blank organization instead of a dangling comma", () => {
+    const contact = { id: 4, name: "Dana Lee", organization: " ", status: "sent" as const };
+    expect(matchLabel(fakeSuggestion({ kind: "contact_reply", contact, contactId: 4 }))).toBe("Dana Lee");
+    expect(matchLabel(fakeSuggestion({ kind: "contact_sent", contact: { ...contact, organization: "" } }))).toBe("Dana Lee");
+  });
 });

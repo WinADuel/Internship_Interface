@@ -95,17 +95,20 @@
 <section class="gmail" aria-labelledby="gmail-heading">
   <h2 id="gmail-heading">Gmail</h2>
   <p class="muted">
-    Optional and off by default. Gmail sync reads the sender, subject, date and Gmail's short preview of recent
-    Inbox and Sent mail to spot application updates and contact replies. It keeps those details only for emails
-    that match an application or contact; message bodies are never downloaded, other mail leaves no trace, and no
-    email goes to Claude.
+    Optional and off by default. Gmail sync reads the sender, recipients, subject, date and Gmail's short preview
+    of recent Inbox and Sent mail to spot application updates, contact replies, emails you sent to a contact, and
+    applications to companies you don't track yet. It keeps the sender, subject, date and preview only for emails
+    it suggests an update from: mail matching an application or contact, and application-system mail (such as
+    Greenhouse or Lever) from a company you don't track yet. Message bodies are never downloaded, other mail
+    leaves no trace, and no email goes to Claude.
   </p>
 
   {#if granted}
     <p class="connected">Gmail: Connected</p>
   {:else}
     <p>
-      <a class="connect" href={CONNECT_GMAIL_URL}>Connect Gmail</a>
+      <!-- Sync on without the permission: it was lost (Google revoked it, or a Drive-only reconnect dropped it). -->
+      <a class="connect" href={CONNECT_GMAIL_URL}>{settings.gmailSyncEnabled ? "Reconnect Gmail" : "Connect Gmail"}</a>
       <span class="muted small">
         Google asks for read-only access to your mail. As a personal app it shows a “Google hasn't verified this
         app” screen first: choose Advanced, then continue.

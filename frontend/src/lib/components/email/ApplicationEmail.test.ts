@@ -37,6 +37,20 @@ describe("ApplicationEmail", () => {
     expect(await screen.findByText("No emails matched to this application yet.")).toBeInTheDocument();
   });
 
+  it("shows a decided card as decided at once, before the reload answers", async () => {
+    vi.mocked(listSuggestions)
+      .mockResolvedValueOnce([fakeSuggestion({ id: 1, subject: "Interview with Acme" })])
+      .mockReturnValueOnce(new Promise(() => {}));
+    vi.mocked(acceptSuggestion).mockResolvedValue(
+      fakeSuggestion({ id: 1, subject: "Interview with Acme", state: "accepted", decidedAt: "2026-10-09T10:00:00Z" }),
+    );
+    render(ApplicationEmail, { applicationId: 1 });
+    await fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Accept" })).toBeNull());
+    expect(screen.getByText("Interview with Acme")).toBeInTheDocument();
+    expect(screen.getAllByText(/Accepted/).length).toBeGreaterThan(0);
+  });
+
   it("reloads and tells the panel after a decision", async () => {
     vi.mocked(listSuggestions).mockResolvedValueOnce([fakeSuggestion()]).mockResolvedValueOnce([]);
     vi.mocked(acceptSuggestion).mockResolvedValue(fakeSuggestion({ state: "accepted" }));
