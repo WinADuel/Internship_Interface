@@ -14,15 +14,28 @@
   let now = $state(new Date());
   // A Back up now result is fresher than a status load still in flight.
   let ranBackup = false;
+  // Announce only what Back up now just reported, not the status loaded with the page.
+  let announcement = $state("");
+
+  // The copy reached Drive but old copies weren't removed: a warning, not a failure.
+  const PRUNE_WARNING_PREFIX = "copy uploaded, but"; // backend/app/services/backup/offsite.py _upload
+
+  const offsiteWarning = $derived(status?.lastOffsiteError?.startsWith(PRUNE_WARNING_PREFIX) ?? false);
 
   const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
 
-  async function load() {
+  // `refresh` re-reads the status after Back up now couldn't report one (409 or network error).
+  async function load(refresh = false) {
     try {
       const loaded = await getBackupStatus();
-      if (!ranBackup) status = loaded;
+      if (refresh || !ranBackup) {
+        status = loaded;
+        loadFailed = false;
+      }
     } catch (err) {
-      if (!ranBackup) loadFailed = true;
+      // Back up now already filled the card, or already toasted why it couldn't.
+      if (refresh || ranBackup) return;
+      loadFailed = true;
       showToast(message(err, "Couldn't load the backup status."));
     }
   }
@@ -35,23 +48,25 @@
 
   async function backUpNow() {
     running = true;
+    announcement = "";
     try {
       const result = await runBackupNow();
       ranBackup = true;
       status = result;
       loadFailed = false;
-      if (result.lastBackupError) showToast(`Backup failed: ${result.lastBackupError}`);
-      else showToast("Backup complete.", "info");
+      announcement = result.lastBackupError ? `Backup failed: ${result.lastBackupError}` : "Backup complete.";
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) showToast("A backup is already running");
       else showToast(message(err, "Couldn't run the backup."));
+      // The other backup, or this one, may have finished: show what the server has now.
+      void load(true);
     } finally {
       running = false;
     }
   }
 </script>
 
-<section aria-labelledby="backups-heading">
+<section aria-labelledby="backups-heading" aria-busy={running}>
   <h2 id="backups-heading">Backups</h2>
   <p class="muted">
     Every night the server keeps a copy of your data and puts an encrypted copy in the "Internship Tracker Backups"
@@ -86,10 +101,11 @@
         Off-site copies to Google Drive are off. They start once Google is connected and BACKUP_ENCRYPTION_KEY is set
         in the server's .env file.
       </p>
-    {:else if status.lastOffsiteError && status.lastOffsiteAt}
-      <!-- An earlier copy is safe in Drive, so this is a warning, not a failure. -->
+    {:else if status.lastOffsiteError && offsiteWarning}
+      <!-- The latest copy reached Drive; only removing old copies failed. -->
       <p class="warning">Off-site copy warning: {status.lastOffsiteError}</p>
     {:else if status.lastOffsiteError}
+      <!-- An older copy in Drive doesn't make a failed upload a warning; "Last off-site copy" shows its age. -->
       <p class="error">Off-site copy failed: {status.lastOffsiteError}</p>
     {/if}
   {:else if loadFailed}
@@ -97,6 +113,7 @@
   {/if}
 
   <button type="button" onclick={backUpNow} disabled={running}>{running ? "Backing up…" : "Back up now"}</button>
+  <p class="status" role="status">{announcement}</p>
 </section>
 
 <style>

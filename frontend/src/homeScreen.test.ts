@@ -45,9 +45,10 @@ describe("index.html", () => {
 describe("manifest.webmanifest", () => {
   const manifest = JSON.parse(readFileSync(new URL("manifest.webmanifest", publicDir), "utf8"));
 
-  it("names the app and opens it standalone at the root", () => {
+  it("names the app, gives it a stable id and opens it standalone at the root", () => {
     expect(manifest.name).toBe("Internship Tracker");
     expect(manifest.short_name).toBe("Tracker");
+    expect(manifest.id).toBe("/");
     expect(manifest.start_url).toBe("/");
     expect(manifest.scope).toBe("/");
     expect(manifest.display).toBe("standalone");

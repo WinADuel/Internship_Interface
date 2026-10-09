@@ -46,6 +46,16 @@ describe("privacy page", () => {
     expect(html).toContain("https://myaccount.google.com/permissions");
   });
 
+  it("says what cookies and browser storage are for", () => {
+    expect(html).toContain("Cookies are used only to keep you signed in");
+    expect(html).toContain("dashboard layout is saved in your own browser");
+    expect(html).not.toContain("The only cookie is the login session");
+  });
+
+  it("says the owner's Claude assistant uses a revocable token and never reads Google data", () => {
+    expect(html).toMatch(/Claude assistant[\s\S]*token the owner can revoke[\s\S]*never reads Google data/);
+  });
+
   it("has a last-updated date", () => {
     expect(html).toMatch(/Last updated: \d{4}-\d{2}-\d{2}/);
   });
