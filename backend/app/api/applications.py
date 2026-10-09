@@ -16,7 +16,7 @@ from app.schemas.prep_brief import PrepBriefOut
 from app.schemas.research_queue import QueueItemOut
 from app.services import application_service, prep_brief_service
 from app.services.errors import AlreadyQueuedError, ApplicationNotFoundError, PrepBriefNotFoundError
-from app.services.sheet_sync_service import TAB_APPLICATIONS, SheetSyncScheduler
+from app.services.sheet_sync_service import ROUND_SYNC_TABS, TAB_APPLICATIONS, SheetSyncScheduler
 
 router = APIRouter(
     prefix="/api/applications",
@@ -46,7 +46,8 @@ def create_application(
     sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
 ):
     application = application_service.create_application(db, data)
-    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    # An interview date becomes the application's first round.
+    sync.schedule(background_tasks, ROUND_SYNC_TABS if data.interview_datetime else [TAB_APPLICATIONS])
     return application
 
 
@@ -76,7 +77,9 @@ def update_application(
         application = application_service.update_application(db, application_id, data)
     except ApplicationNotFoundError:
         raise _not_found()
-    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    # The Interviews tab shows each round's company and role.
+    renamed = bool({"company", "role_title"} & data.model_fields_set)
+    sync.schedule(background_tasks, ROUND_SYNC_TABS if renamed else [TAB_APPLICATIONS])
     return application
 
 

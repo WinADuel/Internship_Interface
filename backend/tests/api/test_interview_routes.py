@@ -17,7 +17,7 @@ ROUTES = [
     ("GET", "/api/interviews/1/calendar.ics"),
 ]
 
-ROUND_TABS = ["Applications"]
+ROUND_TABS = ["Applications", "Interviews"]
 CONTACT_TABS = ["Professors", "Company Contacts"]
 
 
@@ -72,7 +72,7 @@ def test_create_returns_detail_with_derived_fields(logged_in_client, sheet_sync_
     for key in ("prep_notes", "questions_to_ask", "reflection", "thank_you_sent_at", "created_at", "updated_at"):
         assert key in body
     assert logged_in_client.get(f"/api/applications/{a['id']}").json()["interview_datetime"] == _iso(SOON)
-    assert sheet_sync_recorder.scheduled == [ROUND_TABS, ROUND_TABS]  # application create, round create
+    assert sheet_sync_recorder.scheduled == [["Applications"], ROUND_TABS]  # application create, round create
 
 
 def test_create_for_missing_application_is_422(logged_in_client, sheet_sync_recorder):
@@ -124,7 +124,7 @@ def test_get_patch_and_delete(logged_in_client, sheet_sync_recorder):
     assert logged_in_client.patch(f"/api/interviews/{rid}", json={"state": None}).status_code == 422
     assert logged_in_client.delete(f"/api/interviews/{rid}").status_code == 204
     assert logged_in_client.get(f"/api/interviews/{rid}").status_code == 404
-    assert sheet_sync_recorder.scheduled == [ROUND_TABS] * 4
+    assert sheet_sync_recorder.scheduled == [["Applications"]] + [ROUND_TABS] * 3
 
 
 @pytest.mark.parametrize(
