@@ -41,6 +41,12 @@ router = APIRouter(
 
 _NOT_FOUND = HTTPException(status_code=404, detail="interview round not found")
 
+# Round fields the sheet shows: the Interviews tab's Round (title, else kind),
+# Scheduled, State, Outcome and Thank-you sent columns, and through
+# scheduled_at and state the application's derived interview_datetime. Notes
+# autosave as the user types, so a PATCH of anything else skips the re-sync.
+_SHEET_FIELDS = frozenset({"kind", "title", "scheduled_at", "state", "outcome", "thank_you_sent_at"})
+
 
 def _summary_fields(interview_round: InterviewRound, now: datetime) -> dict:
     done, total = interview_service.checklist_progress(interview_round)
@@ -112,7 +118,8 @@ def update_round(
         interview_round = interview_service.update_round(db, round_id, data)
     except InterviewRoundNotFoundError:
         raise _NOT_FOUND
-    sync.schedule(background_tasks, ROUND_SYNC_TABS)
+    if data.model_fields_set & _SHEET_FIELDS:
+        sync.schedule(background_tasks, ROUND_SYNC_TABS)
     return _detail(interview_round)
 
 

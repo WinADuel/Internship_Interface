@@ -79,18 +79,36 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def lock_application(db: Session, application_id: int) -> Application | None:
+    """The application, row-locked until commit and read fresh under the lock.
+    FOR NO KEY UPDATE, not FOR UPDATE: it still serializes these writers but
+    doesn't conflict with the key-share lock that inserting a row referencing
+    the application takes, so two transactions that each added a round (or a
+    queue item) and then lock the application can't deadlock. Pending
+    changes are flushed first, so the fresh read can't drop them."""
+    db.flush()
+    return db.get(
+        Application, application_id, with_for_update={"key_share": True}, populate_existing=True
+    )
+
+
 def recompute_interview_datetime(db: Session, application_id: int) -> None:
     """`applications.interview_datetime` = the earliest `scheduled_at` among
-    the application's rounds that are still `scheduled` (null if none)."""
-    db.flush()
+    the application's rounds that are still `scheduled` (null if none).
+
+    The application row is locked before the rounds are read, so two round
+    writes on one application take turns; otherwise each misses the other's
+    uncommitted change and the later commit can leave a stale date."""
+    application = lock_application(db, application_id)
+    if application is None:
+        return
     earliest = db.scalar(
         select(func.min(InterviewRound.scheduled_at)).where(
             InterviewRound.application_id == application_id,
             InterviewRound.state == InterviewState.SCHEDULED,
         )
     )
-    application = db.get(Application, application_id)
-    if application is not None and application.interview_datetime != earliest:
+    if application.interview_datetime != earliest:
         application.interview_datetime = earliest
 
 
