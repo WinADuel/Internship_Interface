@@ -375,7 +375,7 @@ Google can take a few minutes to apply a new URI.
 
 ## 9. The daily Claude job
 
-The routine researches your Research Queue every morning. It runs in the cloud and needs the server's address.
+The routine researches your Research Queue every morning: people to contact, and the company briefs you ask for from an interview's prep page (**Ask Claude for a brief**). It runs in the cloud and needs the server's address.
 
 1. In the tracker: **Settings → Claude tokens → Create token**. Copy the token now; it's shown once.
 2. Set up the routine as described in the appendix of
@@ -387,7 +387,7 @@ The routine researches your Research Queue every morning. It runs in the cloud a
 
    The routine runs in a cloud environment that may only reach some websites.
    In that environment's network access settings, allow your domain (`yourdomain.com`), or its requests to the tracker are blocked.
-3. Run it once by hand and check the Research Queue page.
+3. Run it once by hand and check the Research Queue page. To test a brief, press **Ask Claude for a brief** on any interview round's prep page first; after the run, the brief shows on that page.
 
 ---
 
