@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeContact } from "../../testing/fixtures";
+import { fakeContact, fakeEmailStatus } from "../../testing/fixtures";
 
 vi.mock("../../api/contacts", () => ({
   getNeedsAttention: vi.fn(),
@@ -12,6 +12,7 @@ vi.mock("../../api/contacts", () => ({
   updateContact: vi.fn(),
 }));
 vi.mock("../../stores/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../api/email", () => ({ getEmailStatus: vi.fn() }));
 
 import {
   applyContactAction,
@@ -20,6 +21,8 @@ import {
   snoozeContact,
   undoContactAction,
 } from "../../api/contacts";
+import { getEmailStatus } from "../../api/email";
+import { emailStatus } from "../../stores/email";
 import { showToast } from "../../stores/toast";
 import { undoDeadlines } from "../../stores/contacts";
 import NeedsAttention from "./NeedsAttention.svelte";
@@ -32,9 +35,30 @@ beforeEach(() => {
   vi.mocked(undoContactAction).mockReset();
   vi.mocked(showToast).mockReset();
   undoDeadlines.set({});
+  emailStatus.set(null);
+  vi.mocked(getEmailStatus).mockReset().mockResolvedValue(fakeEmailStatus());
 });
 
 describe("NeedsAttention", () => {
+  it("links to the email updates waiting for review", async () => {
+    vi.mocked(getNeedsAttention).mockResolvedValue([]);
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 3 }));
+    render(NeedsAttention);
+    const link = await screen.findByRole("link", { name: "3 email updates to review" });
+    expect(link.getAttribute("href")).toBe("#/email");
+    expect(screen.queryByText("Nothing needs attention.")).toBeNull();
+    emailStatus.set(fakeEmailStatus({ pendingCount: 1 }));
+    expect(await screen.findByRole("link", { name: "1 email update to review" })).toBeInTheDocument();
+  });
+
+  it("shows no email row when nothing is pending", async () => {
+    vi.mocked(getNeedsAttention).mockResolvedValue([]);
+    render(NeedsAttention);
+    expect(await screen.findByText("Nothing needs attention.")).toBeInTheDocument();
+    expect(getEmailStatus).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("link", { name: /email update/ })).toBeNull();
+  });
+
   it("offers No response and Wait longer for gone-quiet contacts", async () => {
     vi.mocked(getNeedsAttention)
       .mockResolvedValueOnce([fakeContact({ id: 7, status: "followed_up", nudge: "gone_quiet" })])

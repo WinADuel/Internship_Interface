@@ -35,6 +35,14 @@ const settings: AppSettings = {
   discoveryScanHours: 6,
   lastScanAt: null,
   lastScanError: null,
+  gmailSyncEnabled: false,
+  gmailSyncMinutes: 30,
+  gmailLookbackDays: 30,
+  gmailAutoApply: false,
+  gmailLastSyncAt: null,
+  gmailLastError: null,
+  googleConnected: false,
+  gmailGranted: false,
 };
 
 const FILTERS = {

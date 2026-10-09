@@ -5,11 +5,14 @@ import { get } from "svelte/store";
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("svelte-spa-router", () => ({ push }));
 vi.mock("../api/discovery", () => ({ getScanStatus: vi.fn() }));
+vi.mock("../api/email", () => ({ getEmailStatus: vi.fn() }));
 
 import { getScanStatus } from "../api/discovery";
+import { getEmailStatus } from "../api/email";
 import { discoveryStatus } from "../stores/discovery";
+import { emailStatus } from "../stores/email";
 import { session } from "../stores/session";
-import { fakeScanStatus } from "../testing/fixtures";
+import { fakeEmailStatus, fakeScanStatus } from "../testing/fixtures";
 import { toasts } from "../stores/toast";
 import NavSidebar from "./NavSidebar.svelte";
 
@@ -18,7 +21,9 @@ beforeEach(() => {
   toasts.set([]);
   session.set({ loggedIn: true, checked: true });
   discoveryStatus.set(null);
+  emailStatus.set(null);
   vi.mocked(getScanStatus).mockReset().mockResolvedValue(fakeScanStatus());
+  vi.mocked(getEmailStatus).mockReset().mockResolvedValue(fakeEmailStatus());
 });
 
 describe("NavSidebar", () => {
@@ -33,6 +38,8 @@ describe("NavSidebar", () => {
     expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("#/settings");
     expect(screen.getByRole("link", { name: "Interview Prep" }).getAttribute("href")).toBe("#/interviews");
     expect(screen.queryByText(/Interview Prep\s*Coming soon/)).toBeNull();
+    expect(screen.getByRole("link", { name: "Email updates" }).getAttribute("href")).toBe("#/email");
+    expect(screen.queryByText(/Coming soon/)).toBeNull();
   });
 
   it("Logout calls the logout endpoint, clears the session and routes to /login", async () => {
@@ -85,10 +92,22 @@ describe("NavSidebar", () => {
     expect(link.textContent?.trim()).toBe("Discover");
   });
 
+  it("badges the pending email updates and follows later changes", async () => {
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 4 }));
+    render(NavSidebar);
+    const link = await screen.findByRole("link", { name: "Email updates (4 to review)" });
+    expect(link.getAttribute("href")).toBe("#/email");
+    expect(link).toHaveTextContent("4");
+    expect(getEmailStatus).toHaveBeenCalledTimes(1);
+    emailStatus.set(fakeEmailStatus({ pendingCount: 0 }));
+    expect((await screen.findByRole("link", { name: "Email updates" })).textContent?.trim()).toBe("Email updates");
+  });
+
   it("does not ask for the status while logged out", () => {
     session.set({ loggedIn: false, checked: true });
     render(NavSidebar);
     expect(getScanStatus).not.toHaveBeenCalled();
+    expect(getEmailStatus).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Discover" })).toBeInTheDocument();
   });
 });

@@ -142,6 +142,16 @@ export interface AppSettings extends DiscoverySettings {
   /** Set by the scanner; read-only here. */
   lastScanAt: string | null;
   lastScanError: string | null;
+  gmailSyncEnabled: boolean;
+  gmailSyncMinutes: number;
+  gmailLookbackDays: number;
+  gmailAutoApply: boolean;
+  /** Set by Gmail sync; read-only here. */
+  gmailLastSyncAt: string | null;
+  gmailLastError: string | null;
+  /** Computed by the server: a Google token is stored / it holds gmail.readonly. */
+  googleConnected: boolean;
+  gmailGranted: boolean;
 }
 
 export type AppSettingsUpdate = Partial<
@@ -153,6 +163,10 @@ export type AppSettingsUpdate = Partial<
     | "nudgeGoneQuietDays"
     | "nudgeRepliedStaleDays"
     | "claudeJobMaxItems"
+    | "gmailSyncEnabled"
+    | "gmailSyncMinutes"
+    | "gmailLookbackDays"
+    | "gmailAutoApply"
   > &
     DiscoverySettings
 >;

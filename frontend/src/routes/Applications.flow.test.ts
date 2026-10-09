@@ -51,6 +51,8 @@ beforeEach(() => {
   routes["GET /api/applications/1/history"] = () => ({ body: [] });
   // The detail panel's Contacts section (Phase 1b).
   for (const id of [1, 2]) routes[`GET /api/contacts?kind=company&application_id=${id}`] = () => ({ body: [] });
+  // ...and its Email section (Phase 6).
+  for (const id of [1, 2]) routes[`GET /api/email/suggestions?state=all&application_id=${id}&limit=50`] = () => ({ body: [] });
 });
 afterEach(() => vi.restoreAllMocks());
 

@@ -12,6 +12,7 @@
     runContactAction,
     undoDeadlines,
   } from "../../stores/contacts";
+  import { emailStatus, refreshEmailStatus } from "../../stores/email";
   import { showToast } from "../../stores/toast";
   import type { Contact, ContactAction } from "../../types/contact";
   import ContactDetailPanel from "../contacts/ContactDetailPanel.svelte";
@@ -67,7 +68,10 @@
 
   onMount(() => {
     void refresh();
+    void refreshEmailStatus();
   });
+
+  const emailCount = $derived($emailStatus?.pendingCount ?? 0);
 
   async function act(work: () => Promise<unknown>) {
     busy = true;
@@ -130,10 +134,15 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="widget">
+  {#if emailCount > 0}
+    <a class="email" href="#/email">
+      {emailCount} email {emailCount === 1 ? "update" : "updates"} to review
+    </a>
+  {/if}
   {#if loadFailed && items.length === 0 && settled.length === 0}
     <p class="empty">Couldn't load contacts needing attention.</p>
   {:else if loaded && items.length === 0 && settled.length === 0}
-    <p class="empty">Nothing needs attention.</p>
+    {#if emailCount === 0}<p class="empty">Nothing needs attention.</p>{/if}
   {:else}
     <ul>
       {#each items as c (c.id)}
@@ -198,6 +207,7 @@
   .actions button { font-size: 0.8rem; padding: 0.2rem 0.5rem; }
   .undo { background: #fff3c4; }
   .empty { color: #666; font-size: 0.85rem; }
+  .email { display: block; margin-bottom: 0.5rem; padding: 0.3rem 0.5rem; border-radius: 6px; background: #e8f0fd; font-size: 0.85rem; font-weight: 600; }
   .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(30rem, 100%); box-sizing: border-box; overflow-y: auto; padding: 1rem; background: #fff; border-left: 1px solid #ddd; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1); z-index: 10; }
   .close { float: right; }
 </style>
