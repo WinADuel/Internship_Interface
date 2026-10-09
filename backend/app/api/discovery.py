@@ -6,6 +6,7 @@ status and the live match count. Thin: the work is in
 import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
@@ -18,6 +19,7 @@ from app.api.deps import (
     get_sheet_sync_scheduler,
 )
 from app.db.session import get_db
+from app.models.posting import Posting
 from app.schemas.application import ApplicationOut
 from app.schemas.discovery import (
     DismissAllIn,
@@ -31,6 +33,7 @@ from app.schemas.discovery import (
     PostingPage,
     ScanStartedOut,
     ScanStatusOut,
+    TopPicksCountIn,
     WatchCompanyIn,
     WatchCompanyOut,
 )
@@ -39,6 +42,8 @@ from app.services.discovery.filters import (
     filters_from_settings,
     list_postings,
     match_count,
+    top_picks_count,
+    top_picks_preview,
 )
 from app.services.discovery.http import DiscoveryFetchError, DiscoveryHttp
 from app.services.discovery.scanner import is_scan_running, run_scan, scan_status
@@ -79,16 +84,30 @@ def _conflict(exc: InvalidPostingStateError) -> HTTPException:
 # --- postings ----------------------------------------------------------------
 
 
+def _out(db: Session, posting: Posting) -> PostingOut:
+    return PostingOut.build(posting, get_settings(db).ranking_updated_at)
+
+
 @router.get("/postings", response_model=PostingPage)
 def get_postings(
     view: Literal["inbox", "saved", "dismissed"] = "inbox",
+    sort: Literal["best", "newest"] = "best",
+    min_score: int | None = Query(None, ge=0, le=100),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    filters = filters_from_settings(get_settings(db))
-    items, total = list_postings(db, view, filters, limit=limit, offset=offset)
-    return PostingPage(items=[PostingOut.model_validate(p) for p in items], total=total)
+    """`sort` and `min_score` (Top picks) apply to the Inbox only."""
+    settings = get_settings(db)
+    filters = filters_from_settings(settings)
+    items, total = list_postings(
+        db, view, filters, limit=limit, offset=offset, sort=sort, min_score=min_score
+    )
+    return PostingPage(
+        items=[PostingOut.build(p, settings.ranking_updated_at) for p in items],
+        total=total,
+        top_picks=top_picks_count(db, filters) if view == "inbox" else None,
+    )
 
 
 @router.post("/postings/dismiss-all", response_model=DismissAllOut)
@@ -117,7 +136,7 @@ def _change_state(
     except InvalidPostingStateError as exc:
         raise _conflict(exc) from None
     sync.schedule(background_tasks, [TAB_SAVED_POSTINGS])
-    return posting
+    return _out(db, posting)
 
 
 @router.post("/postings/{posting_id}/save", response_model=PostingOut)
@@ -197,7 +216,7 @@ def paste_confirm(
     except InvalidPostingStateError as exc:
         raise _conflict(exc) from None
     sync.schedule(background_tasks, [TAB_SAVED_POSTINGS])
-    return posting
+    return _out(db, posting)
 
 
 # --- watchlist ---------------------------------------------------------------
@@ -266,3 +285,11 @@ def get_status(db: Session = Depends(get_db)):
 @router.post("/match-count", response_model=MatchCountOut)
 def get_match_count(body: MatchCountIn, db: Session = Depends(get_db)):
     return MatchCountOut(count=match_count(db, body.to_filters()))
+
+
+@router.post("/top-picks-count", response_model=MatchCountOut)
+def get_top_picks_count(body: TopPicksCountIn, db: Session = Depends(get_db)):
+    """Top picks the Inbox (saved filters) would have with the unsaved
+    ranking preferences in the body: Settings → Ranking's live count."""
+    filters = filters_from_settings(get_settings(db))
+    return MatchCountOut(count=top_picks_preview(db, filters, body.to_prefs(), datetime.now(UTC)))

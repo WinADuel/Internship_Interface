@@ -6,10 +6,26 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_claude_token, get_sheet_sync_scheduler
 from app.db.session import get_db
-from app.schemas.claude import ContactsBatchIn, FollowupsBatchIn, IngestResultOut, QueueResultIn, WorkOut
+from app.schemas.claude import (
+    BriefIn,
+    ContactsBatchIn,
+    FollowupsBatchIn,
+    IngestResultOut,
+    PostingScoresIn,
+    QueueResultIn,
+    RankingWorkOut,
+    ScoresResultOut,
+    WorkOut,
+)
+from app.schemas.prep_brief import PrepBriefOut
 from app.schemas.research_queue import QueueItemOut
-from app.services import claude_ingest_service
-from app.services.errors import QueueItemNotFoundError, QueueItemNotPendingError
+from app.services import claude_ingest_service, claude_ranking_service
+from app.services.errors import (
+    ApplicationNotFoundError,
+    QueueItemNotFoundError,
+    QueueItemNotPendingError,
+    QueueItemWrongKindError,
+)
 from app.services.nudges import utc_today
 from app.services.sheet_sync_service import CONTACT_TABS, SheetSyncScheduler
 
@@ -45,6 +61,21 @@ def apply_followups(
     return result
 
 
+@router.post("/briefs", response_model=PrepBriefOut)
+def save_brief(body: BriefIn, db: Session = Depends(get_db)):
+    """Writes only the application's brief and the queue item (Phase 4 §6)."""
+    try:
+        return claude_ingest_service.save_brief(db, body)
+    except QueueItemNotFoundError:
+        raise HTTPException(status_code=404, detail="queue item not found")
+    except QueueItemWrongKindError:
+        raise HTTPException(status_code=409, detail="queue item is not an interview brief")
+    except QueueItemNotPendingError:
+        raise HTTPException(status_code=409, detail="queue item not pending")
+    except ApplicationNotFoundError:
+        raise HTTPException(status_code=409, detail="application no longer exists")
+
+
 def _finish(finisher, item_id: int, body: QueueResultIn, db: Session):
     try:
         return finisher(db, item_id, body.result_note)
@@ -62,3 +93,16 @@ def complete(item_id: int, body: QueueResultIn, db: Session = Depends(get_db)):
 @router.post("/queue/{item_id}/failed", response_model=QueueItemOut)
 def failed(item_id: int, body: QueueResultIn, db: Session = Depends(get_db)):
     return _finish(claude_ingest_service.fail_queue_item, item_id, body, db)
+
+
+# --- Discover Inbox ranking (Phase 5 spec §5) ----------------------------------
+
+
+@router.get("/postings", response_model=RankingWorkOut)
+def ranking_work(db: Session = Depends(get_db)):
+    return claude_ranking_service.ranking_work(db)
+
+
+@router.post("/postings/scores", response_model=ScoresResultOut)
+def save_scores(batch: PostingScoresIn, db: Session = Depends(get_db)):
+    return claude_ranking_service.save_scores(db, batch)

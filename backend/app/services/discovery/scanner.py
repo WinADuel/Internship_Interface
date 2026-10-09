@@ -40,6 +40,7 @@ from app.services.discovery.filters import filters_from_settings, match_count
 from app.services.discovery.http import DiscoveryHttp
 from app.services.discovery.ingest import housekeep, ingest, refresh_unchanged
 from app.services.discovery.parsers import clean_text
+from app.services.discovery.ranking import Ranker, prefs_from_settings, rescore
 from app.services.discovery.sources import (
     company_name,
     fetch_board,
@@ -144,7 +145,13 @@ def _summary(errors: list[str]) -> str | None:
 
 
 def _scan_lists(
-    db: Session, http: DiscoveryHttp, urls: list[str], etags: dict[str, str], now: datetime, report: ScanReport
+    db: Session,
+    http: DiscoveryHttp,
+    urls: list[str],
+    etags: dict[str, str],
+    now: datetime,
+    ranker: Ranker,
+    report: ScanReport,
 ) -> None:
     for url in urls:
         name = list_name(url)
@@ -159,7 +166,7 @@ def _scan_lists(
                 # housekeeping would delete a list's rows after 90 days of 304s.
                 refresh_unchanged(db, result, now)
             else:
-                stats = ingest(db, result, now)
+                stats = ingest(db, result, now, ranker=ranker)
                 report.added += stats.added
                 report.closed += stats.closed
             if result.etag:
@@ -184,6 +191,7 @@ def _scan_boards(
     keywords: list[str],
     now: datetime,
     pause: Callable[[float], None],
+    ranker: Ranker,
     report: ScanReport,
 ) -> None:
     companies = list(db.scalars(select(WatchCompany).order_by(WatchCompany.id)))
@@ -197,7 +205,7 @@ def _scan_boards(
             result = fetch_board(http, company, keywords, now=now, pause=pause)
             error = result.error
             if error is None:
-                stats = ingest(db, result, now, watch_company_id=company_id)
+                stats = ingest(db, result, now, watch_company_id=company_id, ranker=ranker)
                 report.added += stats.added
                 report.closed += stats.closed
         except Exception as exc:  # noqa: BLE001 - one source never stops the scan
@@ -235,15 +243,30 @@ def _scan(
     # ETags of lists no longer configured are dropped.
     etags = {u: e for u, e in stored.items() if u in urls and isinstance(e, str) and e}
 
+    prefs = prefs_from_settings(settings)
+    # The first scan of a (UTC) day also refreshes every local score, whose
+    # freshness points age even for postings no source re-lists.
+    last = settings.last_scan_at
+    first_today = last is None or last.astimezone(UTC).date() < now.astimezone(UTC).date()
+    ranker = Ranker(prefs)
+
     report = ScanReport()
-    _scan_lists(db, http, urls, etags, now, report)
-    _scan_boards(db, http, keywords, now, pause, report)
+    _scan_lists(db, http, urls, etags, now, ranker, report)
+    _scan_boards(db, http, keywords, now, pause, ranker, report)
     try:
         report.removed = housekeep(db, now)
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         logger.exception("housekeeping failed")
         report.errors.append(_unexpected("Housekeeping", exc))
+    if first_today:
+        try:
+            rescore(db, prefs, now)
+            db.commit()
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            logger.exception("re-scoring failed")
+            report.errors.append(_unexpected("Re-scoring", exc))
 
     settings = get_settings(db)
     settings.discovery_list_etags = etags

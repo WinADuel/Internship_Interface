@@ -1,4 +1,5 @@
-"""One-way backup of applications and contacts to a Google Sheet (spec §13.7).
+"""One-way backup of applications, contacts, saved postings and interview
+rounds to a Google Sheet (spec §13.7).
 
 Each sync rewrites whole tabs from the current DB state. At personal scale
 that is simpler than row patching and self-healing, and it satisfies the
@@ -11,15 +12,17 @@ from datetime import date, datetime, timezone
 
 from fastapi import BackgroundTasks
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.session import SessionLocal
 from app.models.application import Application
 from app.models.contact import Contact, ContactKind
+from app.models.interview import InterviewRound
 from app.models.posting import Posting, PostingState
 from app.services.contact_service import last_status_changes
 from app.services.errors import GoogleAuthError
 from app.services.google_docs_service import get_valid_access_token
+from app.services.interview_service import round_label
 from app.services.nudges import NudgeKind, compute_nudge, utc_today
 from app.services.settings_service import get_settings, nudge_settings
 from app.services.sheets_client import GoogleSheetsClient, SheetsClient
@@ -33,8 +36,13 @@ TAB_COMPANY = "Company Contacts"
 # Discover's Saved postings (Phase 2). Sheets created before it lack the tab;
 # sync_tabs adds it (ensure_tabs) before writing.
 TAB_SAVED_POSTINGS = "Saved postings"
-ALL_TABS = (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY, TAB_SAVED_POSTINGS)
+# Interview rounds (Phase 4); added to older sheets the same way.
+TAB_INTERVIEWS = "Interviews"
+ALL_TABS = (TAB_APPLICATIONS, TAB_PROFESSORS, TAB_COMPANY, TAB_SAVED_POSTINGS, TAB_INTERVIEWS)
 CONTACT_TABS = (TAB_PROFESSORS, TAB_COMPANY)
+# A round write changes the Interviews tab and can change the application's
+# derived interview_datetime.
+ROUND_SYNC_TABS = (TAB_APPLICATIONS, TAB_INTERVIEWS)
 HEADER_NOTE = "One-way backup mirror of Internship Tracker — edits made here are overwritten."
 SHEET_URL = "https://docs.google.com/spreadsheets/d/{id}"
 NOT_CONNECTED = "google not connected"
@@ -53,6 +61,8 @@ CONTACT_COLUMNS = (
 )
 NEEDS_ATTENTION_HEADER = "Needs Attention"
 SAVED_POSTING_COLUMNS = ("Company", "Role", "Locations", "Link", "Saved", "Closed")
+# Prep notes, questions and reflections are not exported (Phase 4 spec §4).
+INTERVIEW_COLUMNS = ("Company", "Role", "Round", "Scheduled", "State", "Outcome", "Thank-you sent")
 
 
 def _cell(value) -> str:
@@ -100,6 +110,35 @@ def saved_posting_rows(postings: Iterable[Posting]) -> list[list[str]]:
     return rows
 
 
+def interview_rows(rounds: Iterable[InterviewRound]) -> list[list[str]]:
+    """Every round, as given (by date, undated last), archived applications
+    included like on the Applications tab. Times are UTC ISO 8601."""
+    rows = [[HEADER_NOTE], list(INTERVIEW_COLUMNS)]
+    rows += [
+        [
+            _cell(r.application.company),
+            _cell(r.application.role_title),
+            round_label(r),
+            _cell(r.scheduled_at and r.scheduled_at.astimezone(timezone.utc)),
+            _cell(r.state),
+            _cell(r.outcome),
+            _cell(r.thank_you_sent_at and r.thank_you_sent_at.astimezone(timezone.utc)),
+        ]
+        for r in rounds
+    ]
+    return rows
+
+
+def _interview_rounds(db: Session) -> list[InterviewRound]:
+    return list(
+        db.scalars(
+            select(InterviewRound)
+            .options(joinedload(InterviewRound.application))
+            .order_by(InterviewRound.scheduled_at.asc().nulls_last(), InterviewRound.id)
+        )
+    )
+
+
 def _saved_postings(db: Session) -> list[Posting]:
     return list(
         db.scalars(
@@ -127,6 +166,8 @@ def _tab_rows(db: Session, tab: str) -> list[list[str]]:
         return contact_rows(_contacts_with_nudges(db, ContactKind.COMPANY))
     if tab == TAB_SAVED_POSTINGS:
         return saved_posting_rows(_saved_postings(db))
+    if tab == TAB_INTERVIEWS:
+        return interview_rows(_interview_rounds(db))
     raise ValueError(f"unknown tab {tab!r}")
 
 
@@ -142,7 +183,7 @@ def sync_tabs(db: Session, client: SheetsClient, tabs: Iterable[str], now: datet
         db.commit()
         tabs = list(ALL_TABS)  # a new sheet gets every tab, not just the one that changed
     else:
-        # A sheet made before a tab existed (e.g. Saved postings) gains it here;
+        # A sheet made before a tab existed (e.g. Saved postings, Interviews) gains it here;
         # writing a missing tab would fail.
         client.ensure_tabs(settings.backup_sheet_id, tabs)
     for tab in tabs:

@@ -43,6 +43,7 @@ ROUTES = [
     ("POST", "/api/discovery/scan"),
     ("GET", "/api/discovery/status"),
     ("POST", "/api/discovery/match-count"),
+    ("POST", "/api/discovery/top-picks-count"),
 ]
 
 
@@ -58,6 +59,7 @@ def make_posting(
     url: str | None = None,
     changed: datetime = EARLIER,
     watch_company_id: int | None = None,
+    **extra,
 ) -> Posting:
     url = url or f"https://jobs.example.com/{source.value}/{key}"
     posting = Posting(
@@ -76,6 +78,7 @@ def make_posting(
         last_seen_at=EARLIER,
         closed=False,
         watch_company_id=watch_company_id,
+        **extra,
     )
     db.add(posting)
     db.commit()
@@ -181,6 +184,10 @@ def test_paging(logged_in_client, db_session):
         {"limit": 101},
         {"offset": -1},
         {"limit": "x"},
+        {"sort": "score"},
+        {"min_score": -1},
+        {"min_score": 101},
+        {"min_score": "high"},
     ],
 )
 def test_bad_listing_params_are_422(logged_in_client, params):
@@ -656,4 +663,78 @@ def test_match_count_uses_the_unsaved_filters_in_the_body(logged_in_client, db_s
 
 def test_match_count_validates_its_body(logged_in_client):
     r = logged_in_client.post("/api/discovery/match-count", json={"discovery_terms": "Summer 2027"})
+    assert r.status_code == 422
+
+
+
+# --- ranking (Phase 5 spec §6) -----------------------------------------------
+
+
+def test_inbox_sorts_by_best_match_or_newest_and_filters_top_picks(logged_in_client, db_session):
+    top = make_posting(db_session, "1", local_score=88, local_reasons=["Title matches 'software'"])
+    claude = make_posting(db_session, "2", local_score=10, claude_score=75, claude_note="Good fit")
+    low = make_posting(db_session, "3", local_score=30)
+    newest = make_posting(db_session, "4", local_score=5, date_posted=datetime.now(UTC))
+
+    body = logged_in_client.get("/api/discovery/postings").json()
+    assert [p["id"] for p in body["items"]] == [top.id, claude.id, low.id, newest.id]
+    assert body["total"] == 4 and body["top_picks"] == 2
+    item = body["items"][0]
+    assert item["local_score"] == 88 and item["local_reasons"] == ["Title matches 'software'"]
+    assert item["claude_score"] is None and item["claude_scored_at"] is None and item["claude_stale"] is False
+
+    body = logged_in_client.get("/api/discovery/postings", params={"sort": "newest"}).json()
+    assert body["items"][0]["id"] == newest.id
+
+    body = logged_in_client.get("/api/discovery/postings", params={"min_score": 70}).json()
+    assert [p["id"] for p in body["items"]] == [top.id, claude.id]
+    assert body["total"] == 2 and body["top_picks"] == 2
+
+    saved = logged_in_client.get("/api/discovery/postings", params={"view": "saved"}).json()
+    assert saved["top_picks"] is None
+
+
+def test_claude_scores_older_than_the_preferences_are_marked_stale(logged_in_client, db_session):
+    changed = datetime.now(UTC) - timedelta(hours=1)
+    s = settings_service.get_settings(db_session)
+    s.ranking_updated_at = changed
+    db_session.commit()
+    fresh = make_posting(db_session, "1", claude_score=80, claude_scored_at=changed + timedelta(minutes=1))
+    stale = make_posting(db_session, "2", claude_score=70, claude_scored_at=changed - timedelta(minutes=1))
+    legacy = make_posting(db_session, "3", claude_score=60)  # scored before the timestamp existed
+    unscored = make_posting(db_session, "4", local_score=50)
+
+    items = {p["id"]: p for p in logged_in_client.get("/api/discovery/postings").json()["items"]}
+    assert items[fresh.id]["claude_stale"] is False
+    assert items[stale.id]["claude_stale"] is True
+    assert items[legacy.id]["claude_stale"] is True
+    assert items[unscored.id]["claude_stale"] is False
+
+    r = logged_in_client.post(f"/api/discovery/postings/{stale.id}/save")
+    assert r.status_code == 200 and r.json()["claude_stale"] is True
+
+
+def test_top_picks_count_uses_the_unsaved_preferences_in_the_body(logged_in_client, db_session):
+    make_posting(db_session, "1", title="Backend Engineer Intern", locations=["New York, NY"])
+    make_posting(db_session, "2", title="Frontend Intern", claude_score=90)
+    make_posting(db_session, "3", title="Senior Backend Engineer")  # not in the Inbox
+
+    assert logged_in_client.post("/api/discovery/top-picks-count", json={}).json() == {"count": 1}
+    r = logged_in_client.post(
+        "/api/discovery/top-picks-count",
+        json={
+            "ranking_role_keywords": ["backend"],
+            "ranking_skill_keywords": ["engineer", "intern"],
+            "ranking_preferred_locations": ["New York"],
+        },
+    )
+    # 40 (role) + 10 (two skills) + 15 (location) + freshness: a Top pick.
+    assert r.status_code == 200 and r.json() == {"count": 2}
+    # Nothing was saved.
+    assert settings_service.get_settings(db_session).ranking_role_keywords == []
+
+
+def test_top_picks_count_validates_its_body(logged_in_client):
+    assert logged_in_client.post("/api/discovery/top-picks-count", json={"ranking_role_keywords": "ml"}).status_code == 422
+    r = logged_in_client.post("/api/discovery/top-picks-count", json={"ranking_role_keywords": ["x" * 61]})
     assert r.status_code == 422

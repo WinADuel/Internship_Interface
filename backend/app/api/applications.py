@@ -12,9 +12,11 @@ from app.schemas.application import (
     ApplicationUpdate,
     StatusHistoryOut,
 )
-from app.services import application_service
-from app.services.errors import ApplicationNotFoundError
-from app.services.sheet_sync_service import TAB_APPLICATIONS, SheetSyncScheduler
+from app.schemas.prep_brief import PrepBriefOut
+from app.schemas.research_queue import QueueItemOut
+from app.services import application_service, prep_brief_service
+from app.services.errors import AlreadyQueuedError, ApplicationNotFoundError, PrepBriefNotFoundError
+from app.services.sheet_sync_service import ROUND_SYNC_TABS, TAB_APPLICATIONS, SheetSyncScheduler
 
 router = APIRouter(
     prefix="/api/applications",
@@ -44,7 +46,8 @@ def create_application(
     sync: SheetSyncScheduler = Depends(get_sheet_sync_scheduler),
 ):
     application = application_service.create_application(db, data)
-    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    # An interview date becomes the application's first round.
+    sync.schedule(background_tasks, ROUND_SYNC_TABS if data.interview_datetime else [TAB_APPLICATIONS])
     return application
 
 
@@ -74,7 +77,9 @@ def update_application(
         application = application_service.update_application(db, application_id, data)
     except ApplicationNotFoundError:
         raise _not_found()
-    sync.schedule(background_tasks, [TAB_APPLICATIONS])
+    # The Interviews tab shows each round's company and role.
+    renamed = bool({"company", "role_title"} & data.model_fields_set)
+    sync.schedule(background_tasks, ROUND_SYNC_TABS if renamed else [TAB_APPLICATIONS])
     return application
 
 
@@ -116,3 +121,24 @@ def status_history(application_id: int, db: Session = Depends(get_db)):
     except ApplicationNotFoundError:
         raise _not_found()
     return application_service.get_status_history(db, application_id)
+
+
+@router.get("/{application_id}/brief", response_model=PrepBriefOut)
+def get_brief(application_id: int, db: Session = Depends(get_db)):
+    try:
+        return prep_brief_service.get_brief(db, application_id)
+    except ApplicationNotFoundError:
+        raise _not_found()
+    except PrepBriefNotFoundError:
+        raise HTTPException(status_code=404, detail="brief not found")
+
+
+@router.post("/{application_id}/brief/request", response_model=QueueItemOut, status_code=201)
+def request_brief(application_id: int, db: Session = Depends(get_db)):
+    """Asks the daily Claude job for a company brief (Phase 4 spec §4)."""
+    try:
+        return prep_brief_service.request_brief(db, application_id)
+    except ApplicationNotFoundError:
+        raise _not_found()
+    except AlreadyQueuedError:
+        raise HTTPException(status_code=409, detail="brief already requested")
