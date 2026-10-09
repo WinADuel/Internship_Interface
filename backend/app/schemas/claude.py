@@ -6,7 +6,7 @@ string is stripped and length-capped and every list is size-capped."""
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 from app.models.contact import EmailConfidence
 from app.models.research_queue import QueueKind
@@ -134,10 +134,17 @@ def _note(value: str) -> str:
     return clean_text(value, MAX_CLAUDE_NOTE)
 
 
+def _no_note(value: object) -> object:
+    # `"note": null` means no note, as null does for the other optional fields.
+    return "" if value is None else value
+
+
 class PostingScoreIn(_ClaudeIn):
     posting_id: int
     score: int = Field(ge=0, le=100)
-    note: Annotated[str, Field(max_length=MAX_CLAUDE_NOTE * 10), AfterValidator(_note)] = ""
+    note: Annotated[
+        str, BeforeValidator(_no_note), Field(max_length=MAX_CLAUDE_NOTE * 10), AfterValidator(_note)
+    ] = ""
 
 
 class PostingScoresIn(_ClaudeIn):

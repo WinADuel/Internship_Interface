@@ -209,6 +209,16 @@ def test_notes_are_cleaned_to_one_line_and_capped():
     assert batch.scores[1].note == "y" * MAX_CLAUDE_NOTE
 
 
+def test_a_null_note_counts_as_no_note(db_session):
+    # Like the other optional Claude fields, `"note": null` must not cost the
+    # whole batch a 422 (found in the end-to-end check).
+    batch = PostingScoresIn(scores=[{"posting_id": 1, "score": 50, "note": None}])
+    assert batch.scores[0].note == ""
+    p = make(db_session)
+    save_scores(db_session, PostingScoresIn(scores=[{"posting_id": p.id, "score": 60, "note": None}]), now=NOW)
+    assert (p.claude_score, p.claude_note) == (60, None)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
