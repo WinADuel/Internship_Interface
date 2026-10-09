@@ -134,8 +134,9 @@ def test_interval_is_at_least_one_hour(monkeypatch, fake_sessions, stored, expec
     assert job_scan.scan_interval_seconds() == expected * 3600.0
 
 
-def test_main_uses_the_real_http_client(monkeypatch):
+def test_main_sets_up_logging_and_uses_the_real_http_client(monkeypatch):
     seen = []
+    monkeypatch.setattr(job_scan, "configure_job_logging", lambda: seen.append("logging"))
     monkeypatch.setattr(job_scan, "run_forever", lambda http: seen.append(http))
     job_scan.main()
-    assert len(seen) == 1 and isinstance(seen[0], HttpxDiscoveryHttp)
+    assert len(seen) == 2 and seen[0] == "logging" and isinstance(seen[1], HttpxDiscoveryHttp)

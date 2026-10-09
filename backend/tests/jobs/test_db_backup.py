@@ -1,22 +1,15 @@
 import logging
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.jobs import db_backup
-from app.jobs.db_backup import seconds_until_next_run
 from app.services.backup.dump import DUMP_TIMEOUT
 from app.services.backup.offsite import after_nightly_backup
 from app.services.backup.service import BackupResult
-
-
-def test_seconds_until_next_run_is_0230_local():
-    assert seconds_until_next_run(datetime(2026, 10, 6, 2, 0)) == 1800
-    assert seconds_until_next_run(datetime(2026, 10, 6, 2, 30)) == 86400
-    assert seconds_until_next_run(datetime(2026, 10, 6, 2, 30, 1)) == 86399
-    assert seconds_until_next_run(datetime(2026, 10, 6, 23, 30)) == 3 * 3600
 
 
 class FakeLock:
@@ -150,33 +143,64 @@ class _Stop(Exception):
     pass
 
 
-def test_loop_waits_for_0230_runs_nightly_and_survives_crashes(monkeypatch, caplog):
+def test_loop_runs_nightly_at_0230_local_and_survives_crashes(monkeypatch, caplog):
+    # TZ is read by app/jobs/schedule (tests/jobs/test_schedule.py covers DST days).
+    monkeypatch.setenv("TZ", "America/Chicago")
+    clock = [datetime(2026, 10, 6, 6, 30, tzinfo=UTC)]  # 01:30 CDT
     sleeps = []
     runs = []
 
     def sleep(seconds):
+        if len(runs) == 3:
+            raise _Stop  # (the loop catches anything run_once raises)
         sleeps.append(seconds)
-        if len(sleeps) > 3:
-            raise _Stop
+        clock[0] += timedelta(seconds=seconds)
 
     def run_once(label):
-        runs.append(label)
+        runs.append((label, clock[0].astimezone(ZoneInfo("America/Chicago")).strftime("%m-%d %H:%M")))
+        clock[0] += timedelta(minutes=2)
         if len(runs) == 1:
             raise RuntimeError("database restarting")
-        return BackupResult(label=label, error="pg_dump failed" if len(runs) == 2 else None)
+        return BackupResult(label=label, error="pg_dump failed")
 
     monkeypatch.setattr(db_backup, "run_once", run_once)
     with caplog.at_level(logging.INFO), pytest.raises(_Stop):
-        db_backup.run_forever(sleep=sleep, now=lambda: datetime(2026, 10, 6, 1, 30))
-    assert sleeps == [3600.0] * 4
-    assert runs == ["nightly"] * 3
+        db_backup.run_forever(sleep=sleep, now=lambda: clock[0])
+    assert sleeps == [3600.0, 86400.0 - 120, 86400.0 - 120]
+    assert runs == [("nightly", "10-06 02:30"), ("nightly", "10-07 02:30"), ("nightly", "10-08 02:30")]
     assert "nightly backup crashed" in caplog.text
     assert "nightly backup failed (see Settings)" in caplog.text
+
+
+def test_loop_logs_a_successful_run(monkeypatch, caplog):
+    monkeypatch.setenv("TZ", "UTC")
+    clock = [datetime(2026, 10, 6, 2, 0, tzinfo=UTC)]
+
+    def sleep(seconds):
+        if clock[0].day > 6:
+            raise _Stop
+        clock[0] += timedelta(seconds=seconds)
+
+    def run_once(label):
+        clock[0] += timedelta(minutes=1)
+        return BackupResult(label=label)
+
+    monkeypatch.setattr(db_backup, "run_once", run_once)
+    with caplog.at_level(logging.INFO), pytest.raises(_Stop):
+        db_backup.run_forever(sleep=sleep, now=lambda: clock[0])
     assert "nightly backup succeeded" in caplog.text
 
 
-def test_default_runs_the_loop(monkeypatch):
+def test_default_sets_up_logging_and_runs_the_loop(monkeypatch):
     called = []
-    monkeypatch.setattr(db_backup, "run_forever", lambda: called.append(True))
+    monkeypatch.setattr(db_backup, "configure_job_logging", lambda: called.append("logging"))
+    monkeypatch.setattr(db_backup, "run_forever", lambda: called.append("loop"))
     db_backup.main([])
-    assert called == [True]
+    assert called == ["logging", "loop"]
+
+
+def test_once_sets_up_logging_too(job, monkeypatch):
+    called = []
+    monkeypatch.setattr(db_backup, "configure_job_logging", lambda: called.append("logging"))
+    db_backup.main(["--once"])
+    assert called == ["logging"]
