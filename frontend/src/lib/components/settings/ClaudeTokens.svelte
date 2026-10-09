@@ -92,7 +92,10 @@
 
 <section aria-labelledby="claude-tokens-heading">
   <h2 id="claude-tokens-heading">Claude tokens</h2>
-  <p class="muted">The daily Claude job uses one of these to read the research queue and post contacts.</p>
+  <p class="muted">
+    The daily Claude job uses one of these to fetch its work (research, company briefs, follow-ups and Discover
+    Inbox ranking) and send back the results.
+  </p>
 
   {#if plaintext}
     <div class="new-token">
