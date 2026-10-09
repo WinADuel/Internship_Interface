@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { listRounds } from "../../api/interviews";
   import { countdown, formatRoundTime, roundName, sortByDate } from "../../interviews/format";
+  import { clock } from "../../stores/clock";
   import type { InterviewRoundListItem } from "../../types/interview";
 
   const WITHIN_DAYS = 14;
@@ -29,7 +30,7 @@
     void load();
   });
 
-  const now = $derived(new Date());
+  const now = $derived($clock);
   const upcoming = $derived(
     sortByDate(
       rounds.filter((r) => {

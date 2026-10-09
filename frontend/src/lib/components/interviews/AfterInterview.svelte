@@ -3,6 +3,7 @@
   import { formatDateTime } from "../../format";
   import { INTERVIEW_OUTCOMES, OUTCOME_LABELS, STATE_LABELS, isThankYouDue } from "../../interviews/format";
   import { thankYouDraft } from "../../prep/prompts";
+  import { showToast } from "../../stores/toast";
   import type { Contact } from "../../types/contact";
   import type { InterviewOutcome, InterviewRoundDetail, InterviewRoundUpdate } from "../../types/interview";
   import AutosaveText from "./AutosaveText.svelte";
@@ -24,27 +25,47 @@
 
   const due = $derived(isThankYouDue(round));
 
-  async function run(data: InterviewRoundUpdate) {
+  // A draft too long for a Gmail link, offered for copying instead.
+  let longDraft = $state<{ name: string; text: string } | null>(null);
+
+  async function run(data: InterviewRoundUpdate): Promise<boolean> {
     busy = true;
     try {
-      await patch(data);
+      return await patch(data);
     } finally {
       busy = false;
     }
   }
 
-  function onOutcome(event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value;
-    void run({ outcome: (value || null) as InterviewOutcome | null });
+  async function onOutcome(event: Event) {
+    const select = event.currentTarget as HTMLSelectElement;
+    const ok = await run({ outcome: (select.value || null) as InterviewOutcome | null });
+    // The select keeps what was picked; on failure show the saved outcome again.
+    if (!ok) select.value = round.outcome ?? "";
   }
 
   function draftFor(name: string, email: string | null, contactId: number | null) {
     const draft = thankYouDraft({ company: round.company, roleTitle: round.roleTitle, contactName: name });
     const url = gmailComposeUrl(email ?? "", draft.subject, draft.body);
-    if (!fitsInGmailUrl(url)) return;
+    if (!fitsInGmailUrl(url)) {
+      longDraft = { name, text: `Subject: ${draft.subject}\n\n${draft.body}` };
+      showToast("Too long for a Gmail link — copy the draft and paste it into Gmail.", "info");
+      return;
+    }
+    longDraft = null;
     const guessed = appContacts.find((c) => c.id === contactId)?.emailConfidence === "pattern_guess";
     if (guessed && !window.confirm(GUESS_WARNING)) return;
     window.open(url, "_blank", "noopener");
+  }
+
+  async function copyDraft() {
+    if (!longDraft) return;
+    try {
+      await navigator.clipboard.writeText(longDraft.text);
+      showToast("Copied.", "info");
+    } catch {
+      showToast("Couldn't copy — select the text and copy it by hand.");
+    }
   }
 </script>
 
@@ -94,6 +115,13 @@
           </li>
         {/each}
       </ul>
+      {#if longDraft}
+        <div class="long" role="status">
+          <p>The draft{longDraft.name ? ` to ${longDraft.name}` : ""} is too long for a Gmail link. Copy it and paste it into Gmail.</p>
+          <textarea readonly rows="6" aria-label="Thank-you draft" value={longDraft.text}></textarea>
+          <button type="button" onclick={copyDraft}>Copy draft</button>
+        </div>
+      {/if}
       <p class="hint">Drafts open in Gmail; you send them yourself.</p>
       <button type="button" disabled={busy} onclick={() => run({ thankYouSentAt: new Date().toISOString() })}>Mark sent</button>
     {/if}
@@ -112,4 +140,8 @@
   .hint { font-size: 0.8rem; color: #666; margin: 0 0 0.4rem; }
   .due { padding: 0.4rem; background: #fff3c4; border-radius: 6px; font-size: 0.9rem; }
   .sent { color: #2b7a0b; }
+  .long { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.4rem; padding: 0.4rem; border: 1px solid #ddd; border-radius: 6px; }
+  .long p { margin: 0; font-size: 0.9rem; }
+  .long textarea { font: inherit; width: 100%; box-sizing: border-box; }
+  .long button { align-self: flex-start; }
 </style>
