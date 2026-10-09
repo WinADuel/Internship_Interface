@@ -18,15 +18,17 @@ from app.services.discovery.filters import filters_from_settings, inbox_clause
 from app.services.discovery.ranking import prefs_from_settings
 from app.services.settings_service import get_settings
 
-# Example titles of each kind sent with every run (spec §2).
+# Example titles of each kind sent with every run (spec §2). Applied
+# postings count as positive examples together with saves.
 EXAMPLES = 20
 SCORABLE_STATES = (PostingState.NEW, PostingState.SAVED)
+POSITIVE_STATES = (PostingState.SAVED, PostingState.APPLIED)
 
 
-def _examples(db: Session, state: PostingState) -> list[str]:
+def _examples(db: Session, *states: PostingState) -> list[str]:
     rows = db.execute(
         select(Posting.company, Posting.title)
-        .where(Posting.state == state)
+        .where(Posting.state.in_(states))
         .order_by(Posting.state_changed_at.desc(), Posting.id.desc())
         .limit(EXAMPLES)
     )
@@ -69,7 +71,7 @@ def ranking_work(db: Session) -> dict:
         "profile": settings.outreach_profile,
         "preferences": {k: list(v) for k, v in asdict(prefs_from_settings(settings)).items()},
         "examples": {
-            "saved": _examples(db, PostingState.SAVED),
+            "saved": _examples(db, *POSITIVE_STATES),
             "dismissed": _examples(db, PostingState.DISMISSED),
         },
         "postings": postings,

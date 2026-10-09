@@ -149,6 +149,20 @@ def test_payload_carries_profile_preferences_examples_and_posting_fields(db_sess
     assert given is posting
 
 
+def test_applied_postings_are_positive_examples_with_saves_most_recent_first(db_session):
+    db = db_session
+    for i in range(EXAMPLES):
+        make(db, state=PostingState.SAVED, company=f"Saved {i}", title="Intern",
+             state_changed_at=NOW - timedelta(hours=2 * i + 1))
+        make(db, state=PostingState.APPLIED, company=f"Applied {i}", title="Intern",
+             state_changed_at=NOW - timedelta(hours=2 * i))
+
+    saved = ranking_work(db)["examples"]["saved"]
+    assert len(saved) == EXAMPLES
+    assert saved[:4] == ["Applied 0 — Intern", "Saved 0 — Intern", "Applied 1 — Intern", "Saved 1 — Intern"]
+    assert saved[-1] == f"Saved {EXAMPLES // 2 - 1} — Intern"
+
+
 # --- writing scores ------------------------------------------------------------------
 
 

@@ -25,7 +25,7 @@ The Discover Inbox currently shows matching postings newest first. A real scan s
 | How many does Claude review per day? | 40, the highest local scores among Inbox postings it hasn't scored yet (setting, 0–150; 0 turns Claude ranking off). |
 | Which score orders the Inbox? | Claude's when present, otherwise the app's. Both are shown. |
 | What does a dealbreaker do? | Scores 0 and sinks to the bottom with the reason shown; it isn't hidden (the existing exclude keywords still hide). |
-| Does Claude learn from you? | Lightly: each run also receives the titles of your 20 most recent saves and 20 most recent dismissals as examples. |
+| Does Claude learn from you? | Lightly: each run also receives the titles of your 20 most recent saves or applications and 20 most recent dismissals as examples. |
 | When preferences change | Local scores are recomputed at once. Claude scores stay visible but are marked stale, and stale postings become eligible for re-review. |
 
 ## 3. Ranking preferences (Settings → Discover → Ranking)
