@@ -40,10 +40,21 @@ describe.each(["about.html", "privacy.html"])("public page %s", (name) => {
 describe("privacy page", () => {
   const html = read("privacy.html");
 
-  it("names both Google permissions and how to revoke them", () => {
+  it("names every Google permission and how to revoke them", () => {
     expect(html).toContain("drive.readonly");
     expect(html).toContain("drive.file");
+    expect(html).toContain("gmail.readonly");
     expect(html).toContain("https://myaccount.google.com/permissions");
+  });
+
+  it("says what Gmail sync reads and keeps, that it is optional, and how to turn it off", () => {
+    expect(html).toContain("optional, off by default");
+    expect(html).toMatch(/What is read:[\s\S]*preview text Gmail itself provides/);
+    expect(html).toContain("Message bodies and attachments are never");
+    expect(html).toMatch(/What is kept:[\s\S]*matches a tracked application or\s+contact/);
+    expect(html).toContain("Mail that matches nothing is not stored");
+    expect(html).toMatch(/How to turn it off:[\s\S]*Sync Gmail/);
+    expect(html).toContain("no email data is ever given to it");
   });
 
   it("says what cookies and browser storage are for", () => {
