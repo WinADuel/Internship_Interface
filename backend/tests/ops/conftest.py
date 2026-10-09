@@ -41,7 +41,26 @@ if name == "docker":
     if args[:1] == ["info"]:
         sys.exit(code("FAKE_DOCKER_INFO_EXIT"))
     if args[:1] == ["volume"]:
-        print(os.environ.get("FAKE_VOLUMES", ""))
+        # FAKE_VOLUMES: one "project/volume" per line; prints the names that
+        # match every --filter label=KEY=VALUE, as docker does.
+        wanted = {{}}
+        for i, arg in enumerate(args):
+            if arg == "--filter":
+                key, _, value = args[i + 1].removeprefix("label=").partition("=")
+                wanted[key] = value
+        for line in os.environ.get("FAKE_VOLUMES", "").split():
+            project, volume = line.split("/")
+            labels = {{"com.docker.compose.project": project, "com.docker.compose.volume": volume}}
+            if all(labels.get(k) == v for k, v in wanted.items()):
+                print(f"{{project}}_{{volume}}")
+        sys.exit(0)
+    if args[:2] == ["compose", "config"]:
+        if code("FAKE_CONFIG_EXIT"):
+            print("yaml: line 3: mapping values are not allowed in this context", file=sys.stderr)
+            sys.exit(code("FAKE_CONFIG_EXIT"))
+        # The project name, as Compose picks it: COMPOSE_PROJECT_NAME, else the folder.
+        print("name: " + (os.environ.get("COMPOSE_PROJECT_NAME") or Path.cwd().name))
+        print("services: {{}}")
         sys.exit(0)
     if args[:2] == ["compose", "ps"]:
         if "--services" in args:
@@ -62,6 +81,10 @@ if name == "docker":
             sys.exit(code("FAKE_RESTORE_EXIT"))
     if args[:2] == ["compose", "up"]:
         sys.exit(code("FAKE_UP_EXIT"))
+    if args[:2] == ["compose", "build"]:
+        sys.exit(code("FAKE_BUILD_EXIT"))
+    if args[:2] == ["compose", "stop"]:
+        sys.exit(code("FAKE_STOP_EXIT"))
     sys.exit(0)
 
 if name == "curl":

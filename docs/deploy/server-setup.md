@@ -263,7 +263,7 @@ Check you pasted the whole `.pub` line into **Deploy keys** on the right repo, a
    Move with the arrow keys. Delete the old value with Backspace. Paste with Cmd+V. Set each line like this:
 
    - `DOMAIN=yourdomain.com` (just the name: no `https://`, no slash)
-   - `CONTACT_EMAIL=` your email. It is shown on the public About and Privacy pages.
+   - `CONTACT_EMAIL=` your email. It is shown on the public About and Privacy pages, and Google needs it there to publish the app (step 8).
    - `POSTGRES_USER` and `POSTGRES_DB`: leave as they are.
    - `POSTGRES_PASSWORD=` the database password.
    - `DATABASE_URL=`: replace `change-me-db-password` with the **same** database password. Keep the rest of the line.
@@ -310,7 +310,7 @@ Check you pasted the whole `.pub` line into **Deploy keys** on the right repo, a
    ==> Deployed
    ```
 
-   It also prints "To roll back to the previous version". You can ignore that the first time.
+   It also prints "To go back to the previous code". You can ignore that the first time.
 2. Create your account:
 
    ```
@@ -329,6 +329,7 @@ Check you pasted the whole `.pub` line into **Deploy keys** on the right repo, a
 
 - `ERROR: .env still has change-me placeholders: ...` → step 6 isn't finished. `nano .env` and fill in the names it lists.
 - `ERROR: DOMAIN in .env is still the example` → set `DOMAIN` to your domain.
+- `ERROR: CONTACT_EMAIL in .env is still an example address` → set `CONTACT_EMAIL` to your email.
 - `ERROR: cannot talk to Docker.` → log out (`exit`) and log back in (`ssh deploy@<IP>`), then try again.
 - `did not answer within 120s` → usually the HTTPS certificate. DNS must point at the droplet (step 4) before the first deploy.
   Check `dig +short yourdomain.com` shows your IP and `docker compose logs caddy --tail 50`.
@@ -383,6 +384,9 @@ The routine researches your Research Queue every morning. It runs in the cloud a
    - `CLAUDE_TOKEN=` the token from step 1.
 
    Keep both in the routine's settings, never in the repo.
+
+   The routine runs in a cloud environment that may only reach some websites.
+   In that environment's network access settings, allow your domain (`yourdomain.com`), or its requests to the tracker are blocked.
 3. Run it once by hand and check the Research Queue page.
 
 ---
@@ -418,24 +422,30 @@ ops/server/deploy.sh
 ```
 
 It backs up the database, gets the newest `main` from GitHub, rebuilds and checks the site.
-At the end it prints the commands to roll back. Copy them into your notes before you close the window.
+At the end it prints the command that undoes this deploy. Copy it into your notes before you close the window.
 
 ### Roll back
 
-Deploy the previous version, using the command `deploy.sh` printed:
+Run the command the deploy printed under "To undo this deploy". It looks like this:
 
 ```
-ops/server/deploy.sh <previous commit>
+ops/server/deploy.sh --restore /backups/pre-deploy/tracker-<date>.dump <previous commit>
 ```
 
-If the bad deploy changed the database (a migration), restore the backup taken just before it, right after that.
-`deploy.sh` printed that command too:
+It does the whole rollback in one go: it backs up the data as it is now, goes back to the previous code,
+puts back the database as it was just before the bad deploy, starts the app and checks the site.
+It asks you to type the database name (`internship_tracker`) first.
 
-```
-ops/server/restore.sh /backups/pre-deploy/tracker-<date>.dump
-```
+Why the database too: a new version can change how the data is stored (a migration).
+The old version may not start on the changed database, so going back to the old code alone can leave the site down.
+Putting back the backup from just before the deploy fixes that.
+The catch: anything you changed in the tracker since that deploy is lost.
 
-Until you restore it, the old version may not start and the site may show as down.
+The deploy also printed a shorter command, `ops/server/deploy.sh <previous commit>`.
+It goes back to the old code and keeps the data as it is now.
+Use it only if you know the bad deploy didn't change the database. If you're not sure, use the command above.
+
+Changed your mind? The rollback prints its own "To undo" command at the end, like any deploy.
 
 ### Restore a backup
 
@@ -514,4 +524,5 @@ These never touch your data.
 | Google says `redirect_uri_mismatch` | `GOOGLE_REDIRECT_URI` in `.env` and the URI in Google Cloud (step 8) must match exactly. After editing `.env`, run `ops/server/deploy.sh` to apply it. |
 | Login gives an error (500) after moving servers | `TOKEN_ENCRYPTION_KEY` changed. See [Moving to a new server](../../README.md#moving-to-a-new-server) in the README. |
 | `deploy.sh` says files were changed on the server | Someone edited code on the server. Undo it with `git checkout -- <file>`. |
+| `bootstrap.sh` stops with "Could not get lock /var/lib/dpkg/lock-frontend" | A new droplet installs its first security updates right after it starts. The script waits up to 10 minutes for them. If it still stops, wait a few more minutes and run `bash bootstrap.sh` again. |
 | Settings shows "Off-site copy failed" | Read the message. If it ends in "reconnect Google in Settings", connect Google again with **Connect Google Docs** on the Essays page (step 8). |

@@ -48,6 +48,9 @@ SWAPFILE="${TRACKER_BOOTSTRAP_SWAPFILE:-/swapfile}"
 FSTAB="${TRACKER_BOOTSTRAP_FSTAB:-/etc/fstab}"
 ZONEINFO="${TRACKER_BOOTSTRAP_ZONEINFO:-/usr/share/zoneinfo}"
 SWAPPINESS_CONF=/etc/sysctl.d/60-tracker-swappiness.conf
+# A new droplet often runs its first automatic updates right after boot, which
+# holds apt's lock: wait up to 10 minutes for it instead of failing at once.
+APT_GET=(apt-get -o DPkg::Lock::Timeout=600)
 
 DRY_RUN=0
 
@@ -187,8 +190,8 @@ main() {
 
 	# ---- Packages ---------------------------------------------------------
 	say "Installing base packages"
-	run apt-get update
-	run apt-get install -y ca-certificates curl git ufw unattended-upgrades
+	run "${APT_GET[@]}" update
+	run "${APT_GET[@]}" install -y ca-certificates curl git ufw unattended-upgrades
 
 	# ---- The deploy user --------------------------------------------------
 	say "Setting up the $DEPLOY_USER user"
@@ -276,8 +279,8 @@ PermitRootLogin no"
 	run chmod a+r "$DOCKER_KEY"
 	write_file "$DOCKER_LIST" 0644 \
 		"deb [arch=$arch signed-by=$DOCKER_KEY] https://download.docker.com/linux/ubuntu $codename stable"
-	run apt-get update
-	run apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+	run "${APT_GET[@]}" update
+	run "${APT_GET[@]}" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 	run usermod --append --groups docker "$DEPLOY_USER"
 	run systemctl enable --now docker
 
@@ -303,15 +306,17 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:30";'
 			append_line "$FSTAB" "$SWAPFILE none swap sw 0 0"
 		fi
 	else
-		if [[ -e "$SWAPFILE" ]]; then
-			info "$SWAPFILE exists; turning it on"
-		else
-			run fallocate -l 2G "$SWAPFILE"
-		fi
-		run chmod 600 "$SWAPFILE"
 		# Without swap the app still runs, but image builds may run out of
 		# memory, so a failure here is a warning and the other steps go on.
-		if run mkswap "$SWAPFILE" && run swapon "$SWAPFILE"; then
+		local swap_file_ok=1
+		if [[ -e "$SWAPFILE" ]]; then
+			info "$SWAPFILE exists; turning it on"
+		elif ! run fallocate -l 2G "$SWAPFILE"; then
+			# No half-made file left behind, so the next run makes it again.
+			run rm -f "$SWAPFILE" || true
+			swap_file_ok=0
+		fi
+		if ((swap_file_ok)) && run chmod 600 "$SWAPFILE" && run mkswap "$SWAPFILE" && run swapon "$SWAPFILE"; then
 			# Turn it on again after every reboot.
 			append_line "$FSTAB" "$SWAPFILE none swap sw 0 0"
 			swap_note="2 GB at $SWAPFILE"

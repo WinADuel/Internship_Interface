@@ -196,7 +196,8 @@ This routine is a Claude Code **scheduled cloud routine**. It can only reach the
    - runs **daily at 07:00** in your time zone;
    - uses this file, `ops/claude-routine/outreach-job.md`, as its instructions;
    - stores `APP_BASE_URL` (for example `https://tracker.example.com`) and `CLAUDE_TOKEN` (the token from step 2) in the routine's configuration or secrets, **never in the repository**;
-   - is allowed to use web search and web fetch.
+   - is allowed to use web search and web fetch;
+   - runs in a cloud environment allowed to reach your domain (allow it in the environment's network access settings), or every call to the app is blocked.
 4. Run it once by hand and check the Research Queue page. Items should move to Done with a note, and new contacts should appear on the Contacts page.
 5. To rotate or stop it, revoke the token in Settings. The next run will stop with a 401.
 

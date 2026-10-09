@@ -17,7 +17,8 @@
 # Steps: deploy.sh (first deploy) of the checked-out commit; HTTPS, security
 # headers and the public pages; the API refuses an unauthenticated call; a
 # manual backup; restore.sh of that backup removes a row added after it; a
-# second deploy.sh takes its pre-deploy backup.
+# second deploy.sh takes its pre-deploy backup; deploy.sh --restore of that
+# backup (the one-command rollback) removes a row added after it.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,14 +27,15 @@ repo_root="$(cd "$script_dir/../.." && pwd)"
 # shellcheck source=../server/lib.sh
 source "$repo_root/ops/server/lib.sh"
 
-CONTACT=smoke@example.com
+# Not @example.com: deploy.sh refuses that as a leftover from .env.example.
+CONTACT=smoke@stack-smoke.test
 # Every docker compose command below, and in deploy.sh and restore.sh, uses this project.
 export COMPOSE_PROJECT_NAME=tracker-smoke
 # A row restore.sh must remove: added after the backup it restores.
 MARKER=stack-smoke-marker
 
 usage() {
-	sed -n '2,20p' "$script_dir/stack-smoke.sh" | sed 's/^# \{0,1\}//'
+	sed -n '2,21p' "$script_dir/stack-smoke.sh" | sed 's/^# \{0,1\}//'
 }
 
 failures=0
@@ -124,6 +126,12 @@ check_page() {
 db_query() {
 	docker compose exec -T db psql -X -A -t -v ON_ERROR_STOP=1 \
 		-U "$(env_value POSTGRES_USER)" -d "$(env_value POSTGRES_DB)" -c "$1" </dev/null
+}
+
+add_marker() {
+	db_query "INSERT INTO watch_companies (name, ats, board_token, careers_url)
+		VALUES ('Smoke test', 'greenhouse', '$MARKER', 'https://example.com/careers')" >/dev/null
+	[[ "$(marker_count)" == 1 ]] || die "could not add the marker row."
 }
 
 marker_count() {
@@ -247,6 +255,12 @@ main() {
 			"run it in a checkout without backups, or move them somewhere safe first"
 	fi
 	require_docker
+	# A database left by an interrupted run would make this a redeploy. (deploy.sh only
+	# looks at this Compose project's volumes, so a local stack's data doesn't count.)
+	if [[ -n "$(docker volume ls --quiet --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")" ]]; then
+		die "volumes of the Compose project $COMPOSE_PROJECT_NAME exist, from an earlier smoke test." \
+			"remove them with: COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME docker compose down --volumes"
+	fi
 
 	work="$(mktemp -d)"
 	trap cleanup EXIT
@@ -267,16 +281,9 @@ main() {
 	local ref
 	ref="$(git rev-parse HEAD)"
 
-	# deploy.sh looks for any Compose pgdata volume, so a local stack's would make this
-	# look like a redeploy (with a backup); CI starts with none.
-	local other_volumes
-	other_volumes="$(docker volume ls --quiet --filter label=com.docker.compose.volume=pgdata)"
-
 	say "2. First deploy: ops/server/deploy.sh ${ref:0:12}"
 	ops/server/deploy.sh "$ref" </dev/null | tee "$work/deploy1.log"
-	if [[ -z "$other_volumes" ]]; then
-		check "deploy.sh saw a first deploy (no backup)" grep -q "first deploy: no database yet" "$work/deploy1.log"
-	fi
+	check "deploy.sh saw a first deploy (no backup)" grep -q "first deploy: no database yet" "$work/deploy1.log"
 	check "backend container is healthy" backend_healthy
 
 	say "3. HTTPS, security headers and the public pages"
@@ -306,9 +313,7 @@ main() {
 	info "backups/manual/$dump"
 
 	say "6. Restore that backup: a row added after it must go"
-	db_query "INSERT INTO watch_companies (name, ats, board_token, careers_url)
-		VALUES ('Smoke test', 'greenhouse', '$MARKER', 'https://example.com/careers')" >/dev/null
-	[[ "$(marker_count)" == 1 ]] || die "could not add the marker row."
+	add_marker
 	ops/server/restore.sh --yes "backups/manual/$dump" </dev/null
 	check "the restore removed the marker row" test "$(marker_count)" = 0
 	check "/api/health answers after the restore" status_is 200 /api/health
@@ -317,10 +322,23 @@ main() {
 	say "7. Second deploy: takes a pre-deploy backup first"
 	ops/server/deploy.sh "$ref" </dev/null | tee "$work/deploy2.log"
 	check "deploy.sh backed up before deploying" grep -q "Backing up the database (pre-deploy)" "$work/deploy2.log"
-	check "backups/pre-deploy has a dump" test -n "$(latest_dump pre-deploy)"
+	local pre_deploy
+	pre_deploy="$(latest_dump pre-deploy)"
+	check "backups/pre-deploy has a dump" test -n "$pre_deploy"
 	check "/api/health answers after the second deploy" status_is 200 /api/health
+	check "deploy.sh printed its one-command rollback" \
+		grep -qF "ops/server/deploy.sh --restore /backups/pre-deploy/$pre_deploy $ref" "$work/deploy2.log"
 
-	say "8. Containers"
+	say "8. Rollback in one command: deploy.sh --restore of that pre-deploy backup"
+	[[ -n "$pre_deploy" ]] || die "no pre-deploy dump to roll back to."
+	add_marker
+	ops/server/deploy.sh --yes --restore "/backups/pre-deploy/$pre_deploy" "$ref" </dev/null |
+		tee "$work/deploy3.log"
+	check "deploy.sh --restore removed the marker row" test "$(marker_count)" = 0
+	check "/api/health answers after the rollback" status_is 200 /api/health
+	check "backend container is healthy after the rollback" backend_healthy
+
+	say "9. Containers"
 	docker compose ps
 	if ((failures > 0)); then
 		die "$failures check(s) failed (marked FAIL above)."

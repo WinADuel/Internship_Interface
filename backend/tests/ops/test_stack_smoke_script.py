@@ -23,6 +23,8 @@ FAKE_DOCKER = """#!{python}
 import json, os, sys
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps({{"args": sys.argv[1:], "project": os.environ.get("COMPOSE_PROJECT_NAME")}}) + "\\n")
+if sys.argv[1:2] == ["volume"]:
+    print(os.environ.get("FAKE_VOLUMES", ""))
 """
 
 # Stands in for ops/server/deploy.sh: records the .env it was given, then fails.
@@ -62,7 +64,7 @@ class Checkout:
         path.write_text(text)
         path.chmod(0o755)
 
-    def run(self, *args: str) -> subprocess.CompletedProcess:
+    def run(self, *args: str, **env: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["/bin/bash", str(self.path / "ops" / "checks" / "stack-smoke.sh"), *args],
             cwd=self.path.parent,
@@ -71,6 +73,7 @@ class Checkout:
                 "LANG": "C.UTF-8",
                 "FAKE_LOG": str(self.log),
                 "FAKE_SEEN": str(self.seen),
+                **env,
             },
             capture_output=True,
             text=True,
@@ -159,7 +162,7 @@ def test_writes_a_private_throwaway_env_and_removes_it(checkout):
         if line and not line.startswith("#")
     )
     assert env["DOMAIN"] == "localhost"
-    assert env["CONTACT_EMAIL"] == "smoke@example.com"
+    assert env["CONTACT_EMAIL"] == "smoke@stack-smoke.test"
     assert env["COOKIE_SECURE"] == "true"
     assert "change-me" not in (checkout.seen / "env").read_text()
     assert len(env["JWT_SECRET"]) >= 32
@@ -185,3 +188,16 @@ def test_force_env_puts_your_env_back_even_when_the_test_fails(checkout):
     assert checkout.env_file.read_text() == MY_ENV
     assert not (checkout.path / ".env.before-smoke").exists()
     assert "compose down --volumes --remove-orphans" in checkout.docker_commands()
+
+
+def test_refuses_when_an_earlier_run_left_its_volumes(checkout):
+    result = checkout.run(FAKE_VOLUMES="tracker-smoke_pgdata")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "volumes of the Compose project tracker-smoke exist" in result.stderr
+    assert "COMPOSE_PROJECT_NAME=tracker-smoke docker compose down --volumes" in result.stderr
+    assert not (checkout.seen / "args").exists()  # deploy.sh never ran
+    volume_ls = next(call for call in checkout.docker_calls() if call["args"][:1] == ["volume"])
+    assert "label=com.docker.compose.project=tracker-smoke" in volume_ls["args"]
+    assert not checkout.env_file.exists()
+    # Refused before the test began, so its cleanup didn't take those volumes down either.
+    assert "compose down --volumes --remove-orphans" not in checkout.docker_commands()

@@ -51,7 +51,8 @@ def test_has_every_variable_compose_needs(values):
 
 
 def test_contact_email_and_tz(values):
-    assert "CONTACT_EMAIL" in values
+    # Blank, not an example address: deploy.sh refuses @example.com, the pages show blank as "the site owner".
+    assert values["CONTACT_EMAIL"] == ""
     assert values["TZ"] == "America/Chicago"
     assert values["COOKIE_SECURE"] == "true"
 

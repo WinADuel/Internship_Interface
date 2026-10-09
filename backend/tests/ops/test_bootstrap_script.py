@@ -70,7 +70,7 @@ def test_dry_run_prints_every_step_and_changes_nothing(bootstrap_fakes, fake_hos
     ]:
         assert step in out
     for action in [
-        "[dry-run] apt-get install -y ca-certificates curl git ufw unattended-upgrades",
+        "[dry-run] apt-get -o DPkg::Lock::Timeout=600 install -y ca-certificates curl git ufw unattended-upgrades",
         "[dry-run] useradd --create-home --shell /bin/bash deploy",
         "[dry-run] usermod --append --groups sudo deploy",
         "[dry-run] write /etc/sudoers.d/90-tracker-deploy (mode 0440):",
@@ -84,7 +84,7 @@ def test_dry_run_prints_every_step_and_changes_nothing(bootstrap_fakes, fake_hos
         "[dry-run] ufw --force enable",
         f"[dry-run] curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o {docker_key}",
         f"| deb [arch=amd64 signed-by={docker_key}] https://download.docker.com/linux/ubuntu noble stable",
-        "[dry-run] apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+        "[dry-run] apt-get -o DPkg::Lock::Timeout=600 install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
         "[dry-run] usermod --append --groups docker deploy",
         '| APT::Periodic::Unattended-Upgrade "1";',
         '| Unattended-Upgrade::Automatic-Reboot "true";',
@@ -98,6 +98,10 @@ def test_dry_run_prints_every_step_and_changes_nothing(bootstrap_fakes, fake_hos
         "[dry-run] timedatectl set-timezone America/Chicago",
     ]:
         assert action in out, action
+    # Every apt-get waits for the lock a new droplet's first automatic updates hold.
+    apt_lines = [line for line in out.splitlines() if "apt-get" in line]
+    assert len(apt_lines) == 4
+    assert all("[dry-run] apt-get -o DPkg::Lock::Timeout=600 " in line for line in apt_lines)
     # SSH is allowed before the firewall goes on, so the root session survives.
     assert out.index("ufw allow OpenSSH") < out.index("ufw --force enable")
     # Root's key (a new droplet's) goes to deploy before SSH is locked down.
