@@ -17,6 +17,7 @@ vi.mock("../lib/api/contacts", () => ({
 vi.mock("../lib/api/discovery", () => ({
   listPostings: vi.fn().mockResolvedValue({ items: [], total: 0 }),
 }));
+vi.mock("../lib/api/interviews", () => ({ listRounds: vi.fn().mockResolvedValue([]) }));
 vi.mock("../lib/api/applications", async (orig) => ({
   ...(await orig<typeof import("../lib/api/applications")>()),
   getRecentActivity: vi.fn().mockResolvedValue([]),
@@ -34,10 +35,10 @@ beforeEach(() => {
 });
 
 describe("Dashboard route", () => {
-  it("loads applications on mount and renders all six widgets", () => {
+  it("loads applications on mount and renders all seven widgets", () => {
     const { container } = render(Dashboard);
     expect(load).toHaveBeenCalledTimes(1);
-    for (const id of ["activity", "reminders", "buckets", "snapshot", "needs-attention", "new-postings"]) {
+    for (const id of ["activity", "reminders", "buckets", "snapshot", "needs-attention", "new-postings", "interviews"]) {
       expect(container.querySelector(`[data-widget="${id}"]`)).not.toBeNull();
     }
   });
@@ -58,7 +59,7 @@ describe("Dashboard route", () => {
       JSON.stringify([{ id: "activity", x: 0, y: 0, w: 6, h: 4, settings: {} }]),
     );
     const { container } = render(Dashboard);
-    expect(container.querySelectorAll("[data-widget]")).toHaveLength(6);
+    expect(container.querySelectorAll("[data-widget]")).toHaveLength(7);
     expect(container.querySelector('[data-widget="needs-attention"]')).not.toBeNull();
     expect(container.querySelector('[data-widget="new-postings"]')).not.toBeNull();
   });
@@ -77,6 +78,23 @@ describe("Dashboard route", () => {
     expect(card?.querySelector("h2")?.textContent).toBe("New postings");
     expect(await screen.findByText(/No new matches/)).toBeInTheDocument();
     expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("7");
+  });
+
+  it("adds Upcoming interviews to a saved pre-Phase-4 layout, keeping saved positions and settings", async () => {
+    const old = [
+      { id: "activity", x: 6, y: 0, w: 6, h: 4, settings: {} },
+      { id: "reminders", x: 0, y: 0, w: 6, h: 4, settings: { withinDays: 30 } },
+      { id: "buckets", x: 0, y: 4, w: 6, h: 4, settings: {} },
+      { id: "snapshot", x: 6, y: 4, w: 6, h: 4, settings: {} },
+      { id: "needs-attention", x: 0, y: 8, w: 12, h: 4, settings: {} },
+      { id: "new-postings", x: 0, y: 12, w: 6, h: 4, settings: {} },
+    ];
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(old));
+    const { container } = render(Dashboard);
+    const card = container.querySelector('[data-widget="interviews"]');
+    expect(card?.querySelector("h2")?.textContent).toBe("Upcoming interviews");
+    expect(await screen.findByText(/No interviews in the next 14 days/)).toBeInTheDocument();
+    expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("30");
   });
 
   it("toasts when loading applications fails", async () => {
