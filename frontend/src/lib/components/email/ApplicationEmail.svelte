@@ -41,7 +41,9 @@
     };
   });
 
-  function changed() {
+  /** A card was decided: show it decided at once (no second Accept), then reload. */
+  function changed(updated: EmailSuggestion | null) {
+    if (updated !== null) items = items.map((i) => (i.id === updated.id ? updated : i));
     reloads += 1;
     onchanged?.();
   }

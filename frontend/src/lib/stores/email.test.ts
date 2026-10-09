@@ -44,6 +44,38 @@ describe("refreshEmailStatus", () => {
   });
 });
 
+describe("refreshEmailStatus ordering", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  it("an older answer that lands last doesn't overwrite a newer one", async () => {
+    const first = deferred<ReturnType<typeof fakeEmailStatus>>();
+    const second = deferred<ReturnType<typeof fakeEmailStatus>>();
+    vi.mocked(getEmailStatus).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const before = refreshEmailStatus(); // e.g. the page opening
+    const after = refreshEmailStatus(); // e.g. after a Dismiss
+    second.resolve(fakeEmailStatus({ pendingCount: 1 }));
+    expect(await after).toMatchObject({ pendingCount: 1 });
+    first.resolve(fakeEmailStatus({ pendingCount: 2 }));
+    expect(await before).toBeNull();
+    expect(get(emailStatus)?.pendingCount).toBe(1);
+  });
+
+  it("a status request that started before Sync now finished doesn't undo its result", async () => {
+    const slow = deferred<ReturnType<typeof fakeEmailStatus>>();
+    vi.mocked(getEmailStatus).mockReturnValueOnce(slow.promise);
+    vi.mocked(syncEmailNow).mockResolvedValue(result({ pendingCount: 5 }));
+    const refresh = refreshEmailStatus();
+    await runEmailSync();
+    slow.resolve(fakeEmailStatus({ pendingCount: 2 }));
+    expect(await refresh).toBeNull();
+    expect(get(emailStatus)?.pendingCount).toBe(5);
+  });
+});
+
 describe("afterAccept", () => {
   it("refreshes the application and contact the email changed", async () => {
     applications.set([fakeApplication({ id: 3, status: "applied" })]);

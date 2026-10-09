@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { get } from "svelte/store";
   import { ApiError } from "../lib/api/client";
   import { listSuggestions } from "../lib/api/email";
   import SuggestionCard from "../lib/components/email/SuggestionCard.svelte";
@@ -14,6 +15,7 @@
     { id: "decided", label: "Recent decisions" },
   ];
   const DECIDED_LIMIT = 50;
+  const PENDING_LIMIT = 200; // the API's maximum
 
   let tab = $state<Tab>("pending");
   let tabButtons: HTMLButtonElement[] = $state([]);
@@ -21,6 +23,9 @@
   let loaded = $state(false);
   let failed = $state(false);
   let syncing = $state(false);
+  let statusFailed = $state(false);
+  // Whether the last load hit the list's cap (more may be pending than shown).
+  let capped = $state(false);
   let announcement = $state("");
   // Bumped on every load; an answer is applied only if it is still the latest.
   let latest = 0;
@@ -29,9 +34,10 @@
     const request = ++latest;
     const state = tab;
     try {
-      const rows = await listSuggestions(state === "pending" ? { state } : { state, limit: DECIDED_LIMIT });
+      const rows = await listSuggestions({ state, limit: state === "pending" ? PENDING_LIMIT : DECIDED_LIMIT });
       if (request !== latest) return;
       items = rows;
+      capped = state === "pending" && rows.length >= PENDING_LIMIT;
       failed = false;
     } catch (err) {
       if (request !== latest) return;
@@ -49,9 +55,24 @@
     void load();
   });
 
+  async function loadStatus() {
+    statusFailed = false;
+    const result = await refreshEmailStatus();
+    // null with a status stored means a newer request answered instead.
+    statusFailed = result === null && get(emailStatus) === null;
+  }
+
   onMount(() => {
-    void refreshEmailStatus();
+    void loadStatus();
   });
+
+  /** A card was decided: drop it from Pending (or show it decided) at once, then reload. */
+  function onchanged(updated: EmailSuggestion | null) {
+    if (updated !== null) {
+      items = tab === "pending" ? items.filter((i) => i.id !== updated.id) : items.map((i) => (i.id === updated.id ? updated : i));
+    }
+    void load();
+  }
 
   async function sync() {
     syncing = true;
@@ -82,13 +103,21 @@
   }
 
   const status = $derived($emailStatus);
+  // The list is capped; say so when more are pending than it shows.
+  const hiddenPending = $derived(capped && tab === "pending" && status !== null && status.pendingCount > items.length);
 </script>
 
 <h1>Email updates</h1>
 
 <section class="sync" aria-label="Gmail sync">
-  {#if status && !status.gmailGranted}
-    <p>Gmail isn't connected. <a href="#/settings">Connect Gmail in Settings</a> to find application updates in your mail.</p>
+  {#if !status && statusFailed}
+    <p class="error">Couldn't load Gmail status. <button type="button" onclick={loadStatus}>Retry</button></p>
+  {:else if status && !status.gmailGranted}
+    <p>
+      Gmail isn't connected.
+      <a href="#/settings">{status.gmailSyncEnabled ? "Reconnect Gmail in Settings" : "Connect Gmail in Settings"}</a>
+      to find application updates in your mail.
+    </p>
   {:else if status && !status.gmailSyncEnabled}
     <p>Gmail sync is off. <a href="#/settings">Turn it on in Settings</a>.</p>
   {/if}
@@ -130,9 +159,12 @@
   {:else if items.length === 0}
     <p class="empty">{tab === "pending" ? "No email updates to review." : "No decisions yet."}</p>
   {:else}
+    {#if hiddenPending && status}
+      <p class="muted">Showing the first {items.length} of {status.pendingCount}.</p>
+    {/if}
     <div class="list">
       {#each items as s (s.id)}
-        <SuggestionCard suggestion={s} onchanged={() => void load()} />
+        <SuggestionCard suggestion={s} {onchanged} />
       {/each}
     </div>
   {/if}

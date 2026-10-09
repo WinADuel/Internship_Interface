@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,7 @@ vi.mock("../lib/api/email", () => ({
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
 
 import { ApiError } from "../lib/api/client";
-import { dismissSuggestion, getEmailStatus, listSuggestions, syncEmailNow } from "../lib/api/email";
+import { acceptSuggestion, dismissSuggestion, getEmailStatus, listSuggestions, syncEmailNow } from "../lib/api/email";
 import { emailStatus } from "../lib/stores/email";
 import { showToast } from "../lib/stores/toast";
 import { fakeEmailStatus, fakeSuggestion } from "../lib/testing/fixtures";
@@ -30,6 +30,7 @@ beforeEach(() => {
   vi.mocked(getEmailStatus).mockReset().mockResolvedValue(fakeEmailStatus({ pendingCount: 1 }));
   vi.mocked(syncEmailNow).mockReset();
   vi.mocked(dismissSuggestion).mockReset();
+  vi.mocked(acceptSuggestion).mockReset();
   vi.mocked(showToast).mockReset();
 });
 
@@ -38,7 +39,7 @@ describe("Email updates page", () => {
     render(Email);
     expect(screen.getByRole("heading", { name: "Email updates" })).toBeInTheDocument();
     expect(await screen.findByText("Thank you for applying to Acme")).toBeInTheDocument();
-    expect(listSuggestions).toHaveBeenCalledWith({ state: "pending" });
+    expect(listSuggestions).toHaveBeenCalledWith({ state: "pending", limit: 200 });
     const tabs = screen.getAllByRole("tab");
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
     await vi.waitFor(() => expect(tabs[0]).toHaveTextContent("Pending (1)"));
@@ -53,6 +54,51 @@ describe("Email updates page", () => {
     expect(listSuggestions).toHaveBeenLastCalledWith({ state: "decided", limit: 50 });
     expect(screen.queryByText("Thank you for applying to Acme")).toBeNull();
     expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+  });
+
+  it("drops a decided card at once, before the reload answers", async () => {
+    vi.mocked(dismissSuggestion).mockResolvedValue(fakeSuggestion({ id: 1, state: "dismissed" }));
+    render(Email);
+    await screen.findByText("Thank you for applying to Acme");
+    vi.mocked(listSuggestions).mockReturnValue(new Promise(() => {})); // the reload never answers
+    await fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await vi.waitFor(() => expect(screen.queryByText("Thank you for applying to Acme")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+  });
+
+  it("a stale card (409) is reloaded away", async () => {
+    vi.mocked(acceptSuggestion).mockRejectedValue(new ApiError(409, "this suggestion no longer applies"));
+    render(Email);
+    await screen.findByText("Thank you for applying to Acme");
+    vi.mocked(listSuggestions).mockResolvedValue([]);
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(await screen.findByText("No email updates to review.")).toBeInTheDocument();
+  });
+
+  it("says when more are pending than the list shows", async () => {
+    const rows = Array.from({ length: 200 }, (_, i) => fakeSuggestion({ id: i + 1, subject: `Update ${i + 1}` }));
+    vi.mocked(listSuggestions).mockResolvedValue(rows);
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 230 }));
+    render(Email);
+    expect(await screen.findByText("Showing the first 200 of 230.")).toBeInTheDocument();
+  });
+
+  it("doesn't say so when the whole list is shown", async () => {
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 1 }));
+    render(Email);
+    await screen.findByText("Thank you for applying to Acme");
+    await vi.waitFor(() => expect(screen.getAllByRole("tab")[0]).toHaveTextContent("Pending (1)"));
+    expect(screen.queryByText(/Showing the first/)).toBeNull();
+  });
+
+  it("says when the Gmail status can't be loaded, with Retry", async () => {
+    vi.mocked(getEmailStatus).mockRejectedValueOnce(new ApiError(500, "boom"));
+    render(Email);
+    const sync = screen.getByRole("region", { name: "Gmail sync" });
+    expect(await within(sync).findByText(/Couldn't load Gmail status/)).toBeInTheDocument();
+    await fireEvent.click(within(sync).getByRole("button", { name: "Retry" }));
+    expect(await within(sync).findByRole("button", { name: "Sync now" })).toBeInTheDocument();
+    expect(within(sync).queryByText(/Couldn't load Gmail status/)).toBeNull();
   });
 
   it("reloads after a decision", async () => {
@@ -71,6 +117,13 @@ describe("Email updates page", () => {
     const link = await screen.findByRole("link", { name: "Connect Gmail in Settings" });
     expect(link.getAttribute("href")).toBe("#/settings");
     expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
+  });
+
+  it("says Reconnect when sync is on but the Gmail permission was lost", async () => {
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ gmailGranted: false, gmailSyncEnabled: true }));
+    vi.mocked(listSuggestions).mockResolvedValue([]);
+    render(Email);
+    expect(await screen.findByRole("link", { name: "Reconnect Gmail in Settings" })).toBeInTheDocument();
   });
 
   it("says when sync is off", async () => {

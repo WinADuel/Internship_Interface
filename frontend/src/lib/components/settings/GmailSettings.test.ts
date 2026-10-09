@@ -42,7 +42,8 @@ describe("GmailSettings", () => {
     const connect = screen.getByRole("link", { name: "Connect Gmail" });
     expect(connect.getAttribute("href")).toBe("/api/docs/google/authorize?gmail=1");
     const section = screen.getByRole("region", { name: "Gmail" });
-    expect(section).toHaveTextContent("message bodies are never downloaded");
+    expect(section).toHaveTextContent("Message bodies are never downloaded");
+    expect(section).toHaveTextContent("from a company you don't track yet");
     expect(section).toHaveTextContent("Optional and off by default");
     expect(section).toHaveTextContent("Google hasn't verified this app");
     expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
@@ -113,6 +114,21 @@ describe("GmailSettings", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
     expect(await screen.findByText("Checked 5 emails: 2 updates found, 1 applied automatically.")).toBeInTheDocument();
     expect(screen.queryByText("Last sync: never")).toBeNull();
+  });
+
+  it("offers Reconnect Gmail when sync is on but the permission was lost", () => {
+    render(GmailSettings, {
+      settings: settings({
+        gmailGranted: false,
+        gmailSyncEnabled: true,
+        gmailLastError: "Gmail permission missing: use Reconnect Gmail in Settings",
+      }),
+    });
+    expect(screen.getByText("Last sync failed: Gmail permission missing: use Reconnect Gmail in Settings")).toBeInTheDocument();
+    const links = screen.getAllByRole("link", { name: "Reconnect Gmail" });
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("/api/docs/google/authorize?gmail=1");
+    expect(screen.queryByRole("link", { name: "Connect Gmail" })).toBeNull();
   });
 
   it("shows the last error with a Reconnect link", () => {

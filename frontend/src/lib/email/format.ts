@@ -49,13 +49,35 @@ export function senderLabel(s: Pick<EmailSuggestion, "fromName" | "fromEmail">):
   return name || email || "Unknown sender";
 }
 
-/** What the email was matched to: "Acme — SWE Intern", a contact, or the company to add. */
-export function matchLabel(s: EmailSuggestion): string | null {
+const APPLICATION_KINDS: ReadonlySet<SuggestionKind> = new Set<SuggestionKind>([
+  "confirmation",
+  "rejection",
+  "interview",
+  "assessment",
+  "offer",
+]);
+
+/** "Dana Lee, MIT", or just the name when the organization is blank. */
+function contactLabel(contact: NonNullable<EmailSuggestion["contact"]>): string {
+  const organization = contact.organization.trim();
+  return organization ? `${contact.name}, ${organization}` : contact.name;
+}
+
+/**
+ * What the email was matched to: "Acme — SWE Intern" (with "via Dana Lee"
+ * when a contact sent it), a contact, or the company to add.
+ * `withApplication: false` leaves the application out (the application's
+ * own panel), keeping the contact.
+ */
+export function matchLabel(s: EmailSuggestion, { withApplication = true } = {}): string | null {
   if (s.kind === "new_application") {
     const company = s.proposedCompany ?? "Unknown company";
     return s.proposedRole ? `${company} — ${s.proposedRole}` : company;
   }
-  if (s.contact) return `${s.contact.name}, ${s.contact.organization}`;
-  if (s.application) return `${s.application.company} — ${s.application.roleTitle}`;
-  return null;
+  const application = withApplication && s.application ? `${s.application.company} — ${s.application.roleTitle}` : null;
+  if (APPLICATION_KINDS.has(s.kind) && application) {
+    return s.contact ? `${application} via ${s.contact.name}` : application;
+  }
+  if (s.contact) return contactLabel(s.contact);
+  return application;
 }

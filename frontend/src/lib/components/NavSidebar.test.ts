@@ -5,14 +5,17 @@ import { get } from "svelte/store";
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("svelte-spa-router", () => ({ push }));
 vi.mock("../api/discovery", () => ({ getScanStatus: vi.fn() }));
-vi.mock("../api/email", () => ({ getEmailStatus: vi.fn() }));
+vi.mock("../api/email", () => ({ getEmailStatus: vi.fn(), acceptSuggestion: vi.fn(), dismissSuggestion: vi.fn() }));
+vi.mock("../api/applications", () => ({ getApplication: vi.fn() }));
 
 import { getScanStatus } from "../api/discovery";
-import { getEmailStatus } from "../api/email";
+import { getApplication } from "../api/applications";
+import { acceptSuggestion, dismissSuggestion, getEmailStatus } from "../api/email";
 import { discoveryStatus } from "../stores/discovery";
 import { emailStatus } from "../stores/email";
 import { session } from "../stores/session";
-import { fakeEmailStatus, fakeScanStatus } from "../testing/fixtures";
+import { fakeApplication, fakeEmailStatus, fakeScanStatus, fakeSuggestion } from "../testing/fixtures";
+import SuggestionCard from "./email/SuggestionCard.svelte";
 import { toasts } from "../stores/toast";
 import NavSidebar from "./NavSidebar.svelte";
 
@@ -101,6 +104,21 @@ describe("NavSidebar", () => {
     expect(getEmailStatus).toHaveBeenCalledTimes(1);
     emailStatus.set(fakeEmailStatus({ pendingCount: 0 }));
     expect((await screen.findByRole("link", { name: "Email updates" })).textContent?.trim()).toBe("Email updates");
+  });
+
+  it.each([
+    ["Accept", () => vi.mocked(acceptSuggestion).mockResolvedValue(fakeSuggestion({ state: "accepted" }))],
+    ["Dismiss", () => vi.mocked(dismissSuggestion).mockResolvedValue(fakeSuggestion({ state: "dismissed" }))],
+  ])("the badge goes down after %s on an email card", async (button, decide) => {
+    decide();
+    vi.mocked(getApplication).mockResolvedValue(fakeApplication({ id: 1 }));
+    vi.mocked(getEmailStatus).mockResolvedValueOnce(fakeEmailStatus({ pendingCount: 2 }));
+    render(NavSidebar);
+    await screen.findByRole("link", { name: "Email updates (2 to review)" });
+    render(SuggestionCard, { suggestion: fakeSuggestion() });
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 1 }));
+    await fireEvent.click(screen.getByRole("button", { name: button }));
+    expect(await screen.findByRole("link", { name: "Email updates (1 to review)" })).toBeInTheDocument();
   });
 
   it("does not ask for the status while logged out", () => {

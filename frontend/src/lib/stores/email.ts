@@ -9,14 +9,22 @@ import { replaceContact } from "./contacts";
 /** The latest Gmail sync status (pending count, last sync); null until first loaded. */
 export const emailStatus = writable<EmailStatus | null>(null);
 
+// Bumped when a status request starts and when Sync now stores its result:
+// an answer is stored only if nothing newer started or landed meanwhile, so
+// a slow reply from before an Accept can't put the old count back.
+let statusSeq = 0;
+
 /**
  * Reloads the status into `emailStatus` and returns it. On failure the
- * previous value stays and null is returned; it never throws, so the nav
- * badge and the Needs Attention row can call it freely.
+ * previous value stays and null is returned, as it is when a newer request
+ * or a Sync now overtook this one. It never throws, so the nav badge and the
+ * Needs Attention row can call it freely.
  */
 export async function refreshEmailStatus(): Promise<EmailStatus | null> {
+  const seq = ++statusSeq;
   try {
     const status = await getEmailStatus();
+    if (seq !== statusSeq) return null;
     emailStatus.set(status);
     return status;
   } catch {
@@ -43,6 +51,7 @@ export async function afterAccept(suggestion: EmailSuggestion): Promise<void> {
 /** Sync now: runs a sync, stores the new status and returns the outcome. API errors are thrown. */
 export async function runEmailSync(): Promise<EmailSyncResult> {
   const result = await syncEmailNow();
+  statusSeq += 1; // newer than any status request still in flight
   emailStatus.set({
     gmailGranted: result.gmailGranted,
     gmailSyncEnabled: result.gmailSyncEnabled,

@@ -51,7 +51,11 @@ describe("privacy page", () => {
     expect(html).toContain("optional, off by default");
     expect(html).toMatch(/What is read:[\s\S]*preview text Gmail itself provides/);
     expect(html).toContain("Message bodies and attachments are never");
-    expect(html).toMatch(/What is kept:[\s\S]*matches a tracked application or\s+contact/);
+    expect(html).toMatch(/What is kept:[\s\S]*match a tracked application or\s+contact/);
+    // Not only tracked mail: new-company detection keeps details too, and says so.
+    expect(html).toMatch(/What is kept:[\s\S]*company the owner doesn't track yet/);
+    expect(html).not.toContain("only for an email that matches a tracked application or");
+    expect(html).toMatch(/What it is used for:[\s\S]*marking a contact as emailed[\s\S]*adding a company not yet tracked/);
     expect(html).toContain("Mail that matches nothing is not stored");
     expect(html).toMatch(/How to turn it off:[\s\S]*Sync Gmail/);
     expect(html).toContain("no email data is ever given to it");
