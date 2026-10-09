@@ -182,10 +182,7 @@ def downgrade() -> None:
     for enum_type in reversed(NEW_ENUMS):
         enum_type.drop(op.get_bind(), checkfirst=True)
     # queue_kind keeps 'interview_brief': Postgres cannot drop an enum value
-    # without rebuilding the type. Pending brief requests would be orphaned
-    # work for a routine that no longer handles them, so they are failed.
-    op.execute(
-        "UPDATE research_queue SET state = 'failed', completed_at = now(),"
-        " result_note = 'interview prep removed (downgrade)'"
-        " WHERE kind::text = 'interview_brief' AND state = 'pending'"
-    )
+    # without rebuilding the type. Phase 3's QueueKind can't load such a row
+    # (the queue page would fail), so every brief request goes, whatever its
+    # state; its brief went with prep_briefs above.
+    op.execute("DELETE FROM research_queue WHERE kind::text = 'interview_brief'")

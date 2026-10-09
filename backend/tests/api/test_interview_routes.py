@@ -128,6 +128,32 @@ def test_get_patch_and_delete(logged_in_client, sheet_sync_recorder):
 
 
 @pytest.mark.parametrize(
+    ("fields", "synced"),
+    [
+        ({"prep_notes": "autosaved"}, False),
+        ({"questions_to_ask": "Q?", "reflection": "went ok", "location": "Zoom"}, False),
+        ({"checklist": [{"label": "x", "done": True}]}, False),
+        ({"duration_minutes": 45, "format": "video", "interviewers": "Sam"}, False),
+        ({"kind": "technical"}, True),
+        ({"title": "Loop"}, True),
+        ({"scheduled_at": _iso(SOON + timedelta(days=1))}, True),
+        ({"state": "done"}, True),
+        ({"outcome": "passed"}, True),
+        ({"thank_you_sent_at": _iso(SOON)}, True),
+        ({"prep_notes": "x", "title": "Loop"}, True),
+    ],
+)
+def test_patch_syncs_the_sheet_only_for_exported_fields(logged_in_client, sheet_sync_recorder, fields, synced):
+    """Notes autosave on every pause in typing; only the fields the
+    Interviews tab (and the derived interview_datetime) show re-sync."""
+    a = _app(logged_in_client)
+    rid = _round(logged_in_client, a["id"], scheduled_at=_iso(SOON))["id"]
+    sheet_sync_recorder.scheduled.clear()
+    assert logged_in_client.patch(f"/api/interviews/{rid}", json=fields).status_code == 200
+    assert sheet_sync_recorder.scheduled == ([ROUND_TABS] if synced else [])
+
+
+@pytest.mark.parametrize(
     ("method", "path", "body"),
     [
         ("GET", "/api/interviews/999999", None),

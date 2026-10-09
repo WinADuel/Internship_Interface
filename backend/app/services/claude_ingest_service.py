@@ -228,9 +228,11 @@ def save_brief(db: Session, data: BriefIn, now: datetime | None = None) -> PrepB
     """Stores the company brief for a pending `interview_brief` item and marks
     the item done. The application's brief is replaced, not appended to.
     Sources with non-http(s) URLs are dropped. If the application was deleted
-    after the request, the item is marked failed and nothing is stored."""
+    after the request, the item is marked failed and nothing is stored.
+    The item is row-locked, so a second save of it at the same time waits,
+    then finds it done (409) instead of adding a second brief."""
     now = now or _now()
-    item = research_queue_service.get_item(db, data.queue_item_id)
+    item = research_queue_service.lock_item(db, data.queue_item_id)
     if item.kind != QueueKind.INTERVIEW_BRIEF:
         raise QueueItemWrongKindError(item.id)
     if item.state != QueueState.PENDING:

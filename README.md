@@ -50,6 +50,8 @@ If docs fail to load, `docker compose logs backend` shows why: every failure log
 
 **Daily Claude research job.** A Claude Code scheduled routine, running on your Claude plan, researches the people in the Research Queue and writes email drafts. Its instructions are in [`ops/claude-routine/outreach-job.md`](ops/claude-routine/outreach-job.md). The appendix there covers setup:
 
+The same routine writes the company briefs you request for interviews (see **Interview prep**).
+
 1. Create a token in **Settings → Claude tokens**.
 2. Schedule the routine daily with `APP_BASE_URL` and `CLAUDE_TOKEN` in its configuration.
 
@@ -77,6 +79,18 @@ The Inbox opens on **Best match**: every posting gets a 0–100 match score from
 - **Claude's second opinion:** the last step of the daily Claude job (see above) reviews the highest-scoring Inbox postings it hasn't reviewed yet, 40 a day by default. It can open each posting's page, then writes its own score and a one-line note. Its score, marked **C**, orders the Inbox in place of the app's, and both show under **Why?**. Change the number, or set 0 to turn this off, in **Settings → Ranking**. When you change your preferences, Claude's scores turn grey with "preferences changed since", and those postings go back into its queue. The job reads your outreach profile, your ranking preferences and the titles of your 20 most recent saves (applications included) and 20 most recent dismissals; it never sends them to job sites. This part needs the server; until then the app's own score works alone.
 
 The board formats were written from vendor documentation, because the build environment could not reach those sites. The first real scan is their live check: if a watched company shows an error, compare its response with [`backend/tests/fixtures/discovery/README.md`](backend/tests/fixtures/discovery/README.md).
+
+## Interview prep
+
+The **Interview Prep** page tracks every interview round of every application and helps you get ready for each one.
+
+- **Rounds:** add them from an application's panel (**Add round**) or from Interview Prep, with the kind, date and time, length, format, meeting link or address, and interviewers. An application can have several rounds. Its **Next interview** is now derived from them (the earliest scheduled round) and is read-only in the application form; giving a new application an interview date adds its first round. When an application with rounds is still before Interview, the panel offers **Move to Interview**.
+- **Prep page** for each round: a checklist (it starts with six standard steps), prep notes and questions to ask (saved as you type), the stories you plan to tell, the interviewers (tracked contacts, so thank-you notes have an address), a company brief, ready-made Claude prompts to copy into claude.ai (company research, likely questions, a mock interview, "tell me about yourself", a thank-you note), and **Add to calendar**, which downloads an `.ics` file.
+- **After the interview:** mark it done, record the outcome and how it went, and draft thank-you notes, which open in Gmail compose for you to send (the app never sends email). A round shows **Thank-you due** for 3 days after it, until you press **Mark sent**.
+- **Story bank:** reusable stories in STAR form (situation, task, action, result) with tags; link them to any round.
+- **Company brief:** **Ask Claude for a brief** queues a request for the daily Claude job, which researches the company from public sources and writes a plain-text brief with its sources. It is shared by every round of that application. This is the only part that needs the server.
+- **Dashboard:** the **Upcoming interviews** widget lists rounds in the next 14 days with their checklist progress, and any thank-you that is due.
+- The backup sheet gains an **Interviews** tab (company, role, round, time, state, outcome, thank-you sent). Prep notes and reflections are not exported.
 
 ## Backups
 
