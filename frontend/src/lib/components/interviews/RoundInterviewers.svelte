@@ -1,25 +1,22 @@
 <script lang="ts">
   import { createContact } from "../../api/contacts";
-  import { setRoundContacts } from "../../api/interviews";
   import { showToast } from "../../stores/toast";
   import type { Contact } from "../../types/contact";
-  import type { InterviewRoundDetail, RoundContact } from "../../types/interview";
+  import type { RoundContact } from "../../types/interview";
 
-  /** `onchanged` gets the round as saved after the linked set changes. */
+  /** `save` replaces the round's linked interviewers; it rejects when that fails. */
   let {
-    roundId,
     applicationId,
     company,
     linked,
     appContacts,
-    onchanged,
+    save,
   }: {
-    roundId: number;
     applicationId: number;
     company: string;
     linked: RoundContact[];
     appContacts: Contact[];
-    onchanged: (round: InterviewRoundDetail) => Promise<void>;
+    save: (contactIds: number[]) => Promise<void>;
   } = $props();
 
   let busy = $state(false);
@@ -28,6 +25,9 @@
   let title = $state("");
   let email = $state("");
   let error = $state("");
+  // Created, but linking it failed: Save retries only the link, so a retry
+  // can't add the same person twice.
+  let unlinked = $state<Contact | null>(null);
 
   const linkedIds = $derived(new Set(linked.map((c) => c.id)));
   const available = $derived(appContacts.filter((c) => !c.archived && !linkedIds.has(c.id)));
@@ -35,7 +35,7 @@
   async function replace(ids: number[]): Promise<boolean> {
     busy = true;
     try {
-      await onchanged(await setRoundContacts(roundId, ids));
+      await save(ids);
       return true;
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Couldn't update the interviewers.");
@@ -52,33 +52,39 @@
     if (id) void replace([...linked.map((c) => c.id), id]);
   }
 
+  function closeForm() {
+    creating = false;
+    unlinked = null;
+    name = title = email = "";
+  }
+
   async function create(event: Event) {
     event.preventDefault();
     error = "";
-    if (!name.trim()) {
+    if (!unlinked && !name.trim()) {
       error = "Name is required.";
       return;
     }
     busy = true;
-    let contact: Contact;
-    try {
-      contact = await createContact({
-        kind: "company",
-        name: name.trim(),
-        organization: company,
-        title: title.trim() || null,
-        email: email.trim() || null,
-        applicationId,
-      });
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Couldn't add the interviewer.");
-      busy = false;
-      return;
+    let contact = unlinked;
+    if (!contact) {
+      try {
+        contact = await createContact({
+          kind: "company",
+          name: name.trim(),
+          organization: company,
+          title: title.trim() || null,
+          email: email.trim() || null,
+          applicationId,
+        });
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : "Couldn't add the interviewer.");
+        busy = false;
+        return;
+      }
+      unlinked = contact;
     }
-    if (await replace([...linked.map((c) => c.id), contact.id])) {
-      creating = false;
-      name = title = email = "";
-    }
+    if (await replace([...linked.map((c) => c.id), contact.id])) closeForm();
   }
 </script>
 
@@ -111,13 +117,14 @@
   </div>
   {#if creating}
     <form class="new" aria-label="New interviewer" novalidate onsubmit={create}>
-      <label>Name <input bind:value={name} maxlength="200" autocomplete="off" /></label>
-      <label>Title <input bind:value={title} maxlength="200" autocomplete="off" /></label>
-      <label>Email <input type="email" bind:value={email} maxlength="320" autocomplete="off" /></label>
+      <label>Name <input bind:value={name} maxlength="200" autocomplete="off" disabled={!!unlinked} /></label>
+      <label>Title <input bind:value={title} maxlength="200" autocomplete="off" disabled={!!unlinked} /></label>
+      <label>Email <input type="email" bind:value={email} maxlength="320" autocomplete="off" disabled={!!unlinked} /></label>
+      {#if unlinked}<p class="note" role="status">Saved as a contact, but not linked to this round yet. Save tries the link again.</p>{/if}
       {#if error}<p class="error" role="alert">{error}</p>{/if}
       <div class="row">
         <button type="submit" disabled={busy}>Save interviewer</button>
-        <button type="button" onclick={() => (creating = false)}>Cancel</button>
+        <button type="button" onclick={closeForm}>Cancel</button>
       </div>
     </form>
   {/if}
@@ -138,4 +145,5 @@
   input { font: inherit; font-weight: 400; padding: 0.35rem; min-width: 0; }
   .empty { color: #666; font-size: 0.9rem; }
   .error { color: #b3261e; margin: 0; }
+  .note { margin: 0; font-size: 0.85rem; color: #666; }
 </style>
