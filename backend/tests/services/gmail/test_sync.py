@@ -1,11 +1,15 @@
 """One Gmail sync run on Postgres against a fake Gmail (never the network)."""
 
+import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import select, text
 
+from app.db.session import engine as app_engine
 from app.models.application import Application, ApplicationStatus
 from app.models.contact import Contact, ContactKind, ContactStatus
 from app.models.email_suggestion import EmailDirection, EmailSuggestion, SuggestionKind, SuggestionState
@@ -16,11 +20,13 @@ from app.services.gmail.client import GMAIL_RECONNECT_HINT, GmailError, GmailMes
 from app.services.gmail.sync import (
     BASE_QUERY,
     GMAIL_LOCK_KEY,
+    GMAIL_PERMISSION_MISSING,
     build_query,
     build_snapshot,
     parse_message,
     run_sync,
 )
+from app.services.google_docs_service import GOOGLE_SCOPE, store_token
 from app.services.sheet_sync_service import CONTACT_TABS
 from tests.services.gmail.fakes import FakeGmailClient, grant_gmail, message, ms
 
@@ -82,6 +88,9 @@ def test_does_nothing_until_gmail_is_granted(db_session):
         raise AssertionError("no client without the Gmail permission")
 
     assert run_sync(db_session, factory, now=NOW).status == "not_granted"
+    # Sync is on, so the missing permission is shown in Settings.
+    row = settings_service.get_settings(db_session)
+    assert row.gmail_last_error == GMAIL_PERMISSION_MISSING and row.gmail_last_sync_at is None
 
 
 def test_first_run_looks_back_and_stores_only_matched_mail(db_session, settings, stripe):
@@ -201,10 +210,203 @@ def test_google_refusing_the_token_says_reconnect(db_session, settings):
 
 
 def test_an_unexpected_crash_is_recorded_by_type_only(db_session, settings):
-    gmail = FakeGmailClient([_newsletter("a1", _ago(days=1))], fail_on={"a1": RuntimeError("secret detail")})
+    gmail = FakeGmailClient([_newsletter("a1", _ago(days=1))])
+
+    def broken_list(query, max_ids):
+        raise RuntimeError("secret detail")
+
+    gmail.list_message_ids = broken_list
     report = run_sync(db_session, gmail.factory, now=NOW)
     assert report.error == "gmail sync failed unexpectedly (RuntimeError)"
     assert gmail.closed
+
+
+def test_a_message_that_always_fails_is_skipped_and_logged_by_type_and_id_only(
+    db_session, settings, stripe, monkeypatch, caplog
+):
+    """One bad message must not block later mail, and what is logged must
+    not quote the email (a database error's text can carry its fields)."""
+    real_store = sync.store_suggestion
+
+    def store(db, message, headers, proposal):
+        if message.id == "a2":
+            raise sqlalchemy_exc.StatementError(
+                "insert failed", "INSERT ...", {"subject": headers.subject}, ValueError("Secret subject")
+            )
+        return real_store(db, message, headers, proposal)
+
+    monkeypatch.setattr(sync, "store_suggestion", store)
+    secret = message(
+        "a2",
+        _ago(days=2),
+        from_="Stripe Recruiting <recruiting@stripe.com>",
+        subject="Secret subject",
+        snippet="Unfortunately we will not be moving forward",
+    )
+    gmail = FakeGmailClient([_rejection("a1", _ago(days=3)), secret, _rejection("a3", _ago(days=1))])
+
+    with caplog.at_level(logging.DEBUG):
+        report = run_sync(db_session, gmail.factory, now=NOW)
+
+    assert report.status == "ok" and report.error is None
+    assert (report.fetched, report.suggested, report.skipped) == (3, 2, 1)
+    assert [s.gmail_message_id for s in _suggestions(db_session)] == ["a1", "a3"]
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=1)))
+    logged = "\n".join(r.getMessage() + (r.exc_text or "") for r in caplog.records)
+    assert "gmail sync skipped message a2 (StatementError)" in logged
+    assert "Secret" not in logged and "stripe.com" not in logged
+    assert not any(r.exc_info for r in caplog.records)
+
+    # Later runs are not blocked by it either.
+    gmail.add(_rejection("a4", _ago(hours=2)))
+    report = run_sync(db_session, gmail.factory, now=NOW)
+    assert report.status == "ok" and [s.gmail_message_id for s in _suggestions(db_session)] == ["a1", "a3", "a4"]
+
+
+def test_the_app_engine_hides_sql_parameters_in_errors():
+    assert app_engine.hide_parameters is True
+
+
+class _ListedInOrder(FakeGmailClient):
+    """Lists its messages in the given order (Gmail's order is newest first,
+    but not always strictly by `internalDate`)."""
+
+    def __init__(self, messages, order, **kwargs):
+        super().__init__(messages, **kwargs)
+        self.order = order
+
+    def list_message_ids(self, query, max_ids):
+        self.queries.append(query)
+        after = re.search(r"\bafter:(\d+)", query)
+        since = int(after.group(1)) * 1000 if after else 0
+        ids = [i for i in self.order if self.messages[i].internal_date > since]
+        return ids[:max_ids], len(ids) > max_ids
+
+
+def _out_of_order(first=None, **kwargs) -> _ListedInOrder:
+    """Listed late, mid, first, so handled first, mid, late; but "first" is
+    the newest and "mid" the oldest: the newest date handled is not where the
+    run got to."""
+    return _ListedInOrder(
+        [first or _rejection("first", _ago(days=1)), _newsletter("mid", _ago(days=3)), _rejection("late", _ago(days=2))],
+        ["late", "mid", "first"],
+        **kwargs,
+    )
+
+
+def test_a_capped_run_moves_the_cursor_only_to_the_last_message_handled(db_session, settings, stripe, monkeypatch):
+    monkeypatch.setattr(sync, "MAX_FETCH", 2)
+    gmail = _out_of_order()
+
+    report = run_sync(db_session, gmail.factory, now=NOW)
+
+    assert gmail.gets == ["first", "mid"] and report.more
+    # Not the newest date handled (a day ago): "late" is older than that.
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=3)))
+    report = run_sync(db_session, gmail.factory, now=NOW)
+    assert [s.gmail_message_id for s in _suggestions(db_session)] == ["first", "late"]
+    assert not report.more
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=2)))
+
+
+def test_an_error_stop_moves_the_cursor_only_to_the_last_message_handled(db_session, settings, stripe):
+    gmail = _out_of_order(fail_on={"late": GmailError("gmail get rejected (status 500)", status=500)})
+
+    report = run_sync(db_session, gmail.factory, now=NOW)
+
+    assert report.status == "error"
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=3)))
+    gmail.fail_on.clear()
+    run_sync(db_session, gmail.factory, now=NOW)
+    assert [s.gmail_message_id for s in _suggestions(db_session)] == ["first", "late"]
+
+
+def test_a_capped_run_that_cannot_move_the_cursor_still_makes_progress(db_session, settings, stripe, monkeypatch):
+    """When the oldest end of the list is out of order and unmatched, the
+    same messages would be handled again every run: the cursor then moves
+    to the newest date seen instead."""
+    monkeypatch.setattr(sync, "MAX_FETCH", 2)
+    gmail = _out_of_order(first=_newsletter("first", _ago(days=1)))
+    run_sync(db_session, gmail.factory, now=NOW)
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=3)))
+
+    gmail.gets.clear()
+    run_sync(db_session, gmail.factory, now=NOW)
+    assert gmail.gets == ["first", "mid"]
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=1)))
+
+
+def test_a_complete_run_moves_the_cursor_to_the_newest_message(db_session, settings, stripe):
+    run_sync(db_session, _out_of_order().factory, now=NOW)
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=1)))
+
+
+def test_a_future_dated_message_does_not_move_the_cursor_past_now(db_session, settings, stripe):
+    gmail = FakeGmailClient([_newsletter("future", NOW + timedelta(days=30))])
+    run_sync(db_session, gmail.factory, now=NOW)
+    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(NOW))
+
+    # Mail that arrives later is still found.
+    later = NOW + timedelta(hours=2)
+    gmail.add(_rejection("a1", NOW + timedelta(hours=1)))
+    run_sync(db_session, gmail.factory, now=later)
+    assert [s.gmail_message_id for s in _suggestions(db_session)] == ["a1"]
+
+
+class _Hooked(FakeGmailClient):
+    """Runs `hook` right after fetching `on`."""
+
+    def __init__(self, messages, on, hook):
+        super().__init__(messages)
+        self.on, self.hook = on, hook
+
+    def get_metadata(self, message_id):
+        result = super().get_metadata(message_id)
+        if message_id == self.on:
+            self.hook()
+        return result
+
+
+def _three() -> list[GmailMessage]:
+    return [_newsletter("a1", _ago(days=3)), _newsletter("a2", _ago(days=2)), _rejection("a3", _ago(days=1))]
+
+
+def test_turning_sync_off_stops_a_running_sync(db_session, settings, stripe):
+    def turn_off():
+        settings_service.get_settings(db_session).gmail_sync_enabled = False
+        db_session.flush()
+
+    gmail = _Hooked(_three(), "a2", turn_off)
+
+    report = run_sync(db_session, gmail.factory, now=NOW)
+
+    assert report.status == "disabled"
+    assert gmail.gets == ["a1", "a2"] and _suggestions(db_session) == []
+    row = settings_service.get_settings(db_session)
+    assert row.gmail_history_cursor == str(ms(_ago(days=2)))
+    assert row.gmail_last_sync_at is None and row.gmail_last_error is None
+    assert gmail.closed
+
+
+def test_losing_the_gmail_permission_stops_a_running_sync_and_says_so(db_session, settings, stripe):
+    def drive_only_reconnect():
+        store_token(db_session, {"refresh_token": "refresh"}, GOOGLE_SCOPE)
+
+    gmail = _Hooked(_three(), "a1", drive_only_reconnect)
+
+    report = run_sync(db_session, gmail.factory, now=NOW)
+
+    assert report.status == "not_granted" and gmail.gets == ["a1"]
+    row = settings_service.get_settings(db_session)
+    assert row.gmail_last_error == GMAIL_PERMISSION_MISSING
+    assert row.gmail_history_cursor == str(ms(_ago(days=3)))
+
+
+def test_a_successful_run_clears_the_permission_error(db_session, settings):
+    settings.gmail_last_error = GMAIL_PERMISSION_MISSING
+    db_session.commit()
+    run_sync(db_session, FakeGmailClient().factory, now=NOW)
+    assert settings_service.get_settings(db_session).gmail_last_error is None
 
 
 def test_the_real_client_only_ever_asks_for_metadata(db_session, settings, stripe, monkeypatch):

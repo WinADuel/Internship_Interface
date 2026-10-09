@@ -3,13 +3,21 @@ ids, fetch each new one's metadata (never a body), and store a suggestion
 for each email the matcher proposes one for. Unmatched emails leave no
 trace except the cursor.
 
-The cursor (`app_settings.gmail_history_cursor`) is the newest Gmail
-`internalDate` (ms) fully processed. A run asks for mail after the cursor
-less an hour of overlap (late-arriving mail can carry an earlier date), and
-ids already stored are skipped. New ids are processed oldest first, so the
-cursor only ever advances past messages that were handled; Gmail lists
-newest first, which this relies on. A run fetches at most MAX_FETCH
-messages; the rest wait for the next run.
+The cursor (`app_settings.gmail_history_cursor`) is a Gmail `internalDate`
+(ms) up to which mail was handled, never later than the run's start time. A
+run asks for mail after the cursor less an hour of overlap (late-arriving
+mail can carry an earlier date), and ids already stored are skipped. New ids
+are handled oldest first in Gmail's list order (newest first); after each
+one the cursor moves to that message's date, and only a run that handled
+everything it listed moves it to the newest date it saw. So a run that stops
+early (an error, MAX_FETCH, sync turned off) leaves the cursor at the last
+message it handled. A run fetches at most MAX_FETCH messages; the rest wait
+for the next run. Listing stops at MAX_LIST ids, newest first: older mail
+beyond that in one window is never looked at.
+
+A message that fails to process (anything but a Gmail or Google error) is
+rolled back, logged by type and Gmail id only, counted as skipped, and
+passed over so it can't block later mail.
 
 The gmail-sync job and Sync now share a Postgres advisory lock, so two runs
 never overlap. Every run also deletes decided suggestions older than
@@ -70,6 +78,7 @@ MAX_SNIPPET = 300
 MAX_NAME = 200
 MAX_EMAIL = 320
 _ERROR_LIMIT = 300
+GMAIL_PERMISSION_MISSING = "Gmail permission missing: use Reconnect Gmail in Settings"
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
 _SPACES = re.compile(r"\s+")
 
@@ -85,6 +94,7 @@ class SyncReport:
     suggested: int = 0  # suggestions stored
     auto_applied: int = 0  # of those, applied at once (auto-apply)
     deleted: int = 0  # decided suggestions removed by retention
+    skipped: int = 0  # messages that failed to process and were passed over
     error: str | None = None
     more: bool = False  # mail was left for the next run (MAX_FETCH reached)
     created: list[EmailSuggestion] = field(default_factory=list)
@@ -235,8 +245,58 @@ def store_suggestion(
     return suggestion
 
 
+def _cursor_ms(cursor: str | None) -> int:
+    try:
+        return int(cursor) if cursor else 0
+    except ValueError:
+        return 0
+
+
+def _handle(
+    db: Session, message: GmailMessage, snapshot: Snapshot, report: SyncReport, now: datetime
+) -> Snapshot:
+    """Store the suggestion (if any) for one fetched message; the caller
+    commits. Returns the snapshot to match the next message against."""
+    headers = parse_message(message)
+    proposal = propose(headers, snapshot)
+    if proposal is None or _repeats_pending_new_application(db, proposal):
+        return snapshot
+    suggestion = store_suggestion(db, message, headers, proposal)
+    report.suggested += 1
+    # May commit (stale or auto-applied); the caller then moves the cursor.
+    applied = email_suggestion_service.on_new_suggestion(
+        db, suggestion, auto_apply=get_settings(db).gmail_auto_apply, now=now
+    )
+    report.created.append(suggestion)
+    if applied is None:
+        return snapshot
+    report.auto_applied += 1
+    report.sheet_tabs |= applied.sheet_tabs
+    # A contact marked Sent can now be matched as replying.
+    return build_snapshot(db)
+
+
+def _stop_reason(db: Session) -> SyncStatus | None:
+    """Why the run must stop now: sync was turned off or Gmail disconnected
+    while it ran (checked after each message)."""
+    if not get_settings(db).gmail_sync_enabled:
+        return "disabled"
+    if not is_gmail_granted(db):
+        return "not_granted"
+    return None
+
+
+def _advance_cursor(db: Session, start: int, date: int) -> None:
+    """Move the cursor to the message just handled. The run may stop after
+    it, so the cursor goes only as far as this one, the last handled in list
+    order: one handled earlier may carry a later date than mail not yet
+    handled. It never moves back past where the run started."""
+    get_settings(db).gmail_history_cursor = str(max(start, date))
+
+
 def _process(db: Session, client: GmailClient, report: SyncReport, now: datetime) -> None:
     settings = get_settings(db)
+    start = _cursor_ms(settings.gmail_history_cursor)
     query = build_query(settings.gmail_history_cursor, settings.gmail_lookback_days, now)
     ids, more = client.list_message_ids(query, MAX_LIST)
     known = _known_ids(db, ids)
@@ -245,29 +305,44 @@ def _process(db: Session, client: GmailClient, report: SyncReport, now: datetime
     todo = list(reversed(new_ids))[:MAX_FETCH]  # oldest first
     report.more = more or len(new_ids) > MAX_FETCH
     snapshot = build_snapshot(db)
+    # A message dated in the future must not move the cursor past mail that
+    # hasn't arrived yet.
+    now_ms = int(now.timestamp() * 1000)
+    newest = start
     for message_id in todo:
-        message = client.get_metadata(message_id)
-        if message is not None:
-            report.fetched += 1
-            headers = parse_message(message)
-            proposal = propose(headers, snapshot)
-            cursor = int(settings.gmail_history_cursor or 0)
-            if message.internal_date > cursor:
-                settings.gmail_history_cursor = str(message.internal_date)
-            if proposal is not None and not _repeats_pending_new_application(db, proposal):
-                suggestion = store_suggestion(db, message, headers, proposal)
-                report.created.append(suggestion)
-                report.suggested += 1
-                # May commit (stale or auto-applied); the cursor goes with it.
-                applied = email_suggestion_service.on_new_suggestion(
-                    db, suggestion, auto_apply=settings.gmail_auto_apply, now=now
-                )
-                if applied is not None:
-                    report.auto_applied += 1
-                    report.sheet_tabs |= applied.sheet_tabs
-                    # A contact marked Sent can now be matched as replying.
-                    snapshot = build_snapshot(db)
-        # The suggestion and the cursor move together.
+        date: int | None = None
+        try:
+            message = client.get_metadata(message_id)
+            if message is not None:
+                report.fetched += 1
+                date = min(message.internal_date, now_ms)
+                snapshot = _handle(db, message, snapshot, report, now)
+                _advance_cursor(db, start, date)
+            # The suggestion and the cursor move together.
+            db.commit()
+        except (GmailError, GoogleAuthError):
+            raise  # Gmail itself failed: stop, and the next run retries this message
+        except Exception as exc:  # noqa: BLE001 - one bad message must not block later mail
+            # Type and id only: the exception's text can quote the email.
+            db.rollback()
+            report.skipped += 1
+            logger.warning("gmail sync skipped message %s (%s)", message_id, type(exc).__name__)
+            if date is not None:
+                _advance_cursor(db, start, date)
+                db.commit()
+        if date is not None:
+            newest = max(newest, date)
+        stop = _stop_reason(db)
+        if stop is not None:
+            report.status = stop
+            return
+    settings = get_settings(db)
+    # A run that handled everything it listed moves the cursor to the newest
+    # date it saw. So does a capped run that would otherwise not move it at
+    # all (out-of-order dates at the oldest end of the list): the next run
+    # would list and handle the same messages again, forever.
+    if newest > start and (not report.more or _cursor_ms(settings.gmail_history_cursor) <= start):
+        settings.gmail_history_cursor = str(newest)
         db.commit()
 
 
@@ -275,9 +350,12 @@ def _record(db: Session, report: SyncReport, now: datetime) -> None:
     try:
         db.rollback()  # whatever failed mid-message is not kept
         settings = get_settings(db)
-        if report.error is None:
+        if report.status == "ok":
             settings.gmail_last_sync_at = now
-        settings.gmail_last_error = report.error
+        if report.status == "not_granted":
+            settings.gmail_last_error = GMAIL_PERMISSION_MISSING
+        elif report.status != "disabled":
+            settings.gmail_last_error = report.error
         db.commit()
     except Exception:  # noqa: BLE001
         logger.exception("could not record the gmail sync outcome")
@@ -290,17 +368,23 @@ def run_sync(
     *,
     now: datetime | None = None,
 ) -> SyncReport:
-    """One sync run. Skips quietly while sync is off or Gmail isn't granted,
-    and returns `busy` while another run holds the lock. Never raises for a
-    Gmail or Google failure: the error is recorded for Settings and the
-    next run retries."""
+    """One sync run. Skips quietly while sync is off; while Gmail isn't
+    granted it records that for Settings. Returns `busy` while another run
+    holds the lock. A run stops after the message in hand when sync is
+    turned off or Gmail disconnected meanwhile. Never raises for a Gmail or
+    Google failure: the error is recorded for Settings and the next run
+    retries."""
     now = now or _now()
     deleted = delete_old_decided(db, now)
     settings = get_settings(db)
     if not settings.gmail_sync_enabled:
         return SyncReport("disabled", deleted=deleted)
     if not is_gmail_granted(db):
-        return SyncReport("not_granted", deleted=deleted)
+        # Sync is on but the permission is gone (Google revoked it, or a
+        # Drive-only reconnect dropped it): say so in Settings.
+        report = SyncReport("not_granted", deleted=deleted)
+        _record(db, report, now)
+        return report
 
     with advisory_lock(db.get_bind().engine, GMAIL_LOCK_KEY) as locked:
         if not locked:

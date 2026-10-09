@@ -98,8 +98,15 @@ def test_an_install_without_gmail_logs_nothing(monkeypatch, fake_sessions, caplo
     monkeypatch.setattr(gmail_sync, "run_sync", lambda db, factory: SyncReport("disabled"))
     with caplog.at_level(logging.INFO, logger="app.jobs.gmail_sync"):
         gmail_sync._log(gmail_sync.run_once(object()))
-        gmail_sync._log(SyncReport("not_granted"))
     assert caplog.records == []
+
+
+def test_sync_on_without_the_gmail_permission_is_logged(caplog):
+    with caplog.at_level(logging.INFO, logger="app.jobs.gmail_sync"):
+        gmail_sync._log(SyncReport("not_granted"))
+    assert [r.getMessage() for r in caplog.records] == [
+        "gmail sync is on but cannot run: Gmail permission missing: use Reconnect Gmail in Settings"
+    ]
 
 
 def test_errors_and_results_are_logged(caplog):
@@ -109,7 +116,7 @@ def test_errors_and_results_are_logged(caplog):
         gmail_sync._log(SyncReport("busy"))
     messages = [r.getMessage() for r in caplog.records]
     assert messages == [
-        "gmail sync done: 3 new, 3 fetched, 1 suggestion(s), 0 auto-applied; more next run",
+        "gmail sync done: 3 new, 3 fetched, 1 suggestion(s), 0 auto-applied, 0 skipped; more next run",
         "gmail retention: deleted 2 old suggestion(s)",
         "gmail sync failed: gmail list rejected (status 500)",
         "gmail sync skipped: another sync is running",

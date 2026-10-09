@@ -15,7 +15,13 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.jobs import configure_job_logging
-from app.services.gmail.sync import GmailClientFactory, SyncReport, google_gmail_client, run_sync
+from app.services.gmail.sync import (
+    GMAIL_PERMISSION_MISSING,
+    GmailClientFactory,
+    SyncReport,
+    google_gmail_client,
+    run_sync,
+)
 from app.services.settings_service import get_settings
 from app.services.sheet_sync_service import ALL_TABS, google_sheets_client, safe_sync
 from app.services.sheets_client import SheetsClient
@@ -56,17 +62,20 @@ def _log(report: SyncReport) -> None:
         logger.info("gmail sync skipped: another sync is running")
     elif report.status == "ok":
         logger.info(
-            "gmail sync done: %d new, %d fetched, %d suggestion(s), %d auto-applied%s",
+            "gmail sync done: %d new, %d fetched, %d suggestion(s), %d auto-applied, %d skipped%s",
             report.listed,
             report.fetched,
             report.suggested,
             report.auto_applied,
+            report.skipped,
             "; more next run" if report.more else "",
         )
     elif report.status == "error":
         logger.warning("gmail sync failed: %s", report.error)
-    # "disabled" and "not_granted" are the normal state of an install that
-    # never turned Gmail sync on: nothing is logged.
+    elif report.status == "not_granted":
+        logger.warning("gmail sync is on but cannot run: %s", GMAIL_PERMISSION_MISSING)
+    # "disabled" is the normal state of an install that never turned Gmail
+    # sync on: nothing is logged.
     if report.deleted:
         logger.info("gmail retention: deleted %d old suggestion(s)", report.deleted)
 

@@ -397,6 +397,37 @@ def test_a_new_suggestion_that_already_does_not_apply_is_stale(db_session):
     assert s.state == SuggestionState.STALE
 
 
+@pytest.mark.parametrize("auto_apply", [False, True])
+def test_a_contacts_stale_application_update_is_still_their_reply(db_session, auto_apply):
+    """A rejection from a contact you emailed, for an application already
+    rejected: the update no longer applies, but the reply does."""
+    app = _app(db_session, ApplicationStatus.REJECTED)
+    other = _app(db_session, company="Ramp")
+    contact = _contact(db_session, ContactStatus.SENT, application=other)
+    s = _suggestion(db_session, K.REJECTION, app, contact)
+
+    result = service.on_new_suggestion(db_session, s, auto_apply=auto_apply, now=NOW)
+
+    assert (s.kind, s.application_id, s.contact_id) == (K.CONTACT_REPLY, other.id, contact.id)
+    db_session.refresh(contact)
+    if auto_apply:
+        assert result is not None and s.state == SuggestionState.AUTO_APPLIED
+        assert contact.status == ContactStatus.REPLIED and contact.replied_at == RECEIVED
+    else:
+        assert result is None and s.state == SuggestionState.PENDING
+        assert contact.status == ContactStatus.SENT
+    db_session.refresh(app)
+    assert app.status == ApplicationStatus.REJECTED
+
+
+def test_a_stale_application_update_from_a_contact_who_already_replied_is_stale(db_session):
+    app = _app(db_session, ApplicationStatus.REJECTED)
+    contact = _contact(db_session, ContactStatus.REPLIED, application=app)
+    s = _suggestion(db_session, K.REJECTION, app, contact)
+    assert service.on_new_suggestion(db_session, s, auto_apply=True, now=NOW) is None
+    assert (s.kind, s.state) == (K.REJECTION, SuggestionState.STALE)
+
+
 @pytest.mark.parametrize("kind", [K.CONFIRMATION, K.CONTACT_REPLY, K.CONTACT_SENT])
 def test_auto_apply_applies_the_safe_kinds(db_session, kind):
     app = _app(db_session, ApplicationStatus.WISHLIST)
