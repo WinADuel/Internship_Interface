@@ -9,7 +9,7 @@ vi.mock("../lib/api/settings", () => ({
   revokeClaudeToken: vi.fn(),
   syncSheetNow: vi.fn(),
 }));
-vi.mock("../lib/api/discovery", () => ({ getMatchCount: vi.fn() }));
+vi.mock("../lib/api/discovery", () => ({ getMatchCount: vi.fn(), getTopPicksCount: vi.fn() }));
 vi.mock("../lib/api/backups", () => ({ getBackupStatus: vi.fn(), runBackupNow: vi.fn() }));
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../lib/api/email", () => ({
@@ -26,7 +26,7 @@ import { flushSync } from "svelte";
 import { replace } from "svelte-spa-router";
 import { routerState } from "../lib/testing/routerState.svelte";
 import { getBackupStatus } from "../lib/api/backups";
-import { getMatchCount } from "../lib/api/discovery";
+import { getMatchCount, getTopPicksCount } from "../lib/api/discovery";
 import { getSettings, listClaudeTokens, updateSettings } from "../lib/api/settings";
 import { showToast } from "../lib/stores/toast";
 import type { AppSettings } from "../lib/types/contact";
@@ -53,6 +53,14 @@ const settings: AppSettings = {
   discoveryScanHours: 6,
   lastScanAt: null,
   lastScanError: null,
+  rankingRoleKeywords: [],
+  rankingSkillKeywords: [],
+  rankingPreferredLocations: [],
+  rankingPreferredCompanies: [],
+  rankingAvoidCompanies: [],
+  rankingDealbreakerKeywords: [],
+  rankingClaudeDailyLimit: 40,
+  rankingUpdatedAt: null,
   gmailSyncEnabled: false,
   gmailSyncMinutes: 30,
   gmailLookbackDays: 30,
@@ -71,6 +79,7 @@ beforeEach(() => {
   vi.mocked(listClaudeTokens).mockReset().mockResolvedValue([]);
   vi.mocked(showToast).mockReset();
   vi.mocked(getMatchCount).mockReset().mockResolvedValue(3);
+  vi.mocked(getTopPicksCount).mockReset().mockResolvedValue(2);
   vi.mocked(getBackupStatus).mockReset().mockResolvedValue({
     lastBackupAt: null, lastBackupError: null, lastOffsiteAt: null, lastOffsiteError: null, offsiteConfigured: true,
   });
@@ -152,6 +161,25 @@ describe("Settings page", () => {
     expect(body.discoveryTerms).toEqual(["Summer 2027", "Fall 2027"]);
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Job discovery settings saved.", "info"));
     expect(profile.value).toBe("unsaved edit");
+  });
+
+  it("has a Ranking section after Job discovery that saves only the ranking fields", async () => {
+    vi.mocked(updateSettings).mockResolvedValue({ ...settings, rankingRoleKeywords: ["backend"] });
+    render(Settings);
+    const ranking = await screen.findByRole("form", { name: "Ranking preferences" });
+    const discovery = screen.getByRole("heading", { name: "Job discovery" });
+    const heading = screen.getByRole("heading", { name: "Ranking" });
+    expect(discovery.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const role = screen.getByLabelText("Role keywords");
+    await fireEvent.input(role, { target: { value: "backend" } });
+    await fireEvent.keyDown(role, { key: "Enter" });
+    await fireEvent.submit(ranking);
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    const body = vi.mocked(updateSettings).mock.calls[0][0];
+    expect(Object.keys(body).every((k) => k.startsWith("ranking"))).toBe(true);
+    expect(body.rankingRoleKeywords).toEqual(["backend"]);
+    expect(await screen.findByText("Top picks now: 2")).toBeInTheDocument();
   });
 
   it("has a Gmail section that saves only the Gmail fields", async () => {

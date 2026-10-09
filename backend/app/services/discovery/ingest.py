@@ -10,7 +10,8 @@ or `claude_*` fields touched here. Every inserted or updated row gets its
 local match score (Phase 5 spec §4).
 
 Work is done in bulk: a handful of targeted queries per call, `add_all` for
-inserts, one UPDATE for closing, and one commit.
+inserts, one UPDATE for closing, and one commit. Each of these writers first
+takes the postings write lock (`ranking.lock_scores`).
 """
 
 from collections.abc import Iterable, Iterator, Sequence
@@ -23,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.models.posting import Posting, PostingSource, PostingState
 from app.services.discovery.parsers import PostingIn
-from app.services.discovery.ranking import Ranker, apply_score, prefs_from_settings
+from app.services.discovery.ranking import Ranker, apply_score, lock_scores, prefs_from_settings
 from app.services.discovery.sources import SourceResult
 from app.services.discovery.urls import normalize_url
 from app.services.settings_service import get_settings
@@ -184,6 +185,8 @@ def ingest(
     `ranker` scores the rows (default: the saved ranking preferences)."""
     if result.error is not None:
         return IngestStats()
+    # Serialised with re-scoring; the default preferences are read after it.
+    lock_scores(db)
     if ranker is None:
         ranker = ranker_from_settings(db)
 
@@ -294,6 +297,7 @@ def refresh_unchanged(db: Session, result: SourceResult, now: datetime) -> int:
     closing: custom LIST sources by key prefix. Returns the rows touched."""
     if result.source is None:
         return 0
+    lock_scores(db)
     conditions = _scope(result.source, result.key_prefix)
     latest = db.scalar(select(func.max(Posting.last_seen_at)).where(*conditions))
     if latest is None:
@@ -313,6 +317,7 @@ def housekeep(db: Session, now: datetime) -> int:
     (`last_seen_at`). Closed postings are kept while their source still
     lists them (inactive rows count as seen), as de-duplication tombstones;
     saved and applied postings are never deleted. Returns the number deleted."""
+    lock_scores(db)
     deleted = db.execute(
         delete(Posting).where(
             Posting.state.in_([PostingState.NEW, PostingState.DISMISSED]),

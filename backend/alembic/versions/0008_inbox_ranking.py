@@ -1,5 +1,6 @@
-"""inbox ranking (Phase 5): ranking preferences on app_settings; local score,
-reasons and Claude-scored time on postings; the Best-match index
+"""inbox ranking (Phase 5): ranking preferences and the last re-score time on
+app_settings; local score, reasons and Claude-scored time on postings; the
+Best-match index
 
 Revision ID: 0008
 Revises: 0007
@@ -45,6 +46,7 @@ def upgrade() -> None:
         sa.Column('ranking_claude_daily_limit', sa.Integer(), server_default='40', nullable=False),
     )
     op.add_column('app_settings', sa.Column('ranking_updated_at', sa.DateTime(timezone=True), nullable=True))
+    op.add_column('app_settings', sa.Column('last_rescore_at', sa.DateTime(timezone=True), nullable=True))
 
     op.add_column('postings', sa.Column('local_score', sa.Integer(), nullable=True))
     op.add_column(
@@ -73,6 +75,7 @@ def downgrade() -> None:
     op.drop_column('postings', 'claude_scored_at')
     op.drop_column('postings', 'local_reasons')
     op.drop_column('postings', 'local_score')
+    op.drop_column('app_settings', 'last_rescore_at')
     op.drop_column('app_settings', 'ranking_updated_at')
     op.drop_column('app_settings', 'ranking_claude_daily_limit')
     for name in reversed(RANKING_LISTS):

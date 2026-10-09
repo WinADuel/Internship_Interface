@@ -9,6 +9,16 @@ paste-a-link).
 
 Preference values are user input: keywords are escaped before they reach a
 regular expression.
+
+Every transaction that writes many postings at once (re-scoring, ingest,
+closing and housekeeping, Dismiss all shown, Claude's scores) first takes
+one transaction-level advisory lock, `lock_scores`. Two of them running
+together could otherwise lock the same rows in different orders and
+deadlock (a preferences change re-scoring the Inbox while a scan ingests,
+say). Each holds it only for its own database work, never across a
+download, so a waiting preferences change waits at most for one source's
+ingest. A writer that scores rows also reads the preferences after taking
+it, so it never scores with preferences a change committed meanwhile.
 """
 
 import json
@@ -18,7 +28,7 @@ from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import Text, bindparam, cast, func, select, update
+from sqlalchemy import Text, bindparam, cast, func, select, text, update
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Session
 
@@ -39,13 +49,20 @@ SKILL_EACH = 5
 SKILL_MAX = 15
 LOCATION_POINTS = 15
 COMPANY_POINTS = 15
-# (posted at most this long ago, points), checked in order.
-FRESHNESS = ((timedelta(days=3), 10), (timedelta(days=7), 6), (timedelta(days=14), 3))
+# (posted at most this long ago, points, the band's name), checked in order.
+FRESHNESS = (
+    (timedelta(days=3), 10, "the last 3 days"),
+    (timedelta(days=7), 6, "the last week"),
+    (timedelta(days=14), 3, "the last 2 weeks"),
+)
 
 # Postings re-scored together have the same states (spec §4).
 RESCORED_STATES = (PostingState.NEW, PostingState.SAVED)
 
 _REMOTE = "remote"
+
+# Fixed key for pg_advisory_xact_lock: "RANKING" in ASCII, inside bigint.
+SCORES_LOCK_KEY = 0x52_414E_4B49_4E47
 
 
 @dataclass(frozen=True)
@@ -122,13 +139,6 @@ def _quoted(words: Iterable[str]) -> str:
     return ", ".join(f"'{w}'" for w in words)
 
 
-def _days_ago(age: timedelta) -> str:
-    days = max(0, age.days)
-    if days == 0:
-        return "posted today"
-    return "posted 1 day ago" if days == 1 else f"posted {days} days ago"
-
-
 class Ranker:
     """Preferences compiled once, for scoring many postings."""
 
@@ -139,7 +149,7 @@ class Ranker:
         self._dealbreakers = [(k, _word(k)) for k in prefs.dealbreaker_keywords]
         self._preferred = [_word(k) for k in prefs.preferred_companies]
         self._avoided = [_word(k) for k in prefs.avoid_companies]
-        self._locations = [(k, k.casefold()) for k in prefs.preferred_locations]
+        self._locations = [(k, _word(k)) for k in prefs.preferred_locations]
 
     def score(self, p: PostingFacts, now: datetime) -> LocalScore:
         if self.prefs.empty:
@@ -183,25 +193,30 @@ class Ranker:
             points += COMPANY_POINTS
             reasons.append("Watchlist company")
 
+        # The reason names the band, not a day count: the row already shows
+        # "Posted N days ago" in the viewer's own calendar days, and a stored
+        # count would soon disagree with it.
         posted = p.date_posted or p.first_seen_at
         if posted is not None:
+            verb = "posted" if p.date_posted else "found"
             age = now - posted
-            for limit, fresh in FRESHNESS:
+            for limit, fresh, band in FRESHNESS:
                 if age <= limit:
                     points += fresh
-                    reasons.append(_days_ago(age))
+                    reasons.append(f"{verb} in {band}")
                     break
 
         return LocalScore(min(MAX_SCORE, points), _capped(reasons))
 
     def _location(self, p: PostingFacts, title: str) -> str | None:
-        """The first preferred location found in the posting's locations
-        (case-insensitive substring). "Remote" also matches the title."""
-        locations = [loc.casefold() for loc in p.locations or ()]
-        for spelling, wanted in self._locations:
-            if any(wanted in loc for loc in locations):
+        """The first preferred location found in the posting's locations, as
+        a whole word ignoring case (so "NY" is not found in "Sunnyvale").
+        "Remote" also matches the word "remote" in the title."""
+        locations = list(p.locations or ())
+        for spelling, rx in self._locations:
+            if any(rx.search(loc) for loc in locations):
                 return spelling
-            if wanted == _REMOTE and _REMOTE in title.casefold():
+            if spelling.casefold() == _REMOTE and rx.search(title):
                 return spelling
         return None
 
@@ -215,6 +230,13 @@ def score_posting(p: PostingFacts, prefs: RankingPrefs, now: datetime) -> LocalS
 
 
 # --- storage -------------------------------------------------------------------
+
+
+def lock_scores(db: Session) -> None:
+    """Take the postings write lock (see the module docstring) for the rest
+    of `db`'s current transaction; it is released by its commit or
+    rollback. Taking it again in the same transaction is harmless."""
+    db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": SCORES_LOCK_KEY})
 
 
 def apply_score(posting: Posting, ranker: Ranker, now: datetime) -> None:
@@ -242,6 +264,7 @@ def rescore(db: Session, prefs: RankingPrefs, now: datetime) -> int:
     """Recompute the local score of every `new` and `saved` posting in one
     UPDATE (no commit: the caller's transaction covers it). Rows whose score
     and reasons are unchanged are left alone. Returns the rows updated."""
+    lock_scores(db)
     ranker = Ranker(prefs)
     ids: list[int] = []
     scores: list[int] = []

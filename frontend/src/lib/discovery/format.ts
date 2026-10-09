@@ -1,6 +1,14 @@
 import { parseLocalDate } from "../dashboard/widgets";
 import type { Posting, PostingSource } from "../types/discovery";
 
+/** Inbox postings scoring at least this are Top picks (backend `filters.TOP_PICKS_SCORE`). */
+export const TOP_PICKS_SCORE = 70;
+
+/** The score that orders the Inbox: Claude's when present, else the app's; null when neither. */
+export function bestScore(posting: Pick<Posting, "claudeScore" | "localScore">): number | null {
+  return posting.claudeScore ?? posting.localScore ?? null;
+}
+
 /** Display names for posting sources; mirrors backend `app/services/discovery/labels.py`. */
 export const SOURCE_LABELS: Record<PostingSource, string> = {
   simplify: "Simplify",
