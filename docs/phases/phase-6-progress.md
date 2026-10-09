@@ -18,3 +18,14 @@ Rulings:
 - No `new_application` suggestion from a rejection. Accepted.
 - Contact match vs application kind: when inbound mail matches a contact **and** classifies as interview, rejection, offer or assessment, the suggestion is the application kind (with the contact's application and `contact_id` set), and accepting it also marks the contact Replied when that transition is valid. A plain reply stays `contact_reply`. Task 4 implements this; `propose` changes accordingly.
 - Task 3 leaves archived contacts out of the snapshot. Task 4 checks validity against current status (stale).
+
+### Tasks 3–4: data, Gmail client, sync job, suggestions and routes — `df8087f`, `a4019d5`
+Backend 2103 passed; 2118 after merging Phase 4's review fixes (`5df926a`). Migration 0009 upgrade/downgrade/upgrade tested.
+Rulings:
+- A contact's reply that classifies as interview, rejection, offer or assessment becomes that kind with `contact_id` set (its own application, else the sender's company) and needs a job word, so "Unfortunately I'm out this week" stays a plain reply. Accepted (implements the Task 2 ruling).
+- One pending `new_application` suggestion per untracked company; a suggestion that doesn't apply when found is stored `stale` so the message isn't fetched again. Accepted.
+- `gmail-sync` joins `APP_SERVICES` (stopped during a restore), with a test that the list equals every Compose service except `db`. Accepted.
+- Stale rules: confirmation applies only while `wishlist` or `date_applied` is empty; rejection/interview/assessment stop applying at `rejected` or `offer`; offer stops at `offer`; anything stops when the application is archived or deleted. A rejection arriving for an application already at Offer is stale. Accepted.
+- Dates written on accept (date applied, the assessment follow-up, contact sent/replied) use the email's date. New applications from email get role "Role not given" and source "Gmail". Accepted.
+- **Sync now** runs synchronously (like Back up now). Accepted.
+- To check in review: the sync cursor's reliance on Gmail listing newest first.
