@@ -68,6 +68,9 @@ class SettingsOut(BaseModel):
     discovery_scan_hours: int
     last_scan_at: datetime | None
     last_scan_error: str | None
+    # Computed from the stored Google token, not settings columns.
+    google_connected: bool = False
+    gmail_granted: bool = False
 
 
 class SettingsUpdate(BaseModel):

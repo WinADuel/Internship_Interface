@@ -40,3 +40,22 @@ def test_patch_discovery_settings_validation(logged_in_client):
     # The ETag map is server-owned: not settable through the API.
     r = logged_in_client.patch("/api/settings", json={"discovery_list_etags": {"x": "y"}})
     assert r.status_code == 200 and "discovery_list_etags" not in r.json()
+
+
+def test_settings_report_google_and_gmail_connection(logged_in_client, db_session):
+    from app.services.google_docs_service import GMAIL_SCOPE, GOOGLE_SCOPE, store_token
+
+    s = logged_in_client.get("/api/settings").json()
+    assert s["google_connected"] is False and s["gmail_granted"] is False
+    store_token(db_session, {"refresh_token": "rt"}, scopes=GOOGLE_SCOPE)
+    s = logged_in_client.get("/api/settings").json()
+    assert s["google_connected"] is True and s["gmail_granted"] is False
+    store_token(db_session, {}, scopes=f"{GOOGLE_SCOPE} {GMAIL_SCOPE}")
+    r = logged_in_client.patch("/api/settings", json={"nudge_followup_days": 9})
+    assert r.json()["google_connected"] is True and r.json()["gmail_granted"] is True
+
+
+def test_patch_cannot_set_computed_connection_flags(logged_in_client):
+    r = logged_in_client.patch("/api/settings", json={"gmail_granted": True, "google_connected": True})
+    assert r.status_code == 200
+    assert r.json()["gmail_granted"] is False and r.json()["google_connected"] is False

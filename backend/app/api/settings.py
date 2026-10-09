@@ -7,7 +7,13 @@ from app.api.deps import get_current_user, get_sheets_client_factory
 from app.db.session import get_db
 from app.schemas.claude_token import ClaudeTokenCreatedOut, ClaudeTokenOut
 from app.schemas.settings import SettingsOut, SettingsUpdate, SheetSyncOut
-from app.services import claude_token_service, settings_service, sheet_sync_service
+from app.models.app_settings import AppSettings
+from app.services import (
+    claude_token_service,
+    google_docs_service,
+    settings_service,
+    sheet_sync_service,
+)
 from app.services.errors import ClaudeTokenNotFoundError
 
 router = APIRouter(
@@ -17,14 +23,23 @@ router = APIRouter(
 )
 
 
+def _settings_out(db: Session, row: AppSettings) -> SettingsOut:
+    return SettingsOut.model_validate(row).model_copy(
+        update={
+            "google_connected": google_docs_service.is_google_connected(db),
+            "gmail_granted": google_docs_service.is_gmail_granted(db),
+        }
+    )
+
+
 @router.get("", response_model=SettingsOut)
 def get_settings(db: Session = Depends(get_db)):
-    return settings_service.get_settings(db)
+    return _settings_out(db, settings_service.get_settings(db))
 
 
 @router.patch("", response_model=SettingsOut)
 def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
-    return settings_service.update_settings(db, data)
+    return _settings_out(db, settings_service.update_settings(db, data))
 
 
 @router.get("/claude-tokens", response_model=list[ClaudeTokenOut])
