@@ -5,6 +5,8 @@ import pytest
 
 SERVICES = "backend sheet-sync job-scan db-backup caddy"
 SAFETY = "docker compose run --rm -T db-backup python -m app.jobs.db_backup --once --label manual"
+# What a restore prints for undoing it: the fake backup's path for the safety backup.
+UNDO = "to undo, restore the safety backup taken just before:\n      ops/server/restore.sh /backups/manual/tracker-20261008T120000Z.dump\n"
 
 
 def _restore(server, fakes, *args, input="", cwd=None, **env):
@@ -42,7 +44,7 @@ def test_confirmed_restore_runs_every_step_in_order(server, deploy_fakes):
     assert 'REPLACES ALL DATA in the database "internship_tracker"' in result.stdout
     assert "Type the database name (internship_tracker) to continue:" in result.stdout
     assert len(deploy_fakes.calls("curl")) == 1
-    assert "ops/server/restore.sh /backups/manual/tracker-20261008T120000Z.dump" in result.stdout
+    assert UNDO in result.stdout
 
 
 @pytest.mark.parametrize("answer", ["", "yes", "Internship_Tracker", "internship_tracker extra"])
@@ -171,11 +173,27 @@ def test_failed_restore_starts_the_app_again(server, deploy_fakes):
     assert deploy_fakes.calls("curl") == []
 
 
-def test_health_timeout_after_restore_fails(server, deploy_fakes):
+def test_health_timeout_after_restore_fails_and_prints_the_undo(server, deploy_fakes):
     result = _restore(server, deploy_fakes, "--yes", "backups/manual/x.dump", FAKE_CURL_FAILS="always",
                       TRACKER_HEALTH_TIMEOUT="0")  # fmt: skip
     assert result.returncode == 1
     assert "did not answer within 0s" in result.stderr
+    assert UNDO in result.stdout
+    assert "Restored" not in result.stdout
+
+
+def test_start_failure_after_restore_fails_and_prints_the_undo(server, deploy_fakes):
+    result = _restore(server, deploy_fakes, "--yes", "backups/manual/x.dump", FAKE_UP_EXIT="1")
+    assert result.returncode == 1
+    assert "docker compose up failed (see the error above); the database holds the data from backups/manual/x.dump" in result.stderr
+    assert UNDO in result.stdout
+    assert deploy_fakes.calls("curl") == []
+
+
+def test_start_failure_without_a_safety_backup_has_no_undo(server, deploy_fakes):
+    result = _restore(server, deploy_fakes, "--yes", "--no-safety-backup", "backups/manual/x.dump", FAKE_UP_EXIT="1")
+    assert result.returncode == 1
+    assert "to undo" not in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -185,6 +203,7 @@ def test_health_timeout_after_restore_fails(server, deploy_fakes):
         (lambda env: env.chmod(0o644), "chmod 600 .env"),
         (lambda env: env.write_text(env.read_text() + "JWT_SECRET=change-me\n"), "change-me placeholders: JWT_SECRET"),
         (lambda env: env.write_text(env.read_text().replace("POSTGRES_DB=internship_tracker", "")), "POSTGRES_DB is not set"),
+        (lambda env: env.write_text(env.read_text().replace("CONTACT_EMAIL=", "CONTACT_EMAIL=you@example.com")), "CONTACT_EMAIL in .env is still an example address"),
     ],
 )  # fmt: skip
 def test_env_problems_are_refused(server, deploy_fakes, change, message):

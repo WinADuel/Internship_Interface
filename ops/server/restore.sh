@@ -22,9 +22,6 @@ repo_root="$(cd "$script_dir/../.." && pwd)"
 # shellcheck source=lib.sh
 source "$script_dir/lib.sh"
 
-# Every service that uses the database: stopped during the restore (db keeps running).
-APP_SERVICES=(backend sheet-sync job-scan db-backup caddy)
-
 usage() {
 	sed -n '2,17p' "$script_dir/restore.sh" | sed 's/^# \{0,1\}//'
 }
@@ -59,32 +56,8 @@ main() {
 		die "which backup? Give a file." "see ops/server/restore.sh --help"
 	fi
 
-	# Where the db-backup container will find the file. Dumps the server made
-	# stay where they are (./backups is mounted at /backups, and is readable
-	# only by root on the host); any other file is mounted read-only.
-	local path container_path mount=()
-	case "$file" in
-	*.dump | *.dump.enc) ;;
-	*) die "'$file' is not a backup: the name must end in .dump or .dump.enc." ;;
-	esac
-	path="$(realpath --no-symlinks --canonicalize-missing -- "$file")"
-	if [[ "$path" == /backups/* ]]; then
-		container_path="$path"
-	elif [[ "$path" == "$repo_root/backups/"* ]]; then
-		container_path="/backups/${path#"$repo_root/backups/"}"
-	else
-		if [[ ! -f "$path" || ! -r "$path" ]]; then
-			die "cannot read $path." "check the path (ls -l '$path')"
-		fi
-		if [[ "$path" == *:* ]]; then
-			die "Docker can't mount a path with ':' in it: $path" "move or rename the file"
-		fi
-		container_path="/restore/backup.dump"
-		if [[ "$path" == *.enc ]]; then
-			container_path="/restore/backup.dump.enc"
-		fi
-		mount=(-v "$path:$container_path:ro")
-	fi
+	# Before the cd: a relative path is from where the script was started.
+	resolve_backup_file "$file" "$repo_root"
 
 	cd "$repo_root"
 
@@ -101,22 +74,12 @@ main() {
 	say "Checking Docker"
 	require_docker
 
-	say "Checking the backup can be read"
-	if ! docker compose run --rm -T "${mount[@]}" db-backup \
-		python -m app.cli restore "$container_path" --check </dev/null; then
-		die "$file can't be restored (see the error above); nothing was changed."
-	fi
+	check_backup_file "$file"
 
 	if ((yes)); then
 		info "--yes: not asking for confirmation"
 	else
-		printf '\nThis REPLACES ALL DATA in the database "%s" with:\n  %s\n' "$database" "$file"
-		printf 'Type the database name (%s) to continue: ' "$database"
-		local answer=""
-		read -r answer || true
-		if [[ "$answer" != "$database" ]]; then
-			die "not confirmed; nothing was changed."
-		fi
+		confirm_restore "$database" "$file"
 	fi
 
 	local safety_path=""
@@ -130,25 +93,33 @@ main() {
 		warn "--no-safety-backup: the current data is not backed up first."
 	fi
 
-	say "Stopping the app (the database keeps running)"
-	docker compose stop "${APP_SERVICES[@]}"
+	stop_app
 
-	say "Restoring $file"
-	if ! docker compose run --rm -T "${mount[@]}" db-backup \
-		python -m app.cli restore "$container_path" --yes </dev/null; then
+	if ! restore_backup_file "$file"; then
 		say "Starting the app again on the old data"
 		docker compose up -d || true
 		die "the restore failed (see the error above); the database was not changed."
 	fi
 
+	# From here the data is replaced: whatever goes wrong, the way back is printed.
 	say "Starting the app"
-	docker compose up -d
+	if ! docker compose up -d; then
+		print_undo "$safety_path"
+		die "docker compose up failed (see the error above); the database holds the data from $file."
+	fi
 	if ! wait_for_health "$domain"; then
+		print_undo "$safety_path"
 		exit 1
 	fi
 
 	say "Restored"
 	info "the database now holds the data from $file"
+	print_undo "$safety_path"
+}
+
+# print_undo <safety backup path or "">
+print_undo() {
+	local safety_path="$1"
 	if [[ -n "$safety_path" ]]; then
 		info "to undo, restore the safety backup taken just before:"
 		info "  ops/server/restore.sh $safety_path"

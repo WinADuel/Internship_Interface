@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Shared helpers for deploy.sh and restore.sh (Phase 3 spec §4.2, §4.4).
-# Sourced, not run. Every function expects the current directory to be the
-# repo root (both scripts cd there first).
+# Sourced, not run. Every function except resolve_backup_file expects the
+# current directory to be the repo root (both scripts cd there first).
 #
 # Test hooks (for backend/tests/ops only; never set them on the server):
 #   TRACKER_HEALTH_TIMEOUT   seconds to wait for /api/health (default 120)
@@ -43,10 +43,11 @@ env_value() {
 			-e "s/^'(.*)'\$/\\1/"
 }
 
-# Refuses to go on unless .env exists, is private to this user and has no
-# change-me placeholders left (spec §4.2 step 1, §5).
+# Refuses to go on unless .env exists, is private to this user, has no
+# change-me placeholders left (spec §4.2 step 1, §5) and doesn't put the
+# example contact address on the public pages.
 check_env_file() {
-	local mode owner placeholders
+	local mode owner placeholders contact
 	if [[ ! -f .env ]]; then
 		die ".env is missing in $PWD." \
 			"cp .env.example .env && chmod 600 .env, then fill it in (docs/deploy/server-setup.md)."
@@ -70,6 +71,12 @@ check_env_file() {
 	if [[ -n "$placeholders" ]]; then
 		die ".env still has change-me placeholders: ${placeholders% }" \
 			"edit .env (nano .env) and replace each change-me value; the guide shows how to generate them."
+	fi
+	# Blank is fine: the pages then say "the site owner".
+	contact="$(env_value CONTACT_EMAIL)"
+	if [[ "${contact,,}" == *@example.com ]]; then
+		die "CONTACT_EMAIL in .env is still an example address ($contact); the public pages would show it." \
+			"set CONTACT_EMAIL to your own email (Google requires one to publish the app), or leave it empty"
 	fi
 }
 
@@ -105,11 +112,16 @@ db_is_running() {
 	grep -qx db <<<"$services"
 }
 
-# True when a Compose pgdata volume exists, i.e. this server has database
-# files even if the db container isn't running (after `docker compose down`).
+# True when this Compose project's pgdata volume exists, i.e. this server has
+# database files even if the db container isn't running (after `docker compose
+# down`). Another project's database on the same machine doesn't count. The
+# project name is what Compose uses (COMPOSE_PROJECT_NAME, else the folder name).
 db_volume_exists() {
-	local volumes
-	if ! volumes="$(docker volume ls --quiet --filter label=com.docker.compose.volume=pgdata)"; then
+	local project volumes
+	project="$(docker compose config --no-interpolate 2>/dev/null | sed -n '1s/^name: //p')"
+	[[ -n "$project" ]] || die "could not read the Compose project name (docker compose config failed)."
+	if ! volumes="$(docker volume ls --quiet --filter "label=com.docker.compose.project=$project" \
+		--filter label=com.docker.compose.volume=pgdata)"; then
 		die "docker volume ls failed (see the error above)."
 	fi
 	[[ -n "$volumes" ]]
@@ -127,6 +139,80 @@ take_backup() {
 	{ grep -oE '/backups/[a-z-]+/tracker-[0-9]{8}T[0-9]{6}Z\.dump' "$log" || true; } | tail -n 1
 	rm -f "$log"
 	return "$status"
+}
+
+# Every service that uses the database: stopped during a restore (db keeps running).
+APP_SERVICES=(backend sheet-sync job-scan db-backup caddy)
+
+# resolve_backup_file <file> <repo root>: where the db-backup container will find a backup,
+# in RESTORE_PATH (inside the container) and RESTORE_MOUNT (options for
+# `docker compose run`). Dumps the server made stay where they are (./backups
+# is mounted at /backups, and is readable only by root on the host); any other
+# file is mounted read-only. Call it before cd-ing to the repo root, since a
+# relative path is from wherever the script was started.
+RESTORE_PATH=""
+RESTORE_MOUNT=()
+resolve_backup_file() {
+	local file="$1" repo="$2" path
+	case "$file" in
+	*.dump | *.dump.enc) ;;
+	*) die "'$file' is not a backup: the name must end in .dump or .dump.enc." ;;
+	esac
+	path="$(realpath --no-symlinks --canonicalize-missing -- "$file")"
+	RESTORE_MOUNT=()
+	if [[ "$path" == /backups/* ]]; then
+		RESTORE_PATH="$path"
+	elif [[ "$path" == "$repo/backups/"* ]]; then
+		RESTORE_PATH="/backups/${path#"$repo/backups/"}"
+	else
+		if [[ ! -f "$path" || ! -r "$path" ]]; then
+			die "cannot read $path." "check the path (ls -l '$path')"
+		fi
+		if [[ "$path" == *:* ]]; then
+			die "Docker can't mount a path with ':' in it: $path" "move or rename the file"
+		fi
+		RESTORE_PATH="/restore/backup.dump"
+		if [[ "$path" == *.enc ]]; then
+			RESTORE_PATH="/restore/backup.dump.enc"
+		fi
+		RESTORE_MOUNT=(-v "$path:$RESTORE_PATH:ro")
+	fi
+}
+
+# check_backup_file <file as given>: refuses, before anything changes, unless
+# the backup found by resolve_backup_file exists and can be restored.
+check_backup_file() {
+	say "Checking the backup can be read"
+	if ! docker compose run --rm -T "${RESTORE_MOUNT[@]}" db-backup \
+		python -m app.cli restore "$RESTORE_PATH" --check </dev/null; then
+		die "$1 can't be restored (see the error above); nothing was changed."
+	fi
+}
+
+# confirm_restore <database> <file as given>: asks for the database name to
+# be typed; anything else stops the script. --yes skips this (the callers').
+confirm_restore() {
+	local database="$1" file="$2" answer=""
+	printf '\nThis REPLACES ALL DATA in the database "%s" with:\n  %s\n' "$database" "$file"
+	printf 'Type the database name (%s) to continue: ' "$database"
+	read -r answer || true
+	if [[ "$answer" != "$database" ]]; then
+		die "not confirmed; nothing was changed."
+	fi
+}
+
+stop_app() {
+	say "Stopping the app (the database keeps running)"
+	docker compose stop "${APP_SERVICES[@]}"
+}
+
+# restore_backup_file <file as given>: replaces the whole database with the
+# backup found by resolve_backup_file. It runs in one transaction: when it
+# fails (non-zero), the database is left as it was.
+restore_backup_file() {
+	say "Restoring $1"
+	docker compose run --rm -T "${RESTORE_MOUNT[@]}" db-backup \
+		python -m app.cli restore "$RESTORE_PATH" --yes </dev/null
 }
 
 # wait_for_health <domain>: polls https://<domain>/api/health on this server.

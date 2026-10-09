@@ -6,7 +6,7 @@ FastAPI + PostgreSQL backend, Svelte static frontend, served behind Caddy (autom
 
 The same `docker-compose.yml` runs on the server and on a local copy (Mac or PC).
 
-**The server** (a DigitalOcean droplet): follow [`docs/deploy/server-setup.md`](docs/deploy/server-setup.md), a step-by-step guide from creating the accounts to the daily Claude job and an uptime check. It uses three scripts in `ops/server/`. `bootstrap.sh` runs once, as root, on a new Ubuntu 24.04 droplet: it creates the `deploy` user, turns SSH into keys-only with no root login, turns on the firewall (22, 80, 443), installs Docker, turns on automatic security updates, adds swap and sets the time zone. `deploy.sh [REF]` deploys `origin/main` (or a given commit, which is how you roll back): it checks `.env`, takes a pre-deploy database backup, rebuilds, waits for `/api/health` and prints the command to roll back. `restore.sh FILE` puts a backup back (see **Backups**).
+**The server** (a DigitalOcean droplet): follow [`docs/deploy/server-setup.md`](docs/deploy/server-setup.md), a step-by-step guide from creating the accounts to the daily Claude job and an uptime check. It uses three scripts in `ops/server/`. `bootstrap.sh` runs once, as root, on a new Ubuntu 24.04 droplet: it creates the `deploy` user, turns SSH into keys-only with no root login, turns on the firewall (22, 80, 443), installs Docker, turns on automatic security updates, adds swap and sets the time zone. `deploy.sh [REF]` deploys `origin/main` (or a given commit): it checks `.env`, takes a pre-deploy database backup, rebuilds, waits for `/api/health` and prints the one command that undoes the deploy (`deploy.sh --restore <its pre-deploy backup> <previous commit>`, which also puts back the database from just before it). `restore.sh FILE` puts a backup back (see **Backups**).
 
 **A local copy:**
 
@@ -86,7 +86,14 @@ Keep a copy of `.env` in a password manager (see below): a dump alone is not eno
 
 ## Moving to a new server
 
-1. On the old server, press **Settings → Backups → Back up now**, then copy the newest file in `backups/manual/` to the new server (it belongs to root: `sudo cp` it to your home folder and `sudo chown deploy:` it first). The newest Drive copy works too.
+1. On the old server, in the repo folder, stop the app so nothing changes after the last backup, then take it:
+
+   ```
+   docker compose stop backend caddy job-scan sheet-sync
+   docker compose run --rm db-backup python -m app.jobs.db_backup --once --label manual
+   ```
+
+   Copy the newest file in `backups/manual/` to the new server (it belongs to root: `sudo cp` it to your home folder and `sudo chown deploy:` it first). The newest Drive copy works too, but it misses anything changed since the last nightly backup.
 2. On the new server, clone the repository and copy the old `.env` over **verbatim**. Do not regenerate `JWT_SECRET`, `TOKEN_ENCRYPTION_KEY` or `BACKUP_ENCRYPTION_KEY`: your TOTP secret and the stored Google token are encrypted with `TOKEN_ENCRYPTION_KEY`, and a different key makes them undecryptable; the Drive backups can only be read with the `BACKUP_ENCRYPTION_KEY` that made them. (A changed `JWT_SECRET` just logs you out.) Only change `DOMAIN` and `GOOGLE_REDIRECT_URI` if the hostname changes, and then also update the redirect URI in Google Cloud Console.
 3. Repoint the domain's DNS A/AAAA record at the new server and keep ports 80 and 443 open. Caddy obtains a certificate once DNS resolves to the new host, so do this before deploying (the scripts check the site over HTTPS).
 4. Run `ops/server/deploy.sh`, then `ops/server/restore.sh <the copied file>`.
