@@ -130,6 +130,7 @@
   .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
   .toolbar label { font-size: 0.85rem; display: flex; align-items: center; gap: 0.3rem; }
   select { max-width: 12rem; font: inherit; }
+  .story-bank > :global(.story-form) { margin-bottom: 0.75rem; }
   .stories { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
   .stories > li { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem 0.6rem; }
   .archived { opacity: 0.7; }

@@ -86,6 +86,7 @@
 
 <style>
   .header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .header button { white-space: nowrap; }
   .tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; border-bottom: 1px solid #ddd; margin: 0.75rem 0; }
   .tabs button { border: 1px solid transparent; border-bottom: 0; background: none; padding: 0.4rem 0.9rem; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; }
   .tabs button[aria-selected="true"] { border-color: #ddd; background: #fff; font-weight: 600; margin-bottom: -1px; }

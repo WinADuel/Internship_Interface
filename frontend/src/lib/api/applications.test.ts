@@ -86,6 +86,12 @@ describe("api calls", () => {
     expect(JSON.parse(init.body)).toEqual({ notes: "hi" });
   });
 
+  it("updateApplication never sends interview_datetime (it is derived from rounds)", async () => {
+    const f = mockFetch(rawApp);
+    await updateApplication(3, { notes: "hi", interviewDatetime: "2026-10-12T10:00:00Z" } as never);
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ notes: "hi" });
+  });
+
   it("changeStatus posts new_status", async () => {
     const f = mockFetch(rawApp);
     await changeStatus(3, "applied");
