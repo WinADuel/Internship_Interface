@@ -6,7 +6,8 @@ row already covers (same `url_key` anywhere, or the same company and title
 from a different source in the last 14 days), and, for a complete result,
 closes the source's postings that are no longer listed. A failed source
 changes nothing. Existing rows never have their `state`, `application_id`
-or `claude_*` fields touched here.
+or `claude_*` fields touched here. Every inserted or updated row gets its
+local match score (Phase 5 spec §4).
 
 Work is done in bulk: a handful of targeted queries per call, `add_all` for
 inserts, one UPDATE for closing, and one commit.
@@ -22,8 +23,10 @@ from sqlalchemy.orm import Session
 
 from app.models.posting import Posting, PostingSource, PostingState
 from app.services.discovery.parsers import PostingIn
+from app.services.discovery.ranking import Ranker, apply_score, prefs_from_settings
 from app.services.discovery.sources import SourceResult
 from app.services.discovery.urls import normalize_url
+from app.services.settings_service import get_settings
 
 BOARD_SOURCES = frozenset(
     {
@@ -166,15 +169,23 @@ def _close_missing(
     return len(ids)
 
 
+def ranker_from_settings(db: Session) -> Ranker:
+    return Ranker(prefs_from_settings(get_settings(db)))
+
+
 def ingest(
     db: Session,
     result: SourceResult,
     now: datetime,
     watch_company_id: int | None = None,
+    ranker: Ranker | None = None,
 ) -> IngestStats:
-    """Upsert one source's result. See the module docstring for the rules."""
+    """Upsert one source's result. See the module docstring for the rules.
+    `ranker` scores the rows (default: the saved ranking preferences)."""
     if result.error is not None:
         return IngestStats()
+    if ranker is None:
+        ranker = ranker_from_settings(db)
 
     source = result.source
     if source is None and result.postings:
@@ -216,6 +227,7 @@ def ingest(
         updated += 1
         if _apply_update(row, posting, url_key, now, watch_company_id):
             closed += 1
+        apply_score(row, ranker, now)
 
     # 3. Insert new rows that nothing already covers.
     since = now - DUPLICATE_WINDOW
@@ -257,6 +269,9 @@ def ingest(
                 watch_company_id=watch_company_id,
             )
         )
+
+    for row in inserts:
+        apply_score(row, ranker, now)
 
     # 4. Close what a complete listing no longer shows.
     if result.complete and source is not None:
