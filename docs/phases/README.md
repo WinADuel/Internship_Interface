@@ -15,6 +15,7 @@ Each development phase gets its own report in this folder once the phase is merg
 | 2 — Job discovery | [phase-2-report.md](phase-2-report.md) | Complete (merged 2026-10-08) |
 | 3 — Server deploy | [phase-3-report.md](phase-3-report.md) | Complete on branch, awaiting merge |
 | 4 — Interview prep | [phase-4-report.md](phase-4-report.md) | Complete on branch, awaiting merge |
+| 6 — Gmail sync | [phase-6-report.md](phase-6-report.md) | Complete on branch, awaiting merge |
 
 **Conventions** (spec §11b):
 - Name each report `phase-<id>-report.md`.
