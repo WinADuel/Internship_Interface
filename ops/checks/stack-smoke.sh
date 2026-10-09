@@ -42,6 +42,8 @@ failures=0
 work=""
 env_written=0
 env_saved=0
+# The branch checked out before the test: deploy.sh detaches HEAD, and cleanup puts it back.
+orig_branch=""
 
 # check <description> <command...>: runs the command; a failure is counted and
 # the test goes on, so one run reports every broken header and page.
@@ -215,6 +217,9 @@ cleanup() {
 	if ((env_saved)); then
 		mv .env.before-smoke .env && info "your .env is back in place"
 	fi
+	if [[ -n "$orig_branch" ]] && ! git symbolic-ref -q HEAD >/dev/null; then
+		git checkout -q "$orig_branch" && info "back on branch $orig_branch"
+	fi
 	[[ -n "$work" ]] && rm -rf "$work"
 	exit "$status"
 }
@@ -262,6 +267,7 @@ main() {
 			"remove them with: COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME docker compose down --volumes"
 	fi
 
+	orig_branch="$(git symbolic-ref -q --short HEAD || true)"
 	work="$(mktemp -d)"
 	trap cleanup EXIT
 	if [[ -e .env || -L .env ]]; then
