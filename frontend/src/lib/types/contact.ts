@@ -22,7 +22,7 @@ export type ContactAction =
   | "declined"
   | "no_response";
 export type NudgeKind = "unsent" | "followup_due" | "gone_quiet" | "replied_stale" | "meeting_outcome";
-export type QueueKind = "professor_person" | "professor_search" | "company_contacts";
+export type QueueKind = "professor_person" | "professor_search" | "company_contacts" | "interview_brief";
 export type QueueState = "pending" | "done" | "failed";
 
 export interface ContactSource {

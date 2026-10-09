@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countdown, roundName, sortByDate } from "./format";
+import { countdown, isThankYouDue, roundName, sortByDate } from "./format";
 
 describe("interview formatting", () => {
   const now = new Date(2026, 9, 9, 10, 0);
@@ -31,5 +31,14 @@ describe("interview formatting", () => {
     ];
     expect(sortByDate(rows).map((r) => r.id)).toEqual([3, 2, 1, 4]);
     expect(sortByDate(rows, true).map((r) => r.id)).toEqual([2, 3, 1, 4]);
+  });
+
+  it("knows when a thank-you is due", () => {
+    const done = { state: "done" as const, thankYouSentAt: null, scheduledAt: new Date(2026, 9, 7, 10).toISOString() };
+    expect(isThankYouDue(done, now)).toBe(true);
+    expect(isThankYouDue({ ...done, scheduledAt: new Date(2026, 9, 6, 9).toISOString() }, now)).toBe(false);
+    expect(isThankYouDue({ ...done, thankYouSentAt: "2026-10-08T00:00:00Z" }, now)).toBe(false);
+    expect(isThankYouDue({ ...done, state: "scheduled" }, now)).toBe(false);
+    expect(isThankYouDue({ ...done, scheduledAt: null }, now)).toBe(false);
   });
 });

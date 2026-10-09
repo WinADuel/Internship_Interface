@@ -6,7 +6,7 @@
   import StoryBank from "../lib/components/interviews/StoryBank.svelte";
   import { applications, loadApplications } from "../lib/stores/applications";
   import { showToast } from "../lib/stores/toast";
-  import type { InterviewRound } from "../lib/types/interview";
+  import type { InterviewRoundDetail } from "../lib/types/interview";
 
   type Tab = "upcoming" | "past" | "stories";
 
@@ -39,7 +39,7 @@
     tabButtons[target]?.focus();
   }
 
-  function onAdded(round: InterviewRound) {
+  function onAdded(round: InterviewRoundDetail) {
     adding = false;
     void push(`/interviews/${round.id}`);
   }

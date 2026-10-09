@@ -18,6 +18,9 @@ type Raw = Record<string, unknown>;
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
+// POST, GET, PATCH and both PUTs all answer with the round detail (round,
+// application, progress, linked contacts and stories).
+
 // Brief caps from spec §3; the server enforces them too, this is defence in depth.
 const BRIEF_BODY_MAX = 12_000;
 const BRIEF_SOURCES_MAX = 20;
@@ -95,23 +98,23 @@ export async function getRound(id: number): Promise<InterviewRoundDetail> {
   return mapRoundDetailFromApi(await apiFetch<Raw>(`/api/interviews/${id}`));
 }
 
-export async function createRound(data: InterviewRoundInput): Promise<InterviewRound> {
+export async function createRound(data: InterviewRoundInput): Promise<InterviewRoundDetail> {
   const raw = await apiFetch<Raw>("/api/interviews", {
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify(keysToSnake(data)),
   });
-  return mapRoundFromApi(raw);
+  return mapRoundDetailFromApi(raw);
 }
 
 /** PATCH; only the keys present on `data` are sent. */
-export async function updateRound(id: number, data: InterviewRoundUpdate): Promise<InterviewRound> {
+export async function updateRound(id: number, data: InterviewRoundUpdate): Promise<InterviewRoundDetail> {
   const raw = await apiFetch<Raw>(`/api/interviews/${id}`, {
     method: "PATCH",
     headers: JSON_HEADERS,
     body: JSON.stringify(keysToSnake(data)),
   });
-  return mapRoundFromApi(raw);
+  return mapRoundDetailFromApi(raw);
 }
 
 export async function deleteRound(id: number): Promise<void> {
@@ -119,21 +122,23 @@ export async function deleteRound(id: number): Promise<void> {
 }
 
 /** Replaces the round's tracked interviewers. */
-export async function setRoundContacts(id: number, contactIds: number[]): Promise<void> {
-  await apiFetch<unknown>(`/api/interviews/${id}/contacts`, {
+export async function setRoundContacts(id: number, contactIds: number[]): Promise<InterviewRoundDetail> {
+  const raw = await apiFetch<Raw>(`/api/interviews/${id}/contacts`, {
     method: "PUT",
     headers: JSON_HEADERS,
     body: JSON.stringify({ contact_ids: contactIds }),
   });
+  return mapRoundDetailFromApi(raw);
 }
 
 /** Replaces the stories planned for the round. */
-export async function setRoundStories(id: number, storyIds: number[]): Promise<void> {
-  await apiFetch<unknown>(`/api/interviews/${id}/stories`, {
+export async function setRoundStories(id: number, storyIds: number[]): Promise<InterviewRoundDetail> {
+  const raw = await apiFetch<Raw>(`/api/interviews/${id}/stories`, {
     method: "PUT",
     headers: JSON_HEADERS,
     body: JSON.stringify({ story_ids: storyIds }),
   });
+  return mapRoundDetailFromApi(raw);
 }
 
 /** Same-origin download of the round as an .ics file (cookie auth, so a plain link works). */

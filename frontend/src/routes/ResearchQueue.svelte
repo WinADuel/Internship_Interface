@@ -16,6 +16,7 @@
     professor_person: "Specific professor",
     professor_search: "Search brief",
     company_contacts: "Company contacts",
+    interview_brief: "Company brief",
   };
   const GROUPS: Array<[QueueState, string]> = [
     ["pending", "Pending"],
