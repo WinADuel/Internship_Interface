@@ -1,0 +1,206 @@
+import logging
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from app.jobs import db_backup
+from app.services.backup.dump import DUMP_TIMEOUT
+from app.services.backup.offsite import after_nightly_backup
+from app.services.backup.service import BackupResult
+
+
+class FakeLock:
+    """Stands in for backup_lock (tests/services/backup/test_lock.py covers the real one)."""
+
+    def __init__(self):
+        self.free = True
+        self.calls = []
+
+    @contextmanager
+    def __call__(self, engine, *, wait=0.0):
+        self.calls.append((engine, wait))
+        yield self.free
+
+
+@pytest.fixture(autouse=True)
+def lock(monkeypatch):
+    fake = FakeLock()
+    monkeypatch.setattr(db_backup, "backup_lock", fake)
+    return fake
+
+
+class FakeSession:
+    def __init__(self, log):
+        self.log = log
+
+    def close(self):
+        self.log.append("closed")
+
+
+@pytest.fixture()
+def job(monkeypatch, tmp_path):
+    """run_once with a fake session and a recording run_backup."""
+    log = []
+    outcomes = []
+
+    def fake_run_backup(db, label, *, database_url, backup_dir, after=None):
+        log.append(("run_backup", label, database_url, backup_dir, after))
+        return outcomes.pop(0) if outcomes else BackupResult(label=label, path=Path("x"), status_recorded=True)
+
+    monkeypatch.setattr(db_backup, "SessionLocal", lambda: FakeSession(log))
+    monkeypatch.setattr(db_backup, "run_backup", fake_run_backup)
+    monkeypatch.setattr(db_backup.settings, "backup_dir", str(tmp_path))
+    return log, outcomes
+
+
+def test_run_once_uses_settings_and_a_fresh_session(job, tmp_path):
+    log, _ = job
+    assert db_backup.run_once("pre-deploy").ok
+    assert log == [("run_backup", "pre-deploy", db_backup.settings.database_url, str(tmp_path), None), "closed"]
+
+
+def test_run_once_passes_the_after_step_for_its_label(job, monkeypatch):
+    log, _ = job
+    step = lambda db, path: None  # noqa: E731
+    monkeypatch.setitem(db_backup.AFTER_BACKUP, "nightly", step)
+    db_backup.run_once("nightly")
+    db_backup.run_once("pre-deploy")
+    assert log[0][4] is step
+    assert log[2][4] is None
+
+
+def test_nightly_backups_are_copied_off_site_and_others_are_not():
+    assert db_backup.AFTER_BACKUP == {"nightly": after_nightly_backup}
+
+
+def test_run_once_waits_for_the_backup_lock(job, lock):
+    log, _ = job
+    db_backup.run_once("pre-deploy")
+    assert lock.calls == [(db_backup.engine, db_backup.LOCK_WAIT)]
+    # Longer than a dump can take, so a running manual backup always finishes first.
+    assert db_backup.LOCK_WAIT > DUMP_TIMEOUT
+    assert log[0][0] == "run_backup"
+
+
+def test_run_once_gives_up_when_another_backup_keeps_the_lock(job, lock, caplog):
+    log, _ = job
+    lock.free = False
+    with caplog.at_level(logging.WARNING):
+        result = db_backup.run_once("nightly")
+    assert not result.ok and result.error == "another backup is still running"
+    assert log == []  # no session opened, no dump, nothing recorded
+    assert "nightly backup skipped: another backup is still running" in caplog.text
+    assert "Settings could not be updated" not in caplog.text
+    assert db_backup.main(["--once", "--label", "pre-deploy"]) == 1
+
+
+def test_once_exit_codes(job):
+    _, outcomes = job
+    outcomes.append(BackupResult(label="pre-deploy", path=Path("x"), status_recorded=True))
+    assert db_backup.main(["--once", "--label", "pre-deploy"]) == 0
+    outcomes.append(BackupResult(label="pre-deploy", error="pg_dump failed", status_recorded=True))
+    assert db_backup.main(["--once", "--label", "pre-deploy"]) == 1
+
+
+def test_once_defaults_to_the_manual_label(job):
+    log, _ = job
+    assert db_backup.main(["--once"]) == 0
+    assert log[0][1] == "manual"
+
+
+def test_once_succeeds_when_only_the_status_could_not_be_saved(job, caplog):
+    _, outcomes = job
+    outcomes.append(BackupResult(label="pre-deploy", path=Path("x"), status_recorded=False))
+    with caplog.at_level(logging.WARNING):
+        assert db_backup.main(["--once", "--label", "pre-deploy"]) == 0
+    assert "pre-deploy backup succeeded, but Settings could not be updated" in caplog.text
+
+
+def test_once_crash_exits_1(monkeypatch):
+    def boom():
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(db_backup, "SessionLocal", boom)
+    assert db_backup.main(["--once", "--label", "manual"]) == 1
+
+
+def test_bad_label_is_a_usage_error(job):
+    with pytest.raises(SystemExit) as excinfo:
+        db_backup.main(["--once", "--label", "weekly"])
+    assert excinfo.value.code == 2
+
+
+def test_label_without_once_is_a_usage_error(job):
+    with pytest.raises(SystemExit) as excinfo:
+        db_backup.main(["--label", "manual"])
+    assert excinfo.value.code == 2
+
+
+class _Stop(Exception):
+    pass
+
+
+def test_loop_runs_nightly_at_0230_local_and_survives_crashes(monkeypatch, caplog):
+    # TZ is read by app/jobs/schedule (tests/jobs/test_schedule.py covers DST days).
+    monkeypatch.setenv("TZ", "America/Chicago")
+    clock = [datetime(2026, 10, 6, 6, 30, tzinfo=UTC)]  # 01:30 CDT
+    sleeps = []
+    runs = []
+
+    def sleep(seconds):
+        if len(runs) == 3:
+            raise _Stop  # (the loop catches anything run_once raises)
+        sleeps.append(seconds)
+        clock[0] += timedelta(seconds=seconds)
+
+    def run_once(label):
+        runs.append((label, clock[0].astimezone(ZoneInfo("America/Chicago")).strftime("%m-%d %H:%M")))
+        clock[0] += timedelta(minutes=2)
+        if len(runs) == 1:
+            raise RuntimeError("database restarting")
+        return BackupResult(label=label, error="pg_dump failed")
+
+    monkeypatch.setattr(db_backup, "run_once", run_once)
+    with caplog.at_level(logging.INFO), pytest.raises(_Stop):
+        db_backup.run_forever(sleep=sleep, now=lambda: clock[0])
+    assert sleeps == [3600.0, 86400.0 - 120, 86400.0 - 120]
+    assert runs == [("nightly", "10-06 02:30"), ("nightly", "10-07 02:30"), ("nightly", "10-08 02:30")]
+    assert "nightly backup crashed" in caplog.text
+    assert "nightly backup failed (see Settings)" in caplog.text
+
+
+def test_loop_logs_a_successful_run(monkeypatch, caplog):
+    monkeypatch.setenv("TZ", "UTC")
+    clock = [datetime(2026, 10, 6, 2, 0, tzinfo=UTC)]
+
+    def sleep(seconds):
+        if clock[0].day > 6:
+            raise _Stop
+        clock[0] += timedelta(seconds=seconds)
+
+    def run_once(label):
+        clock[0] += timedelta(minutes=1)
+        return BackupResult(label=label)
+
+    monkeypatch.setattr(db_backup, "run_once", run_once)
+    with caplog.at_level(logging.INFO), pytest.raises(_Stop):
+        db_backup.run_forever(sleep=sleep, now=lambda: clock[0])
+    assert "nightly backup succeeded" in caplog.text
+
+
+def test_default_sets_up_logging_and_runs_the_loop(monkeypatch):
+    called = []
+    monkeypatch.setattr(db_backup, "configure_job_logging", lambda: called.append("logging"))
+    monkeypatch.setattr(db_backup, "run_forever", lambda: called.append("loop"))
+    db_backup.main([])
+    assert called == ["logging", "loop"]
+
+
+def test_once_sets_up_logging_too(job, monkeypatch):
+    called = []
+    monkeypatch.setattr(db_backup, "configure_job_logging", lambda: called.append("logging"))
+    db_backup.main(["--once"])
+    assert called == ["logging"]

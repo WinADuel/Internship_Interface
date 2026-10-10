@@ -1,0 +1,4 @@
+# ShellCheck settings for every script in the repo (ops/**/*.sh).
+# Follow `source` lines (ops/server/*.sh source lib.sh), resolved from the script's folder.
+external-sources=true
+source-path=SCRIPTDIR

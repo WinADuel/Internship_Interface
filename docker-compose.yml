@@ -1,7 +1,16 @@
+# Log rotation for every service (spec §4.3): 10 MB x 3 files, so logs can't fill the disk.
+# Use it as `logging: *default-logging` on each service, including new ones.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -18,26 +27,47 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
+    environment:
+      # Back up now in Settings writes here, next to the db-backup service's dumps.
+      BACKUP_DIR: /backups
+    volumes:
+      - ./backups:/backups
     depends_on:
       db:
         condition: service_healthy
+    # The slim image has no curl, so probe /api/health with Python's urllib.
+    # urlopen raises on a non-2xx status or a refused connection, so any failure exits non-zero.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   # Nightly full re-sync of the backup Google Sheet (spec §13.7), at 03:00 in TZ.
   sheet-sync:
     build: ./backend
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       TZ: ${TZ:-UTC}
     command: python -m app.jobs.nightly_sheet_sync
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   # Job discovery scans (Phase 2 spec §5): every discovery_scan_hours hours.
   job-scan:
     build: ./backend
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       TZ: ${TZ:-UTC}
@@ -46,13 +76,34 @@ services:
       db:
         condition: service_healthy
 
+  # Database backups (Phase 3 spec §4.4): pg_dump nightly at 02:30 in TZ, kept in ./backups.
+  # deploy.sh runs `python -m app.jobs.db_backup --once --label pre-deploy` in this service.
+  db-backup:
+    build: ./backend
+    restart: unless-stopped
+    logging: *default-logging
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+      BACKUP_DIR: /backups
+    command: python -m app.jobs.db_backup
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
   caddy:
     build: ./frontend
     restart: unless-stopped
+    logging: *default-logging
     environment:
       DOMAIN: ${DOMAIN}
+      # Shown on /about.html and /privacy.html; empty shows "the site owner" (spec §4.5).
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"

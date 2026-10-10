@@ -1,10 +1,15 @@
+import stat
+
 import pyotp
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import func, select
 
 from app import cli
 from app.core.security import decrypt_value, verify_password
 from app.models.auth_credential import AuthCredential
+from app.services.backup.crypto import BackupCryptoError
+from app.services.backup.dump import BackupError, DumpListing
 from app.services.user_bootstrap import create_or_reset_user
 
 PASSWORD = "correct-horse-battery"
@@ -107,3 +112,145 @@ def test_correct_code_confirms_account(cli_env, monkeypatch):
     row = cli_env.scalars(select(AuthCredential)).one()
     assert row.totp_confirmed is True
     assert decrypt_value(row.totp_secret_encrypted) == captured["secret"]
+
+
+def test_restore_check_prints_a_summary(monkeypatch, capsys):
+    seen = []
+
+    def fake_list_dump(path):
+        seen.append(path)
+        return DumpListing(42, ["public.applications", "public.contacts"], "16.4", "2026-10-08 02:30:05 UTC")
+
+    monkeypatch.setattr(cli, "list_dump", fake_list_dump)
+    assert cli.main(["restore-check", "/backups/nightly/tracker-20261008T023005Z.dump"]) == 0
+    out = capsys.readouterr().out
+    assert seen == ["/backups/nightly/tracker-20261008T023005Z.dump"]
+    assert "readable dump" in out
+    assert "42 entries, 2 tables" in out
+    assert "public.applications, public.contacts" in out
+    assert "16.4" in out
+
+
+def test_restore_check_fails_on_an_unreadable_file(monkeypatch, capsys):
+    def fake_list_dump(path):
+        raise BackupError("not a readable dump: pg_restore: error: input file is too short")
+
+    monkeypatch.setattr(cli, "list_dump", fake_list_dump)
+    assert cli.main(["restore-check", "broken.dump"]) == 1
+    assert "not a readable dump" in capsys.readouterr().err
+
+
+BACKUP_KEY = Fernet.generate_key().decode()
+
+
+@pytest.fixture()
+def encrypted(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", BACKUP_KEY)
+    source = tmp_path / "tracker-20261008T023000Z.dump.enc"
+    source.write_bytes(Fernet(BACKUP_KEY).encrypt(b"PGDMP whole database"))
+    return source
+
+
+def test_decrypt_backup_writes_the_dump(encrypted, tmp_path, capsys):
+    out = tmp_path / "restored.dump"
+    assert cli.main(["decrypt-backup", str(encrypted), str(out)]) == 0
+    assert out.read_bytes() == b"PGDMP whole database"
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    assert f"restore-check {out}" in capsys.readouterr().out
+
+
+def test_decrypt_backup_with_the_wrong_key_fails_cleanly(encrypted, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", Fernet.generate_key().decode())
+    out = tmp_path / "restored.dump"
+    assert cli.main(["decrypt-backup", str(encrypted), str(out)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("Error: cannot decrypt: wrong BACKUP_ENCRYPTION_KEY")
+    assert "Traceback" not in err
+    assert not out.exists()
+
+
+def test_decrypt_backup_refuses_to_overwrite(encrypted, tmp_path, capsys):
+    out = tmp_path / "restored.dump"
+    out.write_bytes(b"precious")
+    assert cli.main(["decrypt-backup", str(encrypted), str(out)]) == 1
+    assert "already exists" in capsys.readouterr().err
+    assert out.read_bytes() == b"precious"
+
+
+def test_decrypt_backup_needs_the_key(encrypted, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", None)
+    assert cli.main(["decrypt-backup", str(encrypted), str(tmp_path / "out.dump")]) == 1
+    assert "BACKUP_ENCRYPTION_KEY is not set" in capsys.readouterr().err
+
+
+def _fake_restore(monkeypatch, error=None):
+    calls = []
+    listing = DumpListing(42, ["public.applications", "public.contacts"], "16.4", "2026-10-08 02:30:05 UTC")
+
+    def fake_restore(path, database_url, key):
+        calls.append(("restore", path, database_url, key))
+        if error is not None:
+            raise error
+        return listing
+
+    def fake_check(path, key):
+        calls.append(("check", path, key))
+        if error is not None:
+            raise error
+        return listing
+
+    monkeypatch.setattr(cli, "restore_backup", fake_restore)
+    monkeypatch.setattr(cli, "check_backup", fake_check)
+    return calls
+
+
+def test_restore_needs_yes(monkeypatch, capsys):
+    calls = _fake_restore(monkeypatch)
+    assert cli.main(["restore", "/backups/manual/tracker-20261008T023005Z.dump"]) == 1
+    assert calls == []
+    assert "--yes" in capsys.readouterr().err
+
+
+def test_restore_runs_with_the_database_url_and_key(monkeypatch, capsys):
+    monkeypatch.setattr(cli.settings, "database_url", "postgresql+psycopg://app:pw@db:5432/tracker")
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", BACKUP_KEY)
+    calls = _fake_restore(monkeypatch)
+    assert cli.main(["restore", "/restore/backup.dump.enc", "--yes"]) == 0
+    assert calls == [
+        ("restore", "/restore/backup.dump.enc", "postgresql+psycopg://app:pw@db:5432/tracker", BACKUP_KEY)
+    ]
+    out = capsys.readouterr().out
+    assert "OK: restored /restore/backup.dump.enc" in out
+    assert "2 tables" in out
+    assert "2026-10-08 02:30:05 UTC" in out
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        BackupError("restore failed (exit 3); the database was not changed: psql: ERROR: boom"),
+        BackupCryptoError("cannot decrypt: wrong BACKUP_ENCRYPTION_KEY, or the file is damaged"),
+    ],
+)
+@pytest.mark.parametrize("flag", ["--yes", "--check"])
+def test_restore_failure_is_one_clean_line(monkeypatch, capsys, error, flag):
+    _fake_restore(monkeypatch, error=error)
+    assert cli.main(["restore", "x.dump", flag]) == 1
+    err = capsys.readouterr().err
+    assert err == f"Error: {error}\n"
+
+
+def test_restore_check_only_reads_the_file(monkeypatch, capsys):
+    monkeypatch.setattr(cli.settings, "backup_encryption_key", BACKUP_KEY)
+    calls = _fake_restore(monkeypatch)
+    assert cli.main(["restore", "/restore/backup.dump.enc", "--check"]) == 0
+    assert calls == [("check", "/restore/backup.dump.enc", BACKUP_KEY)]
+    out = capsys.readouterr().out
+    assert "OK: /restore/backup.dump.enc is a readable backup (2 tables, made 2026-10-08 02:30:05 UTC)." in out
+
+
+def test_restore_check_and_yes_are_exclusive(monkeypatch, capsys):
+    calls = _fake_restore(monkeypatch)
+    with pytest.raises(SystemExit):
+        cli.main(["restore", "x.dump", "--check", "--yes"])
+    assert calls == []

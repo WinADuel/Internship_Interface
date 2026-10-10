@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { ApiError } from "../lib/api/client";
   import { getSettings, updateSettings } from "../lib/api/settings";
+  import BackupSettings from "../lib/components/settings/BackupSettings.svelte";
   import BackupSheetStatus from "../lib/components/settings/BackupSheetStatus.svelte";
   import ClaudeTokens from "../lib/components/settings/ClaudeTokens.svelte";
   import DiscoverySettings from "../lib/components/settings/DiscoverySettings.svelte";
@@ -111,6 +112,9 @@
 {#if settings}
   <BackupSheetStatus status={settings} />
 {/if}
+
+<!-- Loads its own status from /api/backups. -->
+<BackupSettings />
 
 <style>
   .error { color: #a00; }
