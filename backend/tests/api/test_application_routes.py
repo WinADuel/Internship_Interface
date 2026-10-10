@@ -84,6 +84,22 @@ def test_patch_allows_null_for_nullable_field(logged_in_client):
     assert response.json()["notes"] is None
 
 
+def test_create_with_interview_datetime_returns_the_derived_value(logged_in_client):
+    created = _create(logged_in_client, interview_datetime="2099-03-05T14:30:00Z")
+    assert created["interview_datetime"] == "2099-03-05T14:30:00Z"
+
+
+def test_patch_ignores_interview_datetime(logged_in_client):
+    created = _create(logged_in_client, interview_datetime="2099-03-05T14:30:00Z")
+    response = logged_in_client.patch(
+        f"/api/applications/{created['id']}",
+        json={"interview_datetime": "2099-04-01T09:00:00Z", "notes": "n"},
+    )
+    assert response.status_code == 200
+    assert response.json()["notes"] == "n"
+    assert response.json()["interview_datetime"] == "2099-03-05T14:30:00Z"
+
+
 def test_status_change_updates_status_and_history(logged_in_client):
     created = _create(logged_in_client)
     response = logged_in_client.post(

@@ -12,6 +12,7 @@ from app.services.errors import AlreadyQueuedError, QueueItemNotFoundError, Queu
 from app.services.research_queue_service import (
     complete_item,
     enqueue_company_contacts,
+    enqueue_interview_brief,
     enqueue_professor,
     fail_item,
     list_queue,
@@ -67,6 +68,16 @@ def test_already_queued_counts_items_in_any_state(db_session):
         enqueue_company_contacts(db_session, app)
 
 
+def test_interview_brief_item_does_not_block_company_contacts(db_session):
+    app = _stripe(db_session)
+    db_session.add(
+        ResearchQueueItem(kind=QueueKind.INTERVIEW_BRIEF, request_text="Stripe — SWE Intern", application_id=app.id)
+    )
+    db_session.flush()
+    item = enqueue_company_contacts(db_session, app)
+    assert item.kind == QueueKind.COMPANY_CONTACTS
+
+
 def test_non_applied_status_does_not_enqueue(db_session):
     app = _stripe(db_session)
     change_status(db_session, app.id, ApplicationStatus.INTERVIEW)
@@ -92,7 +103,8 @@ def test_queue_item_create_validation():
             QueueItemCreate(**bad)
 
 
-def test_pending_items_oldest_first_and_limited(db_session):
+def test_pending_items_oldest_first_limited_and_by_kind(db_session):
+    kinds = [QueueKind.PROFESSOR_PERSON]
     items = []
     for i in range(3):
         item = ResearchQueueItem(kind=QueueKind.PROFESSOR_PERSON, request_text=f"p{i}", created_at=NOW + timedelta(minutes=i))
@@ -100,8 +112,9 @@ def test_pending_items_oldest_first_and_limited(db_session):
         items.append(item)
     db_session.flush()
     complete_item(db_session, items[0].id, "done", now=NOW)
-    assert [i.id for i in pending_items(db_session, limit=1)] == [items[1].id]
-    assert [i.id for i in pending_items(db_session, limit=10)] == [items[1].id, items[2].id]
+    assert [i.id for i in pending_items(db_session, limit=1, kinds=kinds)] == [items[1].id]
+    assert [i.id for i in pending_items(db_session, limit=10, kinds=kinds)] == [items[1].id, items[2].id]
+    assert pending_items(db_session, limit=10, kinds=[QueueKind.INTERVIEW_BRIEF]) == []
     assert [i.id for i in list_queue(db_session)] == [items[2].id, items[1].id, items[0].id]
     assert [i.id for i in list_queue(db_session, state=QueueState.DONE)] == [items[0].id]
 
@@ -124,3 +137,25 @@ def test_complete_non_pending_item_raises(db_session):
         fail_item(db_session, item.id, "again", now=NOW)
     with pytest.raises(QueueItemNotFoundError):
         complete_item(db_session, 999999, "x", now=NOW)
+
+
+def test_interview_brief_one_pending_per_application(db_session):
+    stripe = _stripe(db_session)
+    other = create_application(db_session, ApplicationCreate(company="Other", role_title="PM Intern"))
+    item = enqueue_interview_brief(db_session, stripe)
+    assert item.kind == QueueKind.INTERVIEW_BRIEF and item.state == QueueState.PENDING
+    assert item.application_id == stripe.id and item.target_count == 1
+    assert item.request_text == "Stripe — SWE Intern — https://stripe.com/jobs/1"
+    with pytest.raises(AlreadyQueuedError):
+        enqueue_interview_brief(db_session, stripe)
+    assert enqueue_interview_brief(db_session, other).request_text == "Other — PM Intern"
+    fail_item(db_session, item.id, "nothing public", now=NOW)
+    again = enqueue_interview_brief(db_session, stripe)
+    complete_item(db_session, again.id, "brief saved", now=NOW)
+    assert enqueue_interview_brief(db_session, stripe).state == QueueState.PENDING
+
+
+def test_pending_company_contacts_item_does_not_block_a_brief(db_session):
+    stripe = _stripe(db_session)
+    enqueue_company_contacts(db_session, stripe)
+    assert enqueue_interview_brief(db_session, stripe).kind == QueueKind.INTERVIEW_BRIEF
