@@ -92,6 +92,18 @@ The **Interview Prep** page tracks every interview round of every application an
 - **Dashboard:** the **Upcoming interviews** widget lists rounds in the next 14 days with their checklist progress, and any thank-you that is due.
 - The backup sheet gains an **Interviews** tab (company, role, round, time, state, outcome, thank-you sent). Prep notes and reflections are not exported.
 
+## Gmail sync (optional)
+
+Gmail sync watches your mail for application updates so you don't have to move cards by hand. It is off until you turn it on; [`docs/deploy/server-setup.md`](docs/deploy/server-setup.md) step 8 ("Turn on Gmail sync") walks through the Google side.
+
+- **Connect:** Settings → Gmail → **Connect Gmail** asks Google for read-only mail access (`gmail.readonly`), separately from the Drive permissions. Then tick **Sync Gmail**. The `gmail-sync` service checks every 30 minutes by default (15–240), looking back 30 days the first time (1–90); **Sync now** checks at once.
+- **What it reads:** the headers and Gmail's short preview of recent Inbox and Sent mail (not Promotions, Social or chats). Bodies are never downloaded, nothing is sent, and no email data goes to the Claude job.
+- **What it finds:** confirmations, rejections, interview invitations, online assessments and offers from companies you track (directly or through applicant-tracking systems like Greenhouse or Lever), replies from contacts you emailed, emails you sent to contacts, and application emails from companies you don't track yet.
+- **Email updates** (menu, with a count) lists each one with the sender, subject, preview and what it would do: mark applied, move to Rejected or Offer, add an interview round (the round form opens prefilled), add an assessment note with a 7-day follow-up, mark a contact replied or sent, or add a new application (edit the company and role first). **Accept** applies it through the same steps as clicking in the app; **Dismiss** drops it; **Open in Gmail** shows the thread. The Dashboard's Needs Attention widget and each application's panel show them too.
+- **Auto-apply** (off by default) applies confirmations and contact replies/sent mail without asking; rejections, interviews, assessments and offers always wait for you.
+- **What it keeps:** only for emails it suggests an update from (mail about an application or contact you track, and applicant-tracking-system mail from a company you don't track yet), the Gmail IDs, date, sender, subject and preview (300 characters each). Unmatched mail leaves no trace, and decided updates are deleted after 90 days.
+- Changing your Google password disconnects the whole Google connection, not just Gmail: Drive backups, Essays and Gmail sync share one sign-in (Google's rule for mail access). If you use Gmail sync, reconnect with **Reconnect Gmail** in Settings, which brings back all three. **Connect Google Docs** on the Essays page reconnects only Drive and Docs and leaves Gmail off (Settings then says "Gmail permission missing").
+
 ## Backups
 
 The database lives in the `pgdata` Docker volume. The `db-backup` service backs it up by itself:
@@ -111,7 +123,7 @@ Keep a copy of `.env` in a password manager (see below): a dump alone is not eno
 1. On the old server, in the repo folder, stop the app so nothing changes after the last backup, then take it:
 
    ```
-   docker compose stop backend caddy job-scan sheet-sync
+   docker compose stop backend caddy job-scan sheet-sync gmail-sync
    docker compose run --rm db-backup python -m app.jobs.db_backup --once --label manual
    ```
 

@@ -11,6 +11,10 @@ MAX_LIST_URL_LENGTH = 500
 # Ranking preference lists (Phase 5 spec §3).
 MAX_RANKING_ITEM_LENGTH = 60
 MAX_CLAUDE_DAILY_LIMIT = 150
+# Gmail sync (Phase 6 spec §3).
+MIN_GMAIL_SYNC_MINUTES = 15
+MAX_GMAIL_SYNC_MINUTES = 240
+MAX_GMAIL_LOOKBACK_DAYS = 90
 
 
 def _normalize(items: list[str], *, max_items: int, max_length: int) -> list[str]:
@@ -84,6 +88,15 @@ class SettingsOut(BaseModel):
     ranking_dealbreaker_keywords: list[str]
     ranking_claude_daily_limit: int
     ranking_updated_at: datetime | None
+    gmail_sync_enabled: bool
+    gmail_sync_minutes: int
+    gmail_lookback_days: int
+    gmail_auto_apply: bool
+    gmail_last_sync_at: datetime | None
+    gmail_last_error: str | None
+    # Computed from the stored Google token, not settings columns.
+    google_connected: bool = False
+    gmail_granted: bool = False
 
 
 class SettingsUpdate(BaseModel):
@@ -109,6 +122,10 @@ class SettingsUpdate(BaseModel):
     ranking_avoid_companies: RankingList | None = None
     ranking_dealbreaker_keywords: RankingList | None = None
     ranking_claude_daily_limit: int | None = Field(default=None, ge=0, le=MAX_CLAUDE_DAILY_LIMIT)
+    gmail_sync_enabled: bool | None = None
+    gmail_sync_minutes: int | None = Field(default=None, ge=MIN_GMAIL_SYNC_MINUTES, le=MAX_GMAIL_SYNC_MINUTES)
+    gmail_lookback_days: int | None = Field(default=None, ge=1, le=MAX_GMAIL_LOOKBACK_DAYS)
+    gmail_auto_apply: bool | None = None
 
     @model_validator(mode="after")
     def _reject_explicit_nulls(self) -> "SettingsUpdate":

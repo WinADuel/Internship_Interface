@@ -130,3 +130,16 @@ class PrepBriefNotFoundError(Exception):
 
 class QueueItemWrongKindError(Exception):
     """The research queue item is of a different kind than the delivery."""
+
+
+class EmailSuggestionNotFoundError(Exception):
+    """No email suggestion exists with the requested id."""
+
+
+class SuggestionNotPendingError(Exception):
+    """The email suggestion was already accepted, dismissed or marked stale."""
+
+
+class SuggestionStaleError(Exception):
+    """The email suggestion's action no longer applies (the status already
+    moved, the contact already replied); it has been marked stale."""

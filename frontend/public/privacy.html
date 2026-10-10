@@ -26,7 +26,11 @@
       contacts (names, organizations, work emails and public profile links), outreach email
       drafts, essay prompts and saved job postings. It also stores the owner's login (a
       username, a hashed password and an encrypted two-factor secret) and an encrypted Google
-      access token. All of this is kept in a database on the owner's own server.
+      access token. If the owner turns on Gmail sync, it also stores a few details of the emails
+      it suggests an update from: mail about a tracked application or from a tracked contact,
+      mail the owner sent to a tracked contact, and job-application mail from a company the
+      owner doesn't track yet (see below). All of this is kept in a database on the owner's own
+      server.
     </p>
 
     <h2>Google permissions and why</h2>
@@ -40,6 +44,47 @@
         <code>drive.file</code>: to create and update files the app made itself, namely a backup
         Google Sheet of the tracker and encrypted backup copies of the database in a Drive folder.
         This permission gives no access to any other Drive file.
+      </li>
+      <li>
+        <code>gmail.readonly</code> (optional, off by default): to notice application updates
+        (confirmations, interview invitations, assessments, offers and rejections), replies from
+        tracked contacts, emails the owner sent to a tracked contact, and applications to
+        companies not yet in the tracker, and suggest the matching change. It is asked for
+        only when the owner presses <strong>Connect Gmail</strong> in Settings, separately from
+        the Drive permissions.
+      </li>
+    </ul>
+
+    <h2>Gmail sync</h2>
+    <ul>
+      <li>
+        <strong>What is read:</strong> for recent mail in the Inbox and Sent folders (not
+        Promotions, Social or chats), the sender, recipients, subject and date headers and the
+        short preview text Gmail itself provides. Message bodies and attachments are never
+        downloaded.
+      </li>
+      <li>
+        <strong>What is kept:</strong> only for an email the app suggests an update from: its
+        Gmail message and thread IDs, date, sender name and address, subject and preview (each
+        shortened to 300 characters). Those are emails that match a tracked application or
+        contact (including mail the owner sent to a tracked contact), and confirmations or
+        invitations sent through a job-application system (such as Greenhouse or Lever) by a
+        company the owner doesn't track yet, so it can be offered as a new application.
+        Mail that matches nothing is not stored; the app keeps only the date up to which it
+        has checked. Decided suggestions are deleted after 90 days.
+      </li>
+      <li>
+        <strong>What it is used for:</strong> showing the owner suggested updates on the
+        Email updates page, which the owner accepts or dismisses: a change to a tracked
+        application, marking a contact as replied, marking a contact as emailed (from the
+        recipients of mail the owner sent), or adding a company not yet tracked. The app never
+        sends, changes or deletes email.
+      </li>
+      <li>
+        <strong>How to turn it off:</strong> untick <strong>Sync Gmail</strong> in Settings to
+        stop reading mail, and remove the app's access at
+        <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>
+        to withdraw the permission entirely.
       </li>
     </ul>
     <p>
@@ -56,14 +101,14 @@
     <p>
       The site owner's own scheduled Claude assistant reads the research queue, outreach
       profile and contacts through a token the owner can revoke, to draft outreach emails. It
-      never reads Google data.
+      never reads Google data, and no email data is ever given to it.
     </p>
 
     <h2>Revoking access</h2>
     <p>
       Google access can be removed at any time at
       <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.
-      The app then stops reading essays and stops updating the backup files.
+      The app then stops reading essays and email and stops updating the backup files.
     </p>
 
     <h2>Deleting data</h2>

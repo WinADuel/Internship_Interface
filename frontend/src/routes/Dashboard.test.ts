@@ -18,6 +18,7 @@ vi.mock("../lib/api/discovery", () => ({
   listPostings: vi.fn().mockResolvedValue({ items: [], total: 0 }),
 }));
 vi.mock("../lib/api/interviews", () => ({ listRounds: vi.fn().mockResolvedValue([]) }));
+vi.mock("../lib/api/email", () => ({ getEmailStatus: vi.fn().mockResolvedValue({ pendingCount: 0 }) }));
 vi.mock("../lib/api/applications", async (orig) => ({
   ...(await orig<typeof import("../lib/api/applications")>()),
   getRecentActivity: vi.fn().mockResolvedValue([]),

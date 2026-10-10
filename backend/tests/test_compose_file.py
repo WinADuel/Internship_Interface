@@ -65,6 +65,7 @@ def test_backend_serves_on_the_port_the_healthcheck_probes():
         ("sheet-sync", "db", "service_healthy"),
         ("job-scan", "db", "service_healthy"),
         ("db-backup", "db", "service_healthy"),
+        ("gmail-sync", "db", "service_healthy"),
         ("caddy", "backend", "service_healthy"),
     ],
 )
@@ -130,3 +131,22 @@ def test_backend_writes_manual_backups_to_the_same_folder(services):
 def test_backups_folder_is_git_ignored():
     gitignore = (COMPOSE_PATH.parent / ".gitignore").read_text().splitlines()
     assert "/backups/" in gitignore
+
+
+def test_gmail_sync_service_runs_the_gmail_job(services):
+    service = services["gmail-sync"]
+    assert service["build"] == "./backend"
+    assert service["restart"] == "unless-stopped"
+    assert service["env_file"] == ".env"
+    assert service["command"] == "python -m app.jobs.gmail_sync"
+    assert service["environment"] == {"TZ": "${TZ:-UTC}"}
+    # It needs no files: nothing it reads is written to disk.
+    assert "volumes" not in service
+
+
+def test_restore_stops_every_service_that_uses_the_database(services):
+    # ops/server/lib.sh APP_SERVICES: everything but the database itself.
+    lib = (COMPOSE_PATH.parent / "ops" / "server" / "lib.sh").read_text()
+    line = next(x for x in lib.splitlines() if x.startswith("APP_SERVICES=("))
+    listed = line.removeprefix("APP_SERVICES=(").removesuffix(")").split()
+    assert sorted(listed) == sorted(set(services) - {"db"})

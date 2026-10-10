@@ -1,6 +1,7 @@
 import type { Application } from "../types/application";
 import type { Contact } from "../types/contact";
 import type { Posting, ScanStatus, WatchCompany } from "../types/discovery";
+import type { EmailStatus, EmailSuggestion } from "../types/email";
 import type {
   InterviewRound,
   InterviewRoundDetail,
@@ -187,6 +188,44 @@ export function fakeBrief(overrides: Partial<PrepBrief> = {}): PrepBrief {
     sources: [],
     createdAt: "2026-10-05T00:00:00Z",
     updatedAt: "2026-10-05T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function fakeSuggestion(overrides: Partial<EmailSuggestion> = {}): EmailSuggestion {
+  return {
+    id: 1,
+    gmailMessageId: "msg-1",
+    gmailThreadId: "thread-1",
+    gmailUrl: "https://mail.google.com/mail/u/0/#all/thread-1",
+    receivedAt: "2026-10-08T15:00:00Z",
+    direction: "inbound",
+    fromName: "Acme Recruiting",
+    fromEmail: "jobs@acme.com",
+    subject: "Thank you for applying to Acme",
+    snippet: "We received your application for SWE Intern.",
+    kind: "confirmation",
+    state: "pending",
+    applicationId: 1,
+    contactId: null,
+    proposedCompany: null,
+    proposedRole: null,
+    roundKind: null,
+    application: { id: 1, company: "Acme", roleTitle: "SWE Intern", status: "wishlist", archived: false },
+    contact: null,
+    createdAt: "2026-10-08T15:05:00Z",
+    decidedAt: null,
+    ...overrides,
+  };
+}
+
+export function fakeEmailStatus(overrides: Partial<EmailStatus> = {}): EmailStatus {
+  return {
+    gmailGranted: true,
+    gmailSyncEnabled: true,
+    gmailLastSyncAt: null,
+    gmailLastError: null,
+    pendingCount: 0,
     ...overrides,
   };
 }

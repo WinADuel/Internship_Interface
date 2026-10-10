@@ -18,7 +18,9 @@ vi.mock("../lib/api/applications", () => ({ getStatusHistory: vi.fn().mockResolv
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../lib/api/interviews", () => ({ listRounds: vi.fn().mockResolvedValue([]) }));
 vi.mock("../lib/api/contacts", () => ({ listContacts: vi.fn().mockResolvedValue([]) }));
+vi.mock("../lib/api/email", () => ({ listSuggestions: vi.fn().mockResolvedValue([]) }));
 
+import { listSuggestions } from "../lib/api/email";
 import Applications from "./Applications.svelte";
 
 describe("Applications route", () => {
@@ -54,5 +56,17 @@ describe("Applications route", () => {
       new Date("2026-10-12T15:00:00Z").toLocaleString(),
     );
     expect(await screen.findByText("No interview rounds yet.")).toBeInTheDocument();
+  });
+
+  it("lists the application's emails in the panel, between Interviews and Contacts", async () => {
+    render(Applications);
+    await fireEvent.click(screen.getByText("Initech"));
+    const interviews = screen.getByRole("region", { name: "Interviews" });
+    const email = screen.getByRole("region", { name: "Email" });
+    const contacts = screen.getByRole("region", { name: "Contacts" });
+    expect(interviews.compareDocumentPosition(email) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(email.compareDocumentPosition(contacts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await screen.findByText("No emails matched to this application yet.")).toBeInTheDocument();
+    expect(listSuggestions).toHaveBeenCalledWith({ state: "all", applicationId: 3, limit: 50 });
   });
 });

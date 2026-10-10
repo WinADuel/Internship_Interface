@@ -20,15 +20,27 @@
     round = null,
     applicationId = null,
     applications = [],
+    defaultKind = "other",
+    submitLabel,
     save,
+    create,
     onsaved,
     oncancel,
   }: {
     round?: InterviewRound | null;
     applicationId?: number | null;
     applications?: Application[];
+    /** The kind a new round starts with. */
+    defaultKind?: InterviewKind;
+    submitLabel?: string;
     /** Sends an edit instead of a plain PATCH, for a parent that orders its round writes. */
     save?: (fields: Partial<InterviewRoundFields>) => Promise<InterviewRoundDetail>;
+    /**
+     * Sends a new round's fields somewhere other than POST /api/interviews (an
+     * email suggestion's Accept). The parent handles the outcome; `onsaved`
+     * isn't called. A thrown error is shown as a toast and the form stays.
+     */
+    create?: (fields: Partial<InterviewRoundFields>) => Promise<void>;
     onsaved?: (round: InterviewRoundDetail) => void;
     oncancel?: () => void;
   } = $props();
@@ -40,7 +52,8 @@
   const fixedApplicationId = initial?.applicationId ?? applicationId;
 
   let chosenApplication = $state<number | null>(null);
-  let kind = $state<InterviewKind>(initial?.kind ?? "other");
+  /* svelte-ignore state_referenced_locally */
+  let kind = $state<InterviewKind>(initial?.kind ?? defaultKind);
   let title = $state(initial?.title ?? "");
   let when = $state(isoToLocalInput(initial?.scheduledAt ?? null));
   // A number input binds to a number, or null when blank.
@@ -85,6 +98,10 @@
     };
     saving = true;
     try {
+      if (!initial && create) {
+        await create(fields);
+        return;
+      }
       const saved = initial
         ? await (save ? save(fields) : updateRound(initial.id, fields))
         : await createRound({ applicationId: appId, ...fields });
@@ -131,7 +148,7 @@
   <label>Interviewers <input bind:value={interviewers} maxlength="500" placeholder="Names, if you know them" autocomplete="off" /></label>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="actions">
-    <button type="submit" disabled={saving}>{initial ? "Save round" : "Add round"}</button>
+    <button type="submit" disabled={saving}>{submitLabel ?? (initial ? "Save round" : "Add round")}</button>
     <button type="button" onclick={() => oncancel?.()}>Cancel</button>
   </div>
 </form>

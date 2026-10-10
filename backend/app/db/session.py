@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 
-engine = create_engine(settings.database_url)
+# Errors never quote SQL parameters: a failed write can carry email text,
+# contacts' details or tokens, and the message ends up in logs.
+engine = create_engine(settings.database_url, hide_parameters=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

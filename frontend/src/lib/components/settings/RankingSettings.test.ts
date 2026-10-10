@@ -41,6 +41,14 @@ const settings: AppSettings = {
   rankingDealbreakerKeywords: ["unpaid"],
   rankingClaudeDailyLimit: 40,
   rankingUpdatedAt: "2026-10-09T08:00:00Z",
+  gmailSyncEnabled: false,
+  gmailSyncMinutes: 30,
+  gmailLookbackDays: 30,
+  gmailAutoApply: false,
+  gmailLastSyncAt: null,
+  gmailLastError: null,
+  googleConnected: false,
+  gmailGranted: false,
 };
 
 const PREFS = {

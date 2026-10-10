@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeContact } from "../../testing/fixtures";
+import { fakeApplication, fakeContact, fakeEmailStatus, fakeSuggestion } from "../../testing/fixtures";
 
 vi.mock("../../api/contacts", () => ({
   getNeedsAttention: vi.fn(),
@@ -12,6 +12,8 @@ vi.mock("../../api/contacts", () => ({
   updateContact: vi.fn(),
 }));
 vi.mock("../../stores/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../api/email", () => ({ getEmailStatus: vi.fn(), acceptSuggestion: vi.fn(), dismissSuggestion: vi.fn() }));
+vi.mock("../../api/applications", () => ({ getApplication: vi.fn() }));
 
 import {
   applyContactAction,
@@ -20,8 +22,12 @@ import {
   snoozeContact,
   undoContactAction,
 } from "../../api/contacts";
+import { getApplication } from "../../api/applications";
+import { acceptSuggestion, dismissSuggestion, getEmailStatus } from "../../api/email";
+import { emailStatus } from "../../stores/email";
 import { showToast } from "../../stores/toast";
 import { undoDeadlines } from "../../stores/contacts";
+import SuggestionCard from "../email/SuggestionCard.svelte";
 import NeedsAttention from "./NeedsAttention.svelte";
 
 beforeEach(() => {
@@ -32,9 +38,46 @@ beforeEach(() => {
   vi.mocked(undoContactAction).mockReset();
   vi.mocked(showToast).mockReset();
   undoDeadlines.set({});
+  emailStatus.set(null);
+  vi.mocked(getEmailStatus).mockReset().mockResolvedValue(fakeEmailStatus());
 });
 
 describe("NeedsAttention", () => {
+  it("links to the email updates waiting for review", async () => {
+    vi.mocked(getNeedsAttention).mockResolvedValue([]);
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 3 }));
+    render(NeedsAttention);
+    const link = await screen.findByRole("link", { name: "3 email updates to review" });
+    expect(link.getAttribute("href")).toBe("#/email");
+    expect(screen.queryByText("Nothing needs attention.")).toBeNull();
+    emailStatus.set(fakeEmailStatus({ pendingCount: 1 }));
+    expect(await screen.findByRole("link", { name: "1 email update to review" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Accept", () => vi.mocked(acceptSuggestion).mockResolvedValue(fakeSuggestion({ state: "accepted" }))],
+    ["Dismiss", () => vi.mocked(dismissSuggestion).mockResolvedValue(fakeSuggestion({ state: "dismissed" }))],
+  ])("the email row goes down after %s on an email card", async (button, decide) => {
+    decide();
+    vi.mocked(getNeedsAttention).mockResolvedValue([]);
+    vi.mocked(getApplication).mockResolvedValue(fakeApplication({ id: 1 }));
+    vi.mocked(getEmailStatus).mockResolvedValueOnce(fakeEmailStatus({ pendingCount: 2 }));
+    render(NeedsAttention);
+    await screen.findByRole("link", { name: "2 email updates to review" });
+    render(SuggestionCard, { suggestion: fakeSuggestion() });
+    vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 1 }));
+    await fireEvent.click(screen.getByRole("button", { name: button }));
+    expect(await screen.findByRole("link", { name: "1 email update to review" })).toBeInTheDocument();
+  });
+
+  it("shows no email row when nothing is pending", async () => {
+    vi.mocked(getNeedsAttention).mockResolvedValue([]);
+    render(NeedsAttention);
+    expect(await screen.findByText("Nothing needs attention.")).toBeInTheDocument();
+    expect(getEmailStatus).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("link", { name: /email update/ })).toBeNull();
+  });
+
   it("offers No response and Wait longer for gone-quiet contacts", async () => {
     vi.mocked(getNeedsAttention)
       .mockResolvedValueOnce([fakeContact({ id: 7, status: "followed_up", nudge: "gone_quiet" })])

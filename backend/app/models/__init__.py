@@ -16,3 +16,4 @@ from app.models.posting import Posting  # noqa: F401
 from app.models.story import Story  # noqa: F401
 from app.models.interview import InterviewRound  # noqa: F401
 from app.models.prep_brief import PrepBrief  # noqa: F401
+from app.models.email_suggestion import EmailSuggestion  # noqa: F401
