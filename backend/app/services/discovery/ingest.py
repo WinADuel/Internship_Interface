@@ -6,10 +6,12 @@ row already covers (same `url_key` anywhere, or the same company and title
 from a different source in the last 14 days), and, for a complete result,
 closes the source's postings that are no longer listed. A failed source
 changes nothing. Existing rows never have their `state`, `application_id`
-or `claude_*` fields touched here.
+or `claude_*` fields touched here. Every inserted or updated row gets its
+local match score (Phase 5 spec §4).
 
 Work is done in bulk: a handful of targeted queries per call, `add_all` for
-inserts, one UPDATE for closing, and one commit.
+inserts, one UPDATE for closing, and one commit. Each of these writers first
+takes the postings write lock (`ranking.lock_scores`).
 """
 
 from collections.abc import Iterable, Iterator, Sequence
@@ -22,8 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.models.posting import Posting, PostingSource, PostingState
 from app.services.discovery.parsers import PostingIn
+from app.services.discovery.ranking import Ranker, apply_score, lock_scores, prefs_from_settings
 from app.services.discovery.sources import SourceResult
 from app.services.discovery.urls import normalize_url
+from app.services.settings_service import get_settings
 
 BOARD_SOURCES = frozenset(
     {
@@ -166,15 +170,25 @@ def _close_missing(
     return len(ids)
 
 
+def ranker_from_settings(db: Session) -> Ranker:
+    return Ranker(prefs_from_settings(get_settings(db)))
+
+
 def ingest(
     db: Session,
     result: SourceResult,
     now: datetime,
     watch_company_id: int | None = None,
+    ranker: Ranker | None = None,
 ) -> IngestStats:
-    """Upsert one source's result. See the module docstring for the rules."""
+    """Upsert one source's result. See the module docstring for the rules.
+    `ranker` scores the rows (default: the saved ranking preferences)."""
     if result.error is not None:
         return IngestStats()
+    # Serialised with re-scoring; the default preferences are read after it.
+    lock_scores(db)
+    if ranker is None:
+        ranker = ranker_from_settings(db)
 
     source = result.source
     if source is None and result.postings:
@@ -216,6 +230,7 @@ def ingest(
         updated += 1
         if _apply_update(row, posting, url_key, now, watch_company_id):
             closed += 1
+        apply_score(row, ranker, now)
 
     # 3. Insert new rows that nothing already covers.
     since = now - DUPLICATE_WINDOW
@@ -258,6 +273,9 @@ def ingest(
             )
         )
 
+    for row in inserts:
+        apply_score(row, ranker, now)
+
     # 4. Close what a complete listing no longer shows.
     if result.complete and source is not None:
         db.flush()
@@ -279,6 +297,7 @@ def refresh_unchanged(db: Session, result: SourceResult, now: datetime) -> int:
     closing: custom LIST sources by key prefix. Returns the rows touched."""
     if result.source is None:
         return 0
+    lock_scores(db)
     conditions = _scope(result.source, result.key_prefix)
     latest = db.scalar(select(func.max(Posting.last_seen_at)).where(*conditions))
     if latest is None:
@@ -298,6 +317,7 @@ def housekeep(db: Session, now: datetime) -> int:
     (`last_seen_at`). Closed postings are kept while their source still
     lists them (inactive rows count as seen), as de-duplication tombstones;
     saved and applied postings are never deleted. Returns the number deleted."""
+    lock_scores(db)
     deleted = db.execute(
         delete(Posting).where(
             Posting.state.in_([PostingState.NEW, PostingState.DISMISSED]),

@@ -83,6 +83,22 @@ class AppSettings(Base):
     last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_scan_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Inbox ranking preferences (Phase 5 spec §3). `ranking_updated_at` moves
+    # whenever a preference list changes, which makes older Claude scores stale.
+    ranking_role_keywords: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    ranking_skill_keywords: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    ranking_preferred_locations: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    ranking_preferred_companies: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    ranking_avoid_companies: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    ranking_dealbreaker_keywords: Mapped[list[str]] = mapped_column(ARRAY(Text), **_text_array(()))
+    ranking_claude_daily_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=40, server_default="40"
+    )
+    ranking_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The last full re-score of the Inbox and Saved postings (a preferences
+    # change, or the daily pass that ages freshness points). Server-owned.
+    last_rescore_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Database backups (Phase 3 spec §4.4): last success and last error of the
     # local dump and of the off-site copy. An error is cleared by the next success.
     last_backup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

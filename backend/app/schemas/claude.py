@@ -6,13 +6,17 @@ string is stripped and length-capped and every list is size-capped."""
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 from app.models.contact import EmailConfidence
 from app.models.research_queue import QueueKind
+from app.services.discovery.parsers import clean_text
 
 MAX_BATCH = 25
 MAX_SOURCES = 20
+# Inbox ranking (Phase 5 spec §5).
+MAX_SCORES = 150
+MAX_CLAUDE_NOTE = 200
 MAX_BRIEF_LENGTH = 12_000
 
 
@@ -117,3 +121,82 @@ class WorkOut(BaseModel):
     outreach_profile: str
     known_contacts: list[KnownContact]
     followups_needed: list[FollowupNeeded]
+
+
+
+# --- Inbox ranking (Phase 5 spec §5) ------------------------------------------
+
+
+def _note(value: str) -> str:
+    """One line of plain text: control characters dropped, whitespace runs
+    collapsed, capped at MAX_CLAUDE_NOTE (a longer note is cut, not refused,
+    so one wordy note doesn't lose the whole day's scores)."""
+    return clean_text(value, MAX_CLAUDE_NOTE)
+
+
+def _no_note(value: object) -> object:
+    # `"note": null` means no note, as null does for the other optional fields.
+    return "" if value is None else value
+
+
+class PostingScoreIn(_ClaudeIn):
+    posting_id: int
+    score: int = Field(ge=0, le=100)
+    note: Annotated[
+        str, BeforeValidator(_no_note), Field(max_length=MAX_CLAUDE_NOTE * 10), AfterValidator(_note)
+    ] = ""
+
+
+class PostingScoresIn(_ClaudeIn):
+    scores: list[PostingScoreIn] = Field(max_length=MAX_SCORES)
+    # `preferences_as_of` from the GET these scores were made from, echoed
+    # back. Older than the current preferences means they changed while
+    # Claude was scoring, so the scores are stored stale. Left out (an older
+    # routine), the scores count as made against the current preferences.
+    preferences_as_of: datetime | None = None
+
+
+class ScoresResultOut(BaseModel):
+    updated: int
+    skipped: int
+
+
+class RankingPreferencesOut(BaseModel):
+    role_keywords: list[str]
+    skill_keywords: list[str]
+    preferred_locations: list[str]
+    preferred_companies: list[str]
+    avoid_companies: list[str]
+    dealbreaker_keywords: list[str]
+
+
+class RankingExamplesOut(BaseModel):
+    """`Company — Title` of the most recent saves (applied postings included)
+    and dismissals."""
+
+    saved: list[str]
+    dismissed: list[str]
+
+
+class RankingPostingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    company: str
+    title: str
+    locations: list[str]
+    url: str
+    category: str | None
+    terms: list[str]
+    date_posted: datetime | None
+    local_score: int | None
+
+
+class RankingWorkOut(BaseModel):
+    profile: str
+    preferences: RankingPreferencesOut
+    # When the preferences last changed (null: never), for the routine to
+    # echo back with its scores.
+    preferences_as_of: datetime | None
+    examples: RankingExamplesOut
+    postings: list[RankingPostingOut]

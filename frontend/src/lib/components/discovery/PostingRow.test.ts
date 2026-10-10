@@ -102,3 +102,91 @@ describe("PostingRow", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 });
+
+describe("PostingRow ranking", () => {
+  function badge(container: HTMLElement): HTMLElement | null {
+    return container.querySelector(".score");
+  }
+
+  it("shows the app's match score when Claude hasn't scored the posting", () => {
+    const { container } = render(PostingRow, {
+      posting: fakePosting({ localScore: 64, localReasons: ["Title matches 'swe'"] }),
+      view: "inbox",
+      onaction: vi.fn(),
+    });
+    expect(badge(container)?.textContent).toContain("64");
+    expect(screen.getByText("Match score 64 of 100")).toBeInTheDocument();
+    expect(container.querySelector(".c-mark")).toBeNull();
+  });
+
+  it("shows Claude's score with a C mark when present, and marks a Top pick", () => {
+    const { container } = render(PostingRow, {
+      posting: fakePosting({ localScore: 40, claudeScore: 82, claudeNote: "Strong fit" }),
+      view: "inbox",
+      onaction: vi.fn(),
+    });
+    expect(screen.getByText("Claude score 82 of 100")).toBeInTheDocument();
+    expect(container.querySelector(".c-mark")?.textContent).toBe("C");
+    expect(badge(container)?.classList.contains("top")).toBe(true);
+    expect(badge(container)?.classList.contains("stale")).toBe(false);
+    expect(screen.queryByText("preferences changed since")).toBeNull();
+  });
+
+  it("greys a stale Claude score and says the preferences changed since", () => {
+    const { container } = render(PostingRow, {
+      posting: fakePosting({ localScore: 40, claudeScore: 82, claudeStale: true }),
+      view: "inbox",
+      onaction: vi.fn(),
+    });
+    expect(badge(container)?.classList.contains("stale")).toBe(true);
+    expect(badge(container)?.classList.contains("top")).toBe(false);
+    expect(screen.getByText("preferences changed since")).toBeInTheDocument();
+  });
+
+  it("Why? lists the local reasons and the Claude note as text", async () => {
+    const evil = "<img src=x onerror=alert(1)>";
+    const { container } = render(PostingRow, {
+      posting: fakePosting({
+        localScore: 55,
+        localReasons: ["Title matches 'swe'", "New York", "Posted 2 days ago"],
+        claudeScore: 30,
+        claudeNote: evil,
+        claudeStale: true,
+      }),
+      view: "inbox",
+      onaction: vi.fn(),
+    });
+    const why = container.querySelector("details.why") as HTMLDetailsElement;
+    expect(why.open).toBe(false);
+    await fireEvent.click(screen.getByText("Why?"));
+    expect(screen.getByText("Match score 55")).toBeInTheDocument();
+    expect([...why.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "Title matches 'swe'",
+      "New York",
+      "Posted 2 days ago",
+    ]);
+    expect(why.textContent).toContain("Claude score 30");
+    expect(why.textContent).toContain("(preferences changed since)");
+    expect(screen.getByText(evil)).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("labels each Why? with its posting", () => {
+    render(PostingRow, { posting: fakePosting({ localScore: 50 }), view: "saved", onaction: vi.fn() });
+    expect(screen.getByLabelText("Why? Stripe – SWE Intern")).toBeInTheDocument();
+  });
+
+  it("shows no score or Why? without a score, or in Dismissed", () => {
+    const { container, unmount } = render(PostingRow, { posting: fakePosting(), view: "inbox", onaction: vi.fn() });
+    expect(badge(container)).toBeNull();
+    expect(screen.queryByText("Why?")).toBeNull();
+    unmount();
+    const dismissed = render(PostingRow, {
+      posting: fakePosting({ state: "dismissed", localScore: 80, claudeScore: 90 }),
+      view: "dismissed",
+      onaction: vi.fn(),
+    });
+    expect(badge(dismissed.container)).toBeNull();
+    expect(screen.queryByText("Why?")).toBeNull();
+  });
+});

@@ -1,5 +1,6 @@
 """Query-time discovery filters, the Inbox/Saved/Dismissed listings and the
-live match count (Phase 2 spec §4 and §7, plan Task 6).
+live match count (Phase 2 spec §4 and §7, plan Task 6), and the Inbox's
+Best-match order and Top picks (Phase 5 spec §6).
 
 Filters are applied when postings are listed, never when they are stored, so
 changing a filter re-sorts existing postings at once. Every filter list is
@@ -10,6 +11,7 @@ they reach a regular expression and locations before they reach ILIKE.
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, fields
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import ColumnElement, and_, exists, false, func, or_, select, true
@@ -18,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.models.app_settings import AppSettings
 from app.models.posting import Posting, PostingSource, PostingState
 from app.services.discovery.ingest import BOARD_SOURCES
+from app.services.discovery.ranking import Ranker, RankingPrefs
 
 LIST_SOURCES = frozenset({PostingSource.SIMPLIFY, PostingSource.VANSHB03, PostingSource.LIST})
 # Values the community lists use for "no sponsorship" (spec §4).
@@ -26,6 +29,9 @@ NO_SPONSORSHIP = ("Does Not Offer Sponsorship", "U.S. Citizenship is Required")
 DISMISSED_CAP = 200
 
 View = Literal["inbox", "saved", "dismissed"]
+Sort = Literal["best", "newest"]
+# The Top picks filter: the best available score is at least this (spec §6).
+TOP_PICKS_SCORE = 70
 
 # A four-digit year, on both the Python and the Postgres side.
 _YEAR = "[0-9]{4}"
@@ -180,6 +186,18 @@ def inbox_clause(f: DiscoveryFilters) -> ColumnElement[bool]:
     return and_(true(), *common)
 
 
+def best_score() -> ColumnElement[int]:
+    """Claude's score when present, otherwise the app's (spec §2)."""
+    return func.coalesce(Posting.claude_score, Posting.local_score)
+
+
+def _newest_first() -> tuple:
+    return (
+        func.coalesce(Posting.date_posted, Posting.first_seen_at).desc(),
+        Posting.id.desc(),
+    )
+
+
 def _check_paging(limit: int, offset: int) -> None:
     if limit < 1:
         raise ValueError("limit must be at least 1")
@@ -193,19 +211,28 @@ def list_postings(
     filters: DiscoveryFilters,
     limit: int = 50,
     offset: int = 0,
+    sort: Sort = "best",
+    min_score: int | None = None,
 ) -> tuple[list[Posting], int]:
     """One page of a Discover tab and the tab's total. The Inbox applies
-    `filters`; Saved and Dismissed show every posting in that state (closed
-    ones included) and ignore them. Dismissed is capped at the most recent
-    `DISMISSED_CAP`, and its total is capped too."""
+    `filters`, is ordered by `sort` (Best match: the best available score,
+    then newest; or newest first) and, with `min_score`, keeps postings
+    whose best score is at least that. Saved and Dismissed show every
+    posting in that state (closed ones included), newest change first, and
+    ignore filters, sort and `min_score`. Dismissed is capped at the most
+    recent `DISMISSED_CAP`, and its total is capped too. Every order ends
+    with the id, so paging is stable."""
     _check_paging(limit, offset)
     if view == "inbox":
         where = inbox_clause(filters)
-        order = (
-            Posting.claude_score.desc().nulls_last(),
-            func.coalesce(Posting.date_posted, Posting.first_seen_at).desc(),
-            Posting.id.desc(),
-        )
+        if min_score is not None:
+            where = and_(where, best_score() >= min_score)
+        if sort == "best":
+            order = (best_score().desc().nulls_last(), *_newest_first())
+        elif sort == "newest":
+            order = _newest_first()
+        else:
+            raise ValueError(f"unknown sort: {sort!r}")
     elif view in ("saved", "dismissed"):
         state = PostingState.SAVED if view == "saved" else PostingState.DISMISSED
         where = Posting.state == state
@@ -230,3 +257,34 @@ def match_count(db: Session, filters: DiscoveryFilters) -> int:
     """How many postings the Inbox would show with `filters` (which need not
     be saved): powers the live count in Settings → Job discovery."""
     return db.scalar(select(func.count()).select_from(Posting).where(inbox_clause(filters))) or 0
+
+
+def top_picks_count(db: Session, filters: DiscoveryFilters) -> int:
+    """How many Inbox postings are Top picks (best score >= TOP_PICKS_SCORE)."""
+    where = and_(inbox_clause(filters), best_score() >= TOP_PICKS_SCORE)
+    return db.scalar(select(func.count()).select_from(Posting).where(where)) or 0
+
+
+def top_picks_preview(db: Session, filters: DiscoveryFilters, prefs: RankingPrefs, now: datetime) -> int:
+    """How many Inbox postings would be Top picks with `prefs` (which need
+    not be saved): powers the live count in Settings → Ranking. A Claude
+    score still counts as it is; the others are scored here with `prefs`."""
+    ranker = Ranker(prefs)
+    rows = db.execute(
+        select(
+            Posting.claude_score,
+            Posting.company,
+            Posting.title,
+            Posting.locations,
+            Posting.category,
+            Posting.date_posted,
+            Posting.first_seen_at,
+            Posting.watch_company_id,
+        ).where(inbox_clause(filters))
+    )
+    return sum(
+        1
+        for row in rows
+        if (row.claude_score if row.claude_score is not None else ranker.score(row, now).score)
+        >= TOP_PICKS_SCORE
+    )

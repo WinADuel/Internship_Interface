@@ -10,10 +10,11 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
-from app.models.posting import PostingSource, PostingState
+from app.models.posting import Posting, PostingSource, PostingState
 from app.models.watch_company import WatchAts, WatchCompany
-from app.schemas.settings import KeywordList
+from app.schemas.settings import KeywordList, RankingList
 from app.services.discovery.filters import DiscoveryFilters
+from app.services.discovery.ranking import RankingPrefs
 from app.services.discovery.parsers import (
     MAX_COMPANY,
     MAX_LOCATION,
@@ -139,13 +140,31 @@ class PostingOut(BaseModel):
     state_changed_at: datetime
     application_id: int | None
     watch_company_id: int | None
+    # Ranking (Phase 5 spec §4-§6). `claude_stale`: the preferences changed
+    # after Claude scored this posting.
+    local_score: int | None
+    local_reasons: list[str]
     claude_score: int | None
     claude_note: str | None
+    claude_scored_at: datetime | None
+    claude_stale: bool = False
+
+    @classmethod
+    def build(cls, posting: Posting, ranking_updated_at: datetime | None) -> "PostingOut":
+        out = cls.model_validate(posting)
+        out.claude_stale = (
+            posting.claude_score is not None
+            and ranking_updated_at is not None
+            and (posting.claude_scored_at is None or posting.claude_scored_at < ranking_updated_at)
+        )
+        return out
 
 
 class PostingPage(BaseModel):
     items: list[PostingOut]
     total: int
+    # Inbox only: how many Inbox postings are Top picks (whatever `min_score`).
+    top_picks: int | None = None
 
 
 class DismissAllIn(BaseModel):
@@ -251,3 +270,25 @@ class MatchCountIn(BaseModel):
 
 class MatchCountOut(BaseModel):
     count: int
+
+
+class TopPicksCountIn(BaseModel):
+    """Unsaved ranking preferences, named as in `SettingsUpdate`, for the
+    live Top picks count."""
+
+    ranking_role_keywords: RankingList = []
+    ranking_skill_keywords: RankingList = []
+    ranking_preferred_locations: RankingList = []
+    ranking_preferred_companies: RankingList = []
+    ranking_avoid_companies: RankingList = []
+    ranking_dealbreaker_keywords: RankingList = []
+
+    def to_prefs(self) -> RankingPrefs:
+        return RankingPrefs(
+            role_keywords=self.ranking_role_keywords,
+            skill_keywords=self.ranking_skill_keywords,
+            preferred_locations=self.ranking_preferred_locations,
+            preferred_companies=self.ranking_preferred_companies,
+            avoid_companies=self.ranking_avoid_companies,
+            dealbreaker_keywords=self.ranking_dealbreaker_keywords,
+        )

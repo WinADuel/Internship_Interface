@@ -35,6 +35,14 @@ const settings: AppSettings = {
   discoveryScanHours: 6,
   lastScanAt: null,
   lastScanError: null,
+  rankingRoleKeywords: [],
+  rankingSkillKeywords: [],
+  rankingPreferredLocations: [],
+  rankingPreferredCompanies: [],
+  rankingAvoidCompanies: [],
+  rankingDealbreakerKeywords: [],
+  rankingClaudeDailyLimit: 40,
+  rankingUpdatedAt: null,
 };
 
 const FILTERS = {

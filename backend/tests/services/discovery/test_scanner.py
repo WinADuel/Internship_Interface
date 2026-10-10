@@ -14,6 +14,7 @@ from sqlalchemy import event, select, text
 from app.models.app_settings import DEFAULT_LIST_URLS
 from app.models.posting import Posting, PostingSource, PostingState
 from app.models.watch_company import WatchAts, WatchCompany
+from app.schemas.settings import SettingsUpdate
 from app.services import settings_service
 from app.services.discovery import scanner, sources, watchlist
 from app.services.discovery.http import DiscoveryFetchError, FetchResult
@@ -758,3 +759,202 @@ def test_scan_status_reports_scanning_while_the_lock_is_held_and_leaves_it_held(
     assert scan_status(db_session)["scanning"] is False
     # And scan_status does not leave the lock held either.
     assert try_lock(other_connection)
+
+
+# --- daily re-score (Phase 5 spec §4) ----------------------------------------
+
+
+def _stale_posting(db) -> Posting:
+    """An Inbox posting no source lists, with a score from long ago."""
+    posting = Posting(
+        source=PostingSource.LIST,
+        source_key="https://x.test/list.json:old",
+        company="Old Co",
+        title="Backend Intern",
+        locations=[],
+        url="https://jobs.example.com/old",
+        url_key="https://jobs.example.com/old",
+        terms=[],
+        date_posted=NOW - timedelta(days=2),
+        first_seen_at=NOW - timedelta(days=2),
+        last_seen_at=NOW - timedelta(days=2),
+        state=PostingState.NEW,
+        local_score=99,
+    )
+    db.add(posting)
+    db.commit()
+    return posting
+
+
+def test_a_scan_rescores_every_posting_once_the_last_rescore_is_20_hours_old(db_session):
+    db = db_session
+    s = configure(db, list_urls=())
+    s.ranking_role_keywords = ["backend"]
+    s.last_rescore_at = NOW - timedelta(hours=20)
+    db.commit()
+    posting = _stale_posting(db)
+
+    run_scan(db, FakeDiscoveryHttp({}), now=NOW, pause=Pauses())
+    db.refresh(posting)
+    assert (posting.local_score, posting.local_reasons) == (50, ["Title matches 'backend'", "posted in the last 3 days"])
+    db.refresh(s)
+    assert s.last_rescore_at == NOW
+
+    # 19 hours later: no full pass (ingest still scores what it touches),
+    # even though the UTC day has changed.
+    posting.local_score = 99
+    db.commit()
+    run_scan(db, FakeDiscoveryHttp({}), now=NOW + timedelta(hours=19), pause=Pauses())
+    db.refresh(posting)
+    assert posting.local_score == 99
+    db.refresh(s)
+    assert s.last_rescore_at == NOW
+
+
+def test_the_very_first_scan_rescores_too(db_session):
+    db = db_session
+    configure(db, list_urls=())
+    posting = _stale_posting(db)
+    run_scan(db, FakeDiscoveryHttp({}), now=NOW, pause=Pauses())
+    db.refresh(posting)
+    assert posting.local_score == 50
+
+
+def test_a_failed_rescore_is_not_recorded_and_the_next_scan_retries_it(db_session, monkeypatch):
+    db = db_session
+    s = configure(db, list_urls=())
+    s.ranking_role_keywords = ["backend"]
+    db.commit()
+    posting = _stale_posting(db)
+    real_rescore = scanner.rescore
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(scanner, "rescore", broken)
+    report = run_scan(db, FakeDiscoveryHttp({}), now=NOW, pause=Pauses())
+    assert report.errors == ["Re-scoring: unexpected error (RuntimeError)"]
+    db.refresh(s)
+    assert s.last_rescore_at is None
+    assert s.last_scan_at == NOW  # the scan itself is still recorded
+
+    monkeypatch.setattr(scanner, "rescore", real_rescore)
+    later = NOW + timedelta(hours=1)
+    assert run_scan(db, FakeDiscoveryHttp({}), now=later, pause=Pauses()).errors == []
+    db.refresh(posting)
+    db.refresh(s)
+    assert posting.local_score == 50 and s.last_rescore_at == later
+
+
+def test_a_preference_change_saved_during_a_scan_is_kept_by_the_rest_of_it(db_session):
+    """The user saves new preferences while a scan is between sources: the
+    sources ingested afterwards score with them, and the scan's re-score
+    does not put the old ones back."""
+    db = db_session
+    s = configure(db, list_urls=(SIMPLIFY_URL, VANSHB03_URL))
+    add_company(db, "Acme", WatchAts.GREENHOUSE, "acme")
+    s.ranking_role_keywords = ["software"]
+    db.commit()
+
+    def second_list(call: FakeCall) -> FetchResult:
+        settings_service.update_settings(
+            db, SettingsUpdate(ranking_role_keywords=["backend"]), now=NOW - timedelta(minutes=1)
+        )
+        return json_result([list_row(2) | {"source": "vanshb03"}])
+
+    http = full_http({("GET", VANSHB03_URL): second_list})
+    run_scan(db, http, now=NOW, pause=Pauses())
+
+    rows = postings(db)
+    assert len(rows) == 4  # one per list, two from the board
+    # Every row (the first list's, re-scored by the change; the second
+    # list's and the board's, ingested after it) scores with "backend",
+    # which none of their titles has.
+    assert [r.local_reasons for r in rows if any(x.startswith("Title") for x in r.local_reasons)] == []
+    assert [r.local_score for r in rows] == [0, 0, 18, 18]  # board: watchlist + freshness
+
+
+def test_the_scans_rescore_reads_the_preferences_as_they_are_at_its_end(db_session, monkeypatch):
+    db = db_session
+    s = configure(db, list_urls=())
+    s.ranking_role_keywords = ["software"]
+    db.commit()
+    posting = _stale_posting(db)  # "Backend Intern"
+    real_housekeep = scanner.housekeep
+
+    def housekeep_then_change(session, now):
+        # Preferences committed by another session after the last ingest
+        # (its own re-score is left out here).
+        other = settings_service.get_settings(session)
+        other.ranking_role_keywords = ["backend"]
+        other.ranking_updated_at = now
+        session.commit()
+        return real_housekeep(session, now)
+
+    monkeypatch.setattr(scanner, "housekeep", housekeep_then_change)
+    run_scan(db, FakeDiscoveryHttp({}), now=NOW, pause=Pauses())
+    db.refresh(posting)
+    assert posting.local_reasons[0] == "Title matches 'backend'"
+
+
+# --- the scan job's check between scans ----------------------------------------
+
+
+def test_rescore_if_due_rescores_and_records_only_when_due(db_session):
+    db = db_session
+    s = configure(db, list_urls=())
+    s.ranking_role_keywords = ["backend"]
+    s.last_rescore_at = NOW - timedelta(hours=19)
+    db.commit()
+    posting = _stale_posting(db)
+
+    assert scanner.rescore_if_due(db, now=NOW) is False
+    db.refresh(posting)
+    assert posting.local_score == 99
+
+    later = NOW + timedelta(hours=1)
+    assert scanner.rescore_if_due(db, now=later) is True
+    db.refresh(posting)
+    db.refresh(s)
+    assert posting.local_score == 50
+    assert s.last_rescore_at == later
+    assert s.last_scan_at is None  # not a scan
+
+
+def test_rescore_if_due_leaves_it_to_a_running_scan(db_session, other_connection):
+    db = db_session
+    configure(db, list_urls=())
+    posting = _stale_posting(db)
+    assert try_lock(other_connection)
+
+    assert scanner.rescore_if_due(db, now=NOW) is None
+    db.refresh(posting)
+    assert posting.local_score == 99
+    assert settings_service.get_settings(db).last_rescore_at is None
+
+
+def test_rescore_if_due_records_nothing_when_it_fails(db_session, other_connection, monkeypatch):
+    db = db_session
+    configure(db, list_urls=())
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(scanner, "rescore", broken)
+    with pytest.raises(RuntimeError):
+        scanner.rescore_if_due(db, now=NOW)
+    s = settings_service.get_settings(db)
+    db.refresh(s)
+    assert s.last_rescore_at is None
+    assert try_lock(other_connection)  # the scan lock was released
+
+
+def test_scanned_list_rows_are_scored(db_session):
+    db = db_session
+    s = configure(db, list_urls=(SIMPLIFY_URL,))
+    s.ranking_role_keywords = ["software engineer"]
+    db.commit()
+    run_scan(db, FakeDiscoveryHttp({("GET", SIMPLIFY_URL): json_result([list_row(1)])}), now=NOW, pause=Pauses())
+    (row,) = postings(db)
+    assert row.local_score >= 40
+    assert row.local_reasons[0] == "Title matches 'software engineer'"

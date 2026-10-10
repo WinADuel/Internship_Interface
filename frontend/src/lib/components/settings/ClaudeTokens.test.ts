@@ -34,6 +34,12 @@ beforeEach(() => {
 });
 
 describe("ClaudeTokens", () => {
+  it("says what the daily job uses a token for, Inbox ranking included", async () => {
+    render(ClaudeTokens);
+    await screen.findByText("ct_abcde…");
+    expect(screen.getByText(/fetch its work/).textContent).toMatch(/Discover\s+Inbox ranking/);
+  });
+
   it("lists tokens by prefix with their revoked state and never renders a token field", async () => {
     const { container } = render(ClaudeTokens);
     await screen.findByText("ct_abcde…");

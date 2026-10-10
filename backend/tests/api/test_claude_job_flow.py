@@ -109,3 +109,57 @@ def test_claude_job_flow(logged_in_client, db_session):
     assert company.email_confidence == EmailConfidence.PATTERN_GUESS
     items = db_session.query(ResearchQueueItem).all()
     assert len(items) == 2 and {i.state for i in items} == {QueueState.DONE}
+
+
+def test_claude_inbox_ranking_flow(logged_in_client, db_session):
+    """Phase 5 spec §5: the routine's "Rank the Discover Inbox" step."""
+    from app.models.posting import Posting, PostingSource, PostingState
+
+    client = logged_in_client
+    _, raw = create_token(db_session)
+    bearer = {"Authorization": f"Bearer {raw}"}
+    for key, title in (("1", "Machine Learning Intern"), ("2", "Software Engineer Intern")):
+        db_session.add(
+            Posting(
+                source=PostingSource.SIMPLIFY, source_key=key, company="Acme", title=title,
+                locations=["Remote"], url=f"https://jobs.example.com/{key}",
+                url_key=f"https://jobs.example.com/{key}", terms=["Summer 2027"], category="Software",
+                state=PostingState.NEW,
+            )
+        )
+    db_session.commit()
+
+    # 1. The user sets ranking preferences: the Inbox is re-scored at once.
+    r = client.patch("/api/settings", json={"ranking_role_keywords": ["machine learning"]})
+    assert r.status_code == 200
+    inbox = client.get("/api/discovery/postings").json()["items"]
+    ml, swe = inbox
+    assert ml["title"] == "Machine Learning Intern" and ml["local_score"] > swe["local_score"]
+
+    # 2. The routine reads the postings (best local score first) and scores them.
+    work = client.get("/api/claude/postings", headers=bearer).json()
+    assert [p["id"] for p in work["postings"]] == [ml["id"], swe["id"]]
+    assert work["preferences"]["role_keywords"] == ["machine learning"]
+    r = client.post(
+        "/api/claude/postings/scores",
+        headers=bearer,
+        json={"scores": [
+            {"posting_id": ml["id"], "score": 40, "note": "Research-heavy; weaker fit"},
+            {"posting_id": swe["id"], "score": 92, "note": "Strong fit: backend in Python"},
+        ]},
+    )
+    assert r.json() == {"updated": 2, "skipped": 0}
+
+    # 3. Claude's score now orders the Inbox; nothing is left to review.
+    inbox = client.get("/api/discovery/postings").json()["items"]
+    assert [(p["id"], p["claude_score"], p["claude_stale"]) for p in inbox] == [
+        (swe["id"], 92, False),
+        (ml["id"], 40, False),
+    ]
+    assert client.get("/api/claude/postings", headers=bearer).json()["postings"] == []
+
+    # 4. Changing preferences marks the Claude scores stale and re-offers them.
+    client.patch("/api/settings", json={"ranking_role_keywords": ["software"]})
+    inbox = client.get("/api/discovery/postings").json()["items"]
+    assert all(p["claude_stale"] for p in inbox)
+    assert len(client.get("/api/claude/postings", headers=bearer).json()["postings"]) == 2
