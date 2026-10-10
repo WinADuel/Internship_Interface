@@ -47,11 +47,25 @@ def test_update_settings_changes_only_supplied_fields(db_session):
         {"discovery_locations": [f"City {i}" for i in range(31)]},
         {"discovery_exclude_keywords": None},
         {"discovery_hide_no_sponsorship": None},
+        {"ranking_role_keywords": ["x" * 61]},
+        {"ranking_preferred_locations": [f"City {i}" for i in range(31)]},
+        {"ranking_dealbreaker_keywords": None},
+        {"ranking_claude_daily_limit": -1},
+        {"ranking_claude_daily_limit": 151},
     ],
 )
 def test_settings_update_validation(payload):
     with pytest.raises(ValidationError):
         SettingsUpdate(**payload)
+
+
+def test_ranking_lists_are_trimmed_and_deduplicated_and_60_chars_is_allowed():
+    data = SettingsUpdate(
+        ranking_skill_keywords=[" Python ", "python", "", "x" * 60],
+        ranking_claude_daily_limit=150,
+    )
+    assert data.ranking_skill_keywords == ["Python", "x" * 60]
+    assert SettingsUpdate(ranking_claude_daily_limit=0).ranking_claude_daily_limit == 0
 
 
 def test_list_needs_attention_returns_only_due_contacts(db_session):

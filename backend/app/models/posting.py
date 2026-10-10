@@ -12,7 +12,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -46,6 +46,14 @@ class Posting(Base):
         UniqueConstraint("source", "source_key", name="uq_postings_source_source_key"),
         # Cross-source de-duplication matches company + title case-insensitively.
         Index("ix_postings_lower_company_lower_title", func.lower(text("company")), func.lower(text("title"))),
+        # The Inbox's Best-match order (Phase 5 spec §6).
+        Index(
+            "ix_postings_inbox_best",
+            text("coalesce(claude_score, local_score) DESC NULLS LAST"),
+            text("coalesce(date_posted, first_seen_at) DESC"),
+            text("id DESC"),
+            postgresql_where=text("state = 'new'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -90,6 +98,13 @@ class Posting(Base):
     watch_company_id: Mapped[int | None] = mapped_column(
         ForeignKey("watch_companies.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    # Reserved for Claude ranking (spec §6).
+    # Inbox ranking (Phase 5 spec §4-§5). The local score is the app's own
+    # 0-100 match score with up to six short reasons; the Claude score and
+    # note come from the daily routine, which stamps `claude_scored_at`.
+    local_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    local_reasons: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     claude_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     claude_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claude_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

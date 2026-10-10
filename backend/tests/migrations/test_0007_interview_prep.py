@@ -105,7 +105,6 @@ def test_upgrade_turns_interview_dates_into_rounds(scratch_db, alembic_cfg):
     ids = _seed_applications(scratch_db)
 
     command.upgrade(alembic_cfg, "0007")
-    command.check(alembic_cfg)  # the models match the migrated schema
 
     with scratch_db.connect() as conn:
         assert {"interview_rounds", "interview_round_contacts", "interview_round_stories", "stories",

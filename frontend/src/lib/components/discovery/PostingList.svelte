@@ -9,14 +9,19 @@
     restorePosting,
     savePosting,
   } from "../../api/discovery";
-  import { postingLabel } from "../../discovery/format";
+  import { bestScore, postingLabel, TOP_PICKS_SCORE } from "../../discovery/format";
   import { upsertApplication } from "../../stores/applications";
   import { refreshDiscoveryStatus } from "../../stores/discovery";
   import { showToast } from "../../stores/toast";
-  import type { Posting, PostingView } from "../../types/discovery";
+  import type { Posting, PostingSort, PostingView } from "../../types/discovery";
   import PostingRow, { type PostingAction } from "./PostingRow.svelte";
 
-  let { view }: { view: PostingView } = $props();
+  // `sort` and `topPicksOnly` apply to the Inbox only; bound so the choice outlives a reload.
+  let {
+    view,
+    sort = $bindable("best"),
+    topPicksOnly = $bindable(false),
+  }: { view: PostingView; sort?: PostingSort; topPicksOnly?: boolean } = $props();
 
   const EMPTY: Record<PostingView, string> = {
     inbox: "No new postings match your filters.",
@@ -36,41 +41,76 @@
   let loading = $state(true);
   let loadingMore = $state(false);
   let loadError = $state<string | null>(null);
+  /** Inbox only: how many Inbox postings are Top picks; null until loaded. */
+  let topPicks = $state<number | null>(null);
   const now = new Date();
+  // Bumped by every fresh load; an older answer (or a page for an older list) is dropped.
+  let generation = 0;
 
   function errorText(err: unknown): string | null {
     return err instanceof ApiError ? err.message : null;
   }
 
+  function query(offset: number) {
+    if (view !== "inbox") return { offset };
+    return topPicksOnly ? { offset, sort, minScore: TOP_PICKS_SCORE } : { offset, sort };
+  }
+
+  const isTopPick = (posting: Posting) => (bestScore(posting) ?? 0) >= TOP_PICKS_SCORE;
+
+  /** Keeps the Top picks count in step with rows leaving (negative) or coming back. */
+  function countTopPicks(postings: Posting[], sign: 1 | -1) {
+    if (topPicks === null) return;
+    topPicks = Math.max(0, topPicks + sign * postings.filter(isTopPick).length);
+  }
+
   async function load() {
+    const request = ++generation;
     loading = true;
     loadError = null;
     try {
-      const page = await listPostings(view, { offset: 0 });
+      const page = await listPostings(view, query(0));
+      if (request !== generation) return;
       items = page.items;
       total = page.total;
+      topPicks = page.topPicks;
     } catch (err) {
+      if (request !== generation) return;
       const message = errorText(err);
       loadError = message ? `Couldn't load postings: ${message}` : "Couldn't load postings.";
     } finally {
-      loading = false;
+      if (request === generation) loading = false;
     }
   }
 
   async function loadMore() {
+    const request = generation;
     loadingMore = true;
     try {
       // Rows removed by actions have left this view on the server too, so the
       // count shown is the right offset; a repeated id is skipped anyway.
-      const page = await listPostings(view, { offset: items.length });
+      const page = await listPostings(view, query(items.length));
+      if (request !== generation) return;
       const known = new Set(items.map((p) => p.id));
       items = [...items, ...page.items.filter((p) => !known.has(p.id))];
       total = page.total;
+      topPicks = page.topPicks;
     } catch (err) {
-      showToast(errorText(err) ?? "Couldn't load more postings.");
+      if (request === generation) showToast(errorText(err) ?? "Couldn't load more postings.");
     } finally {
       loadingMore = false;
     }
+  }
+
+  function setSort(next: PostingSort) {
+    if (sort === next) return;
+    sort = next;
+    void load();
+  }
+
+  function toggleTopPicks() {
+    topPicksOnly = !topPicksOnly;
+    void load();
   }
 
   onMount(() => {
@@ -94,27 +134,49 @@
     }
   }
 
+  /**
+   * After a reload (the order or filter changed, say) answered while an action
+   * was out, the list on screen is the reload's: it may still show postings the
+   * action has since moved out of this view. Drops those, with their counts.
+   */
+  function dropFromReload(gone: Set<number>) {
+    const back = items.filter((p) => gone.has(p.id));
+    if (!back.length) return;
+    items = items.filter((p) => !gone.has(p.id));
+    total = Math.max(0, total - back.length);
+    countTopPicks(back, -1);
+  }
+
   /** Removes the row at once; puts it back where it was if the server refuses. */
   async function act(posting: Posting, action: PostingAction) {
     const label = postingLabel(posting);
     if (action === "apply" && !window.confirm(`Add ${label} to your tracker as Applied today?`)) return;
     const index = items.findIndex((p) => p.id === posting.id);
     if (index === -1) return;
+    // A reload started meanwhile replaces the list this removal (and any rollback) belongs to.
+    const request = generation;
     items = items.filter((p) => p.id !== posting.id);
     total = Math.max(0, total - 1);
+    countTopPicks([posting], -1);
     try {
       await call(action, posting);
     } catch (err) {
-      const at = Math.min(index, items.length);
-      items = [...items.slice(0, at), posting, ...items.slice(at)];
-      total += 1;
+      // After a reload the list already shows what the server has, this posting included.
+      if (request === generation && !items.some((p) => p.id === posting.id)) {
+        const at = Math.min(index, items.length);
+        items = [...items.slice(0, at), posting, ...items.slice(at)];
+        total += 1;
+        countTopPicks([posting], 1);
+      }
       const message = errorText(err);
       showToast(message ? `Couldn't ${VERBS[action]} ${label}: ${message}` : `Couldn't ${VERBS[action]} ${label}.`);
       return;
     }
     void refreshDiscoveryStatus();
+    // Every action moves the posting out of this view; a reload may have brought it back.
+    dropFromReload(new Set([posting.id]));
     // Emptied a page while more remain: fetch the next ones instead of claiming the list is empty.
-    if (items.length === 0 && total > 0) void load();
+    if (request === generation && items.length === 0 && total > 0) void load();
   }
 
   /** The backend takes at most this many ids per dismiss-all request. */
@@ -124,6 +186,8 @@
   async function dismissAllShown() {
     const shown = items;
     if (!shown.length || !window.confirm(`Dismiss all ${shown.length} ${shown.length === 1 ? "posting" : "postings"} shown?`)) return;
+    // A reload started meanwhile (the order changed, say) owns the list from then on.
+    const request = generation;
     items = [];
     dismissing = shown.length;
     try {
@@ -140,27 +204,46 @@
           failure ??= err;
         }
       }
+      const message = errorText(failure);
       if (failed.length === shown.length) {
-        items = shown;
-        const message = errorText(failure);
+        if (request === generation) items = shown;
         showToast(message ? `Couldn't dismiss the postings: ${message}` : "Couldn't dismiss the postings.");
         return;
       }
       void refreshDiscoveryStatus();
-      if (failed.length) {
+      const stillThere = new Set(failed.map((p) => p.id));
+      const gone = shown.filter((p) => !stillThere.has(p.id));
+      if (request !== generation) {
+        // Keep the reload's list, less what was dismissed after it was fetched.
+        dropFromReload(new Set(gone.map((p) => p.id)));
+      } else if (failed.length) {
+        countTopPicks(gone, -1);
         items = failed;
-        total = Math.max(failed.length, total - (shown.length - failed.length));
-        const message = errorText(failure);
+        total = Math.max(failed.length, total - gone.length);
+      }
+      if (failed.length) {
         const lead = `Dismissed ${dismissed} of ${shown.length} postings. Couldn't dismiss the other ${failed.length}`;
         showToast(message ? `${lead}: ${message}` : `${lead}.`);
         return;
       }
-      await load();
+      if (request === generation) await load();
     } finally {
       dismissing = 0;
     }
   }
 </script>
+
+{#if view === "inbox"}
+  <div class="ranking">
+    <div class="sort" role="group" aria-label="Order">
+      <button type="button" aria-pressed={sort === "best"} onclick={() => setSort("best")}>Best match</button>
+      <button type="button" aria-pressed={sort === "newest"} onclick={() => setSort("newest")}>Newest</button>
+    </div>
+    <button type="button" class="chip" aria-pressed={topPicksOnly} onclick={toggleTopPicks}>
+      Top picks{#if topPicks !== null}{" "}<span class="n">{topPicks}</span>{/if}
+    </button>
+  </div>
+{/if}
 
 {#if dismissing && items.length === 0}
   <p class="muted" role="status">Dismissing {dismissing} {dismissing === 1 ? "posting" : "postings"}…</p>
@@ -172,7 +255,14 @@
     <button type="button" onclick={load}>Retry</button>
   </div>
 {:else if items.length === 0}
-  <p class="muted">{EMPTY[view]}</p>
+  {#if view === "inbox" && topPicksOnly}
+    <p class="muted">
+      No Top picks (score {TOP_PICKS_SCORE}+) right now. Tune your ranking preferences in
+      <a href="#/settings">Settings</a>.
+    </p>
+  {:else}
+    <p class="muted">{EMPTY[view]}</p>
+  {/if}
 {:else}
   <div class="toolbar">
     <span class="muted">Showing {items.length} of {total}</span>
@@ -192,6 +282,16 @@
 
 <style>
   .muted { color: #555; }
+  .ranking { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+  .sort { display: inline-flex; }
+  .sort button { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.7rem; border: 1px solid #bbb; background: #fff; cursor: pointer; }
+  .sort button:first-child { border-radius: 6px 0 0 6px; }
+  .sort button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+  .sort button[aria-pressed="true"] { background: #1a5fb4; border-color: #1a5fb4; color: #fff; }
+  .chip { display: inline-flex; align-items: center; gap: 0.35rem; font: inherit; font-size: 0.85rem; padding: 0.25rem 0.75rem; border: 1px solid #bbb; border-radius: 999px; background: #fff; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: #d7f0dc; border-color: #2e7d32; color: #14532d; font-weight: 600; }
+  .chip .n { min-width: 1.2rem; padding: 0 0.35rem; border-radius: 999px; background: #e0e0e0; color: #222; font-size: 0.75rem; text-align: center; }
+  .ranking button:focus-visible { outline: 2px solid #1a5fb4; outline-offset: 1px; }
   .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
   ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
   .error { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; color: #b3261e; }

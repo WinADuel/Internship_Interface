@@ -11,13 +11,17 @@ from app.models.app_settings import AppSettings
 from app.models.posting import Posting, PostingSource, PostingState
 from app.services.discovery.filters import (
     DISMISSED_CAP,
+    TOP_PICKS_SCORE,
     DiscoveryFilters,
     filters_from_settings,
     inbox_clause,
     keyword_regex,
     list_postings,
     match_count,
+    top_picks_count,
+    top_picks_preview,
 )
+from app.services.discovery.ranking import RankingPrefs
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
 ANY = DiscoveryFilters()  # every list empty, sponsorship shown: matches everything
@@ -452,3 +456,105 @@ def test_match_count_counts_the_inbox_for_unsaved_filters(db_session):
     assert match_count(db_session, DiscoveryFilters(locations=("Tokyo",))) == 0
     _, total = list_postings(db_session, "inbox", DiscoveryFilters(include_keywords=("software",)))
     assert total == 1
+
+
+
+# --- Best match, Newest and Top picks (Phase 5 spec §6) -------------------------------
+
+
+def ids(items) -> list[int]:
+    return [p.id for p in items]
+
+
+def test_best_match_uses_claudes_score_when_present_else_the_local_one(db_session):
+    day = timedelta(days=1)
+    local_90 = make(db_session, local_score=90, date_posted=NOW - 9 * day)
+    claude_80_local_95 = make(db_session, claude_score=80, local_score=95, date_posted=NOW - 9 * day)
+    local_80_newer = make(db_session, local_score=80, date_posted=NOW - 1 * day)
+    claude_20_local_99 = make(db_session, claude_score=20, local_score=99, date_posted=NOW)
+    unscored = make(db_session, date_posted=NOW)  # neither score: last
+    zero = make(db_session, local_score=0, date_posted=NOW)
+
+    items, total = list_postings(db_session, "inbox", ANY, sort="best")
+    assert ids(items) == [
+        local_90.id,
+        local_80_newer.id,  # ties on 80 go newest first
+        claude_80_local_95.id,
+        claude_20_local_99.id,
+        zero.id,
+        unscored.id,
+    ]
+    assert total == 6
+    # Best match is the default.
+    assert ids(list_postings(db_session, "inbox", ANY)[0]) == ids(items)
+
+
+def test_newest_ignores_scores(db_session):
+    old_top = make(db_session, claude_score=99, local_score=99, date_posted=NOW - timedelta(days=9))
+    new_low = make(db_session, local_score=1, date_posted=NOW)
+    mid = make(db_session, date_posted=None, first_seen_at=NOW - timedelta(days=2))
+    items, _ = list_postings(db_session, "inbox", ANY, sort="newest")
+    assert ids(items) == [new_low.id, mid.id, old_top.id]
+
+
+def test_min_score_keeps_postings_whose_best_score_reaches_it(db_session):
+    assert TOP_PICKS_SCORE == 70
+    keep_local = make(db_session, local_score=70)
+    keep_claude = make(db_session, claude_score=85, local_score=10)
+    make(db_session, claude_score=60, local_score=95)  # Claude's score wins
+    make(db_session, local_score=69)
+    make(db_session)  # unscored
+    make(db_session, local_score=99, state=PostingState.SAVED)  # not in the Inbox
+
+    items, total = list_postings(db_session, "inbox", ANY, min_score=70)
+    assert ids(items) == [keep_claude.id, keep_local.id]
+    assert total == 2
+    newest, _ = list_postings(db_session, "inbox", ANY, sort="newest", min_score=70)
+    assert set(ids(newest)) == {keep_claude.id, keep_local.id}
+    assert top_picks_count(db_session, ANY) == 2
+    assert top_picks_count(db_session, DiscoveryFilters(exclude_keywords=("software",))) == 0
+
+
+def test_best_match_paging_is_stable_across_ties(db_session):
+    made = [
+        make(db_session, local_score=(50 if i % 2 else 80), date_posted=NOW - timedelta(days=i % 3))
+        for i in range(23)
+    ]
+    full, total = list_postings(db_session, "inbox", ANY, limit=100)
+    pages = []
+    for offset in range(0, 23, 5):
+        page, page_total = list_postings(db_session, "inbox", ANY, limit=5, offset=offset)
+        assert page_total == total == 23
+        pages.extend(ids(page))
+    assert pages == ids(full)
+    assert sorted(pages) == sorted(p.id for p in made)
+
+
+def test_sort_and_min_score_do_not_apply_to_saved_or_dismissed(db_session):
+    older = make(db_session, state=PostingState.SAVED, local_score=99, state_changed_at=NOW - timedelta(days=2))
+    newer = make(db_session, state=PostingState.SAVED, local_score=1, state_changed_at=NOW - timedelta(days=1))
+    items, total = list_postings(db_session, "saved", ANY, sort="best", min_score=90)
+    assert ids(items) == [newer.id, older.id] and total == 2
+
+
+def test_list_postings_rejects_an_unknown_sort(db_session):
+    with pytest.raises(ValueError):
+        list_postings(db_session, "inbox", ANY, sort="score")  # type: ignore[arg-type]
+
+
+def test_top_picks_preview_scores_with_unsaved_preferences(db_session):
+    make(db_session, title="Machine Learning Intern", locations=["New York, NY"], date_posted=NOW)
+    make(db_session, title="Machine Learning Intern", locations=["Austin, TX"], date_posted=NOW - timedelta(days=30))
+    make(db_session, title="Frontend Intern", claude_score=91)  # Claude's score counts as it is
+    make(db_session, title="Machine Learning Intern", claude_score=10, date_posted=NOW)
+    make(db_session, title="Machine Learning Intern", locations=["New York"], date_posted=NOW,
+         state=PostingState.SAVED)
+
+    prefs = RankingPrefs(role_keywords=("machine learning",), preferred_locations=("New York",))
+    # 40 + 15 + 10 = 65 short of 70; a skill keyword tips the first over.
+    assert top_picks_preview(db_session, ANY, prefs, NOW) == 1
+    richer = RankingPrefs(
+        role_keywords=("machine learning",), preferred_locations=("New York",), skill_keywords=("intern",)
+    )
+    assert top_picks_preview(db_session, ANY, richer, NOW) == 2
+    assert top_picks_preview(db_session, ANY, RankingPrefs(), NOW) == 1  # neutral 50s are not picks
