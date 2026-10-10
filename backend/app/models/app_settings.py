@@ -82,3 +82,10 @@ class AppSettings(Base):
     )
     last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_scan_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Database backups (Phase 3 spec §4.4): last success and last error of the
+    # local dump and of the off-site copy. An error is cleared by the next success.
+    last_backup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_backup_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_offsite_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_offsite_error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -119,28 +119,30 @@
   {#if tokens.length === 0}
     <p class="muted">No tokens yet.</p>
   {:else}
-    <table>
-      <thead>
-        <tr><th>Token</th><th>Created</th><th>Last used</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr>
-      </thead>
-      <tbody>
-        {#each tokens as token (token.id)}
-          <tr>
-            <td><code>{token.tokenPrefix}…</code></td>
-            <td>{formatDateTime(token.createdAt)}</td>
-            <td>{token.lastUsedAt ? formatDateTime(token.lastUsedAt) : "Never used"}</td>
-            <td>{token.revokedAt ? "Revoked" : "Active"}</td>
-            <td>
-              {#if !token.revokedAt}
-                <button type="button" aria-label={`Revoke ${token.tokenPrefix}…`} onclick={() => revoke(token)}>
-                  Revoke
-                </button>
-              {/if}
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Token</th><th>Created</th><th>Last used</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          {#each tokens as token (token.id)}
+            <tr>
+              <td><code>{token.tokenPrefix}…</code></td>
+              <td>{formatDateTime(token.createdAt)}</td>
+              <td>{token.lastUsedAt ? formatDateTime(token.lastUsedAt) : "Never used"}</td>
+              <td>{token.revokedAt ? "Revoked" : "Active"}</td>
+              <td>
+                {#if !token.revokedAt}
+                  <button type="button" aria-label={`Revoke ${token.tokenPrefix}…`} onclick={() => revoke(token)}>
+                    Revoke
+                  </button>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 </section>
 
@@ -150,6 +152,8 @@
   .new-token { border: 1px solid #c90; background: #fff8e1; padding: 0.75rem; margin-bottom: 0.75rem; }
   .new-token input { width: 100%; font-family: monospace; box-sizing: border-box; }
   .warning { font-weight: 600; }
+  /* On a phone the five columns can be wider than the screen; the table scrolls on its own. */
+  .table-wrap { position: relative; max-width: 100%; overflow-x: auto; }
   table { border-collapse: collapse; margin-top: 0.75rem; }
   th, td { text-align: left; padding: 0.25rem 0.75rem 0.25rem 0; }
 </style>

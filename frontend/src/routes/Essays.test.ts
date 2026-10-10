@@ -1,4 +1,5 @@
 import { fireEvent, render, waitFor } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -122,6 +123,59 @@ describe("Essays", () => {
     await waitFor(() =>
       expect(appsApi.updateApplication).toHaveBeenCalledWith(1, { googleDocLink: null }),
     );
+  });
+
+  it("shows the first application in the select on load, and Save link targets it", async () => {
+    vi.mocked(appsApi.updateApplication).mockResolvedValue(fakeApplication({ id: 1, googleDocLink: "d1" }));
+    const { getByLabelText, getByRole } = render(Essays);
+    const select = getByLabelText("Application") as HTMLSelectElement;
+    expect(select.selectedIndex).toBe(0);
+    expect(select.value).toBe("1");
+    expect(select.selectedOptions[0].textContent).toContain("Acme");
+    await fireEvent.input(getByLabelText("Google Doc link"), { target: { value: "d1" } });
+    await fireEvent.click(getByRole("button", { name: "Save link" }));
+    await waitFor(() => expect(appsApi.updateApplication).toHaveBeenCalledWith(1, { googleDocLink: "d1" }));
+  });
+
+  it("saves to the application picked in the select", async () => {
+    vi.mocked(appsApi.updateApplication).mockResolvedValue(fakeApplication({ id: 2, googleDocLink: "d2" }));
+    const { getByLabelText, getByRole } = render(Essays);
+    const select = getByLabelText("Application") as HTMLSelectElement;
+    select.value = "2";
+    await fireEvent.change(select);
+    expect(select.selectedOptions[0].textContent).toContain("Beta");
+    await fireEvent.input(getByLabelText("Google Doc link"), { target: { value: "d2" } });
+    await fireEvent.click(getByRole("button", { name: "Save link" }));
+    await waitFor(() => expect(appsApi.updateApplication).toHaveBeenCalledWith(2, { googleDocLink: "d2" }));
+  });
+
+  it("shows the application it falls back to when the picked one disappears", async () => {
+    const { getByLabelText } = render(Essays);
+    const select = getByLabelText("Application") as HTMLSelectElement;
+    select.value = "2";
+    await fireEvent.change(select);
+    applications.set([fakeApplication({ id: 1, company: "Acme" }), fakeApplication({ id: 3, company: "Gamma" })]);
+    await tick();
+    expect(select.value).toBe("1");
+    expect(select.selectedOptions[0].textContent).toContain("Acme");
+  });
+
+  it("renders without a select when there are no applications", async () => {
+    applications.set([]);
+    const { getByText, queryByLabelText, queryByRole } = render(Essays);
+    expect(getByText("No applications yet.")).toBeTruthy();
+    expect(queryByLabelText("Application")).toBeNull();
+    expect(queryByRole("button", { name: "Save link" })).toBeNull();
+  });
+
+  it("drops the select without crashing when the last application goes away", async () => {
+    applications.set([fakeApplication({ id: 1, company: "Acme" })]);
+    const { getByText, queryByLabelText } = render(Essays);
+    expect(queryByLabelText("Application")).toBeTruthy();
+    applications.set([]);
+    await tick();
+    expect(getByText("No applications yet.")).toBeTruthy();
+    expect(queryByLabelText("Application")).toBeNull();
   });
 
   it("toasts when saving fails", async () => {

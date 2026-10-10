@@ -4,13 +4,16 @@ FastAPI + PostgreSQL backend, Svelte static frontend, served behind Caddy (autom
 
 ## Deploying
 
-The same `docker-compose.yml` runs on a VPS or a local server.
+The same `docker-compose.yml` runs on the server and on a local copy (Mac or PC).
 
-1. Copy `.env.example` to `.env` and fill it in (generate `JWT_SECRET` and `TOKEN_ENCRYPTION_KEY` with the commands in the file; keep the `POSTGRES_*` values consistent with `DATABASE_URL`). Never commit `.env`.
-2. Point your domain's DNS A/AAAA record at the server, and open ports 80 and 443.
-3. Start everything: `docker compose up -d --build`
-4. Create your account: `docker compose exec backend python -m app.cli create-user --username <you>`
-5. Log in at `https://<DOMAIN>/`.
+**The server** (a DigitalOcean droplet): follow [`docs/deploy/server-setup.md`](docs/deploy/server-setup.md), a step-by-step guide from creating the accounts to the daily Claude job and an uptime check. It uses three scripts in `ops/server/`. `bootstrap.sh` runs once, as root, on a new Ubuntu 24.04 droplet: it creates the `deploy` user, turns SSH into keys-only with no root login, turns on the firewall (22, 80, 443), installs Docker, turns on automatic security updates, adds swap and sets the time zone. `deploy.sh [REF]` deploys `origin/main` (or a given commit): it checks `.env`, takes a pre-deploy database backup, rebuilds, waits for `/api/health` and prints the one command that undoes the deploy (`deploy.sh --restore <its pre-deploy backup> <previous commit>`, which also puts back the database from just before it). `restore.sh FILE` puts a backup back (see **Backups**).
+
+**A local copy:**
+
+1. Copy `.env.example` to `.env` and fill it in (use `DOMAIN=localhost`; generate the secrets with the commands in the file; keep the `POSTGRES_*` values consistent with `DATABASE_URL`). Never commit `.env`.
+2. Start everything: `docker compose up -d --build`
+3. Create your account: `docker compose exec backend python -m app.cli create-user --username <you>`
+4. Log in at `https://<DOMAIN>/`.
 
 The Google OAuth client in Google Cloud Console must list `https://<DOMAIN>/api/docs/google/callback` as an authorized redirect URI (it must match `GOOGLE_REDIRECT_URI`).
 
@@ -69,28 +72,31 @@ The board formats were written from vendor documentation, because the build envi
 
 ## Backups
 
-The database lives in the `pgdata` Docker volume. Take a dump regularly (cron, or before every upgrade):
+The database lives in the `pgdata` Docker volume. The `db-backup` service backs it up by itself:
 
-```
-docker compose exec -T db pg_dump -U <POSTGRES_USER> <POSTGRES_DB> > backup.sql
-```
+- **Nightly** at 02:30 (in `TZ`), a `pg_dump` to `backups/nightly/`; the newest 14 are kept. `deploy.sh` also takes one before every deploy (`backups/pre-deploy/`, newest 5 kept).
+- **Off-site copy:** when `BACKUP_ENCRYPTION_KEY` is set in `.env` and Google is connected, each nightly dump is encrypted and uploaded to the "Internship Tracker Backups" folder in your Google Drive; the newest 30 copies are kept. Google only ever sees encrypted data. Dumps over 100 MB aren't copied (Settings shows the error).
+- **Settings → Backups** shows the last backup and the last off-site copy, with any error, and has **Back up now**, which adds a copy on the server only (`backups/manual/`, newest 5 kept).
 
-Restore into an empty database (start only the db first, so the backend has not already created tables):
+The files in `backups/` belong to root, so read them through the scripts rather than directly.
 
-```
-docker compose up -d db
-docker compose exec -T db psql -U <POSTGRES_USER> <POSTGRES_DB> < backup.sql
-docker compose up -d --build
-```
+**Restore** with `ops/server/restore.sh <file>`, from the repo folder. The file is a dump from `backups/`, or a `.dump.enc` copy downloaded from Drive (it needs the `BACKUP_ENCRYPTION_KEY` that made it). The script checks the file, asks you to type the database name, backs up the current data first, then replaces all data in one transaction and restarts the app. [`docs/deploy/server-setup.md`](docs/deploy/server-setup.md) step 11 has the details.
 
-Keep the dump somewhere other than the server. Also keep a copy of `.env` (see below): the dump alone is not enough to use the encrypted data in it.
+Keep a copy of `.env` in a password manager (see below): a dump alone is not enough to use the encrypted data in it, and the Drive copies can't be read without `BACKUP_ENCRYPTION_KEY`.
 
 ## Moving to a new server
 
-1. On the old server, take a dump as above.
-2. On the new server, clone the repository and copy the old `.env` over **verbatim**. Do not regenerate `JWT_SECRET` or `TOKEN_ENCRYPTION_KEY`: your TOTP secret and the stored Google token are encrypted with `TOKEN_ENCRYPTION_KEY`, and a different key makes them undecryptable. (A changed `JWT_SECRET` just logs you out.) Only change `DOMAIN` and `GOOGLE_REDIRECT_URI` if the hostname changes, and then also update the redirect URI in Google Cloud Console.
-3. Start the database and restore the dump as in **Backups**, then `docker compose up -d --build`.
-4. Repoint the domain's DNS A/AAAA record at the new server and keep ports 80 and 443 open. Caddy obtains a certificate once DNS resolves to the new host.
+1. On the old server, in the repo folder, stop the app so nothing changes after the last backup, then take it:
+
+   ```
+   docker compose stop backend caddy job-scan sheet-sync
+   docker compose run --rm db-backup python -m app.jobs.db_backup --once --label manual
+   ```
+
+   Copy the newest file in `backups/manual/` to the new server (it belongs to root: `sudo cp` it to your home folder and `sudo chown deploy:` it first). The newest Drive copy works too, but it misses anything changed since the last nightly backup.
+2. On the new server, clone the repository and copy the old `.env` over **verbatim**. Do not regenerate `JWT_SECRET`, `TOKEN_ENCRYPTION_KEY` or `BACKUP_ENCRYPTION_KEY`: your TOTP secret and the stored Google token are encrypted with `TOKEN_ENCRYPTION_KEY`, and a different key makes them undecryptable; the Drive backups can only be read with the `BACKUP_ENCRYPTION_KEY` that made them. (A changed `JWT_SECRET` just logs you out.) Only change `DOMAIN` and `GOOGLE_REDIRECT_URI` if the hostname changes, and then also update the redirect URI in Google Cloud Console.
+3. Repoint the domain's DNS A/AAAA record at the new server and keep ports 80 and 443 open. Caddy obtains a certificate once DNS resolves to the new host, so do this before deploying (the scripts check the site over HTTPS).
+4. Run `ops/server/deploy.sh`, then `ops/server/restore.sh <the copied file>`.
 5. Log in and check that the Essays page can still load a doc.
 
 **If login returns 500 after a move, the encryption key changed**: `TOKEN_ENCRYPTION_KEY` in the new `.env` is not the one the data was encrypted with. Put the original key back. If it is lost, recreate the account with `docker compose exec backend python -m app.cli create-user --username <you> --reset` and reconnect Google from the Essays page.

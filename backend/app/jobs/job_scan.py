@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 
 from app.db.session import SessionLocal
+from app.jobs import configure_job_logging
 from app.services.discovery.http import DiscoveryHttp, HttpxDiscoveryHttp
 from app.services.discovery.scanner import ScanReport, run_scan
 from app.services.settings_service import get_settings
@@ -70,7 +71,7 @@ def run_forever(http: DiscoveryHttp, sleep: Callable[[float], None] = time.sleep
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    configure_job_logging()
     run_forever(HttpxDiscoveryHttp())
 
 
