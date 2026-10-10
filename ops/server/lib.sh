@@ -142,7 +142,7 @@ take_backup() {
 }
 
 # Every service that uses the database: stopped during a restore (db keeps running).
-APP_SERVICES=(backend sheet-sync job-scan db-backup caddy)
+APP_SERVICES=(backend sheet-sync job-scan gmail-sync db-backup caddy)
 
 # resolve_backup_file <file> <repo root>: where the db-backup container will find a backup,
 # in RESTORE_PATH (inside the container) and RESTORE_MOUNT (options for

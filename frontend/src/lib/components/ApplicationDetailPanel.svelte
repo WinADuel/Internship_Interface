@@ -9,12 +9,15 @@
   import ApplicationForm from "./ApplicationForm.svelte";
   import ApplicationContacts from "./contacts/ApplicationContacts.svelte";
   import ApplicationInterviews from "./interviews/ApplicationInterviews.svelte";
+  import ApplicationEmail from "./email/ApplicationEmail.svelte";
   import GoogleDocViewer from "./GoogleDocViewer.svelte";
 
   let { application }: { application: Application } = $props();
 
   let editing = $state(false);
   let archiving = $state(false);
+  // Bumped after an email update is accepted here: an interview email adds a round.
+  let emailChanges = $state(0);
 
   async function onStatusChange(event: Event) {
     const select = event.currentTarget as HTMLSelectElement;
@@ -127,7 +130,11 @@
     </ol>
   {/if}
 
-  <ApplicationInterviews {application} />
+  {#key emailChanges}
+    <ApplicationInterviews {application} />
+  {/key}
+
+  <ApplicationEmail applicationId={application.id} onchanged={() => (emailChanges += 1)} />
 
   <ApplicationContacts applicationId={application.id} />
 

@@ -14,6 +14,7 @@
   import Settings from "./routes/Settings.svelte";
   import Interviews from "./routes/Interviews.svelte";
   import InterviewRound from "./routes/InterviewRound.svelte";
+  import Email from "./routes/Email.svelte";
 
   const routes = {
     "/": Dashboard,
@@ -25,6 +26,7 @@
     "/research-queue": ResearchQueue,
     "/interviews": Interviews,
     "/interviews/:id": InterviewRound,
+    "/email": Email,
     "/settings": Settings,
   };
 

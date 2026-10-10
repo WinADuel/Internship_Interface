@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { replace, router } from "svelte-spa-router";
   import { ApiError } from "../lib/api/client";
   import { getSettings, updateSettings } from "../lib/api/settings";
   import BackupSettings from "../lib/components/settings/BackupSettings.svelte";
@@ -7,6 +8,7 @@
   import ClaudeTokens from "../lib/components/settings/ClaudeTokens.svelte";
   import DiscoverySettings from "../lib/components/settings/DiscoverySettings.svelte";
   import RankingSettings from "../lib/components/settings/RankingSettings.svelte";
+  import GmailSettings from "../lib/components/settings/GmailSettings.svelte";
   import { showToast } from "../lib/stores/toast";
   import type { AppSettings } from "../lib/types/contact";
 
@@ -44,6 +46,20 @@
 
   onMount(() => {
     void load();
+  });
+
+  // Connect Gmail comes back to #/settings?gmail=1 (granted) or ?gmail=0 (cancelled or not allowed).
+  // Each new query is handled once; clearing it lets a later return (same page) be handled too.
+  let handledQuery: string | null = null;
+  $effect(() => {
+    const query = router.querystring ?? "";
+    if (query === handledQuery) return;
+    handledQuery = query;
+    const result = new URLSearchParams(query).get("gmail");
+    if (result !== "1" && result !== "0") return;
+    if (result === "1") showToast("Gmail connected. Turn on Sync Gmail below to start.", "info");
+    else showToast("Gmail wasn't connected: Google didn't give permission to read mail.");
+    void replace("/settings");
   });
 
   async function save(event: SubmitEvent) {
@@ -108,6 +124,8 @@
   <DiscoverySettings {settings} onsaved={(saved) => (settings = saved)} />
   <!-- Its own form and Save too: sends only the ranking fields. -->
   <RankingSettings {settings} onsaved={(saved) => (settings = saved)} />
+  <!-- Likewise for the Gmail fields. -->
+  <GmailSettings {settings} onsaved={(saved) => (settings = saved)} />
 {/if}
 
 <ClaudeTokens />

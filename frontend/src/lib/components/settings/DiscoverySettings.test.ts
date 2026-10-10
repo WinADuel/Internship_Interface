@@ -43,6 +43,14 @@ const settings: AppSettings = {
   rankingDealbreakerKeywords: [],
   rankingClaudeDailyLimit: 40,
   rankingUpdatedAt: null,
+  gmailSyncEnabled: false,
+  gmailSyncMinutes: 30,
+  gmailLookbackDays: 30,
+  gmailAutoApply: false,
+  gmailLastSyncAt: null,
+  gmailLastError: null,
+  googleConnected: false,
+  gmailGranted: false,
 };
 
 const FILTERS = {

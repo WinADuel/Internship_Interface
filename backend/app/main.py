@@ -7,6 +7,7 @@ from app.api.claude import router as claude_router
 from app.api.contacts import router as contacts_router
 from app.api.discovery import router as discovery_router
 from app.api.docs import router as docs_router
+from app.api.email import router as email_router
 from app.api.interviews import router as interviews_router
 from app.api.research_queue import router as research_queue_router
 from app.api.settings import router as settings_router
@@ -24,6 +25,7 @@ app.include_router(claude_router)
 app.include_router(backups_router)
 app.include_router(interviews_router)
 app.include_router(stories_router)
+app.include_router(email_router)
 
 
 @app.get("/api/health")

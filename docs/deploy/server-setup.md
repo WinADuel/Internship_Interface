@@ -371,6 +371,33 @@ Publishing the app stops Google from logging you out of Google every 7 days.
 **If it goes wrong:** Google says `Error 400: redirect_uri_mismatch` → the URI in step 3 and `GOOGLE_REDIRECT_URI` in `.env` must match exactly: `https`, no `www`, no slash at the end.
 Google can take a few minutes to apply a new URI.
 
+### Turn on Gmail sync (optional)
+
+Gmail sync reads the headers and Gmail's short preview of your recent Inbox and Sent mail, spots application updates and contact replies, and lists them on the **Email updates** page for you to accept or dismiss.
+It never downloads message bodies and never sends email. Skip this part if you don't want it; everything else works without it.
+
+Gmail's read permission (`gmail.readonly`) is one Google calls *restricted*. A public app with it needs Google's security review, but a personal app (you, plus fewer than 100 users) doesn't: you just click through the "Google hasn't verified this app" screen once, as in step 6 above.
+
+1. In [console.cloud.google.com](https://console.cloud.google.com), with the **internship-tracker** project picked, open **APIs & Services → Library**, search for **Gmail API**, open it and click **Enable**.
+2. Open **Google Auth Platform → Data Access** → **Add or remove scopes**. Find `.../auth/gmail.readonly` (filter for "gmail.readonly"), tick it, click **Update**, then **Save**.
+   - If the console then wants a review before the app can stay published, remove the scope again and save: the tracker asks for it at sign-in anyway, and the unverified-app screen covers it.
+3. In the tracker, go to **Settings → Gmail** and click **Connect Gmail**.
+   - Google shows **"Google hasn't verified this app"** again. Click **Advanced** → **Go to ... (unsafe)**.
+   - Tick the box that lets the app **read your email**, then **Continue**.
+
+   You land back on Settings with "Gmail connected", and the card says **Gmail: Connected**.
+   If it says Gmail wasn't connected, the box wasn't ticked: click **Connect Gmail** and try again.
+4. Tick **Sync Gmail** and click **Save Gmail settings**. The defaults are fine: check every 30 minutes, and look back 30 days on the first sync.
+   Leave **Apply some updates automatically** off at first; turn it on later if you want confirmations and contact replies applied without asking (rejections, interviews, assessments and offers always wait for you).
+5. Press **Sync now**. **What you should see:** "Checked N emails: M updates found." and **Email updates** in the menu with a count when there is something to review.
+   After this, the `gmail-sync` service checks by itself on the interval you chose.
+
+**Good to know:**
+- Changing your Google account password disconnects the whole Google connection, not just Gmail: backups to Drive, Essays and Gmail sync all use the same one (Google's rule for mail access). Settings then shows "Last sync failed: ... reconnect Google and allow Gmail in Settings" with a **Reconnect Gmail** link; click it and go through step 3 again. That reconnects all three.
+  Don't use **Connect Google Docs** on the Essays page for this while Gmail sync is on: it reconnects only Drive and Docs and drops Gmail, and Settings then says "Gmail permission missing: use Reconnect Gmail in Settings".
+- To stop it, untick **Sync Gmail**. To withdraw the permission completely, remove the app at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) (that also disconnects Docs and backups until you connect Google again).
+- The console clicks above were written from Google's documentation and are confirmed during the live setup; if a screen looks different, the names (Gmail API, Data Access, `gmail.readonly`) stay the same.
+
 ---
 
 ## 9. The daily Claude job
@@ -527,4 +554,5 @@ These never touch your data.
 | Login gives an error (500) after moving servers | `TOKEN_ENCRYPTION_KEY` changed. See [Moving to a new server](../../README.md#moving-to-a-new-server) in the README. |
 | `deploy.sh` says files were changed on the server | Someone edited code on the server. Undo it with `git checkout -- <file>`. |
 | `bootstrap.sh` stops with "Could not get lock /var/lib/dpkg/lock-frontend" | A new droplet installs its first security updates right after it starts. The script waits up to 10 minutes for them. If it still stops, wait a few more minutes and run `bash bootstrap.sh` again. |
-| Settings shows "Off-site copy failed" | Read the message. If it ends in "reconnect Google in Settings", connect Google again with **Connect Google Docs** on the Essays page (step 8). |
+| Settings → Gmail shows "reconnect Google and allow Gmail" or "Gmail permission missing" | Gmail access was removed, your Google password changed (that disconnects backups and Essays too), or Google was reconnected with **Connect Google Docs**, which leaves Gmail out. Click **Reconnect Gmail** in Settings and tick every box, including read-your-email (step 8, "Turn on Gmail sync"). It reconnects Drive and Docs as well. |
+| Settings shows "Off-site copy failed" | Read the message. If it ends in "reconnect Google in Settings", connect Google again: with **Reconnect Gmail** in Settings if you use Gmail sync (it reconnects everything), otherwise with **Connect Google Docs** on the Essays page (step 8). |

@@ -12,7 +12,19 @@ vi.mock("../lib/api/settings", () => ({
 vi.mock("../lib/api/discovery", () => ({ getMatchCount: vi.fn(), getTopPicksCount: vi.fn() }));
 vi.mock("../lib/api/backups", () => ({ getBackupStatus: vi.fn(), runBackupNow: vi.fn() }));
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../lib/api/email", () => ({
+  CONNECT_GMAIL_URL: "/api/docs/google/authorize?gmail=1",
+  getEmailStatus: vi.fn().mockResolvedValue({ pendingCount: 0 }),
+  syncEmailNow: vi.fn(),
+}));
+vi.mock("svelte-spa-router", async () => ({
+  router: (await import("../lib/testing/routerState.svelte")).routerState,
+  replace: vi.fn(),
+}));
 
+import { flushSync } from "svelte";
+import { replace } from "svelte-spa-router";
+import { routerState } from "../lib/testing/routerState.svelte";
 import { getBackupStatus } from "../lib/api/backups";
 import { getMatchCount, getTopPicksCount } from "../lib/api/discovery";
 import { getSettings, listClaudeTokens, updateSettings } from "../lib/api/settings";
@@ -49,9 +61,19 @@ const settings: AppSettings = {
   rankingDealbreakerKeywords: [],
   rankingClaudeDailyLimit: 40,
   rankingUpdatedAt: null,
+  gmailSyncEnabled: false,
+  gmailSyncMinutes: 30,
+  gmailLookbackDays: 30,
+  gmailAutoApply: false,
+  gmailLastSyncAt: null,
+  gmailLastError: null,
+  googleConnected: false,
+  gmailGranted: false,
 };
 
 beforeEach(() => {
+  routerState.querystring = "";
+  vi.mocked(replace).mockReset();
   vi.mocked(getSettings).mockReset().mockResolvedValue(settings);
   vi.mocked(updateSettings).mockReset();
   vi.mocked(listClaudeTokens).mockReset().mockResolvedValue([]);
@@ -158,6 +180,61 @@ describe("Settings page", () => {
     expect(Object.keys(body).every((k) => k.startsWith("ranking"))).toBe(true);
     expect(body.rankingRoleKeywords).toEqual(["backend"]);
     expect(await screen.findByText("Top picks now: 2")).toBeInTheDocument();
+  });
+
+  it("has a Gmail section that saves only the Gmail fields", async () => {
+    vi.mocked(updateSettings).mockResolvedValue({ ...settings, gmailSyncEnabled: true });
+    render(Settings);
+    const gmail = await screen.findByRole("form", { name: "Gmail settings" });
+    expect(screen.getByRole("heading", { name: "Gmail" })).toBeInTheDocument();
+    await fireEvent.click(screen.getByLabelText("Sync Gmail"));
+    await fireEvent.submit(gmail);
+    expect(updateSettings).toHaveBeenCalledWith({
+      gmailSyncEnabled: true,
+      gmailSyncMinutes: 30,
+      gmailLookbackDays: 30,
+      gmailAutoApply: false,
+    });
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("Gmail settings saved.", "info"));
+  });
+
+  it("confirms a Gmail connection on return from Google and clears the query", async () => {
+    routerState.querystring = "gmail=1";
+    render(Settings);
+    await vi.waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith("Gmail connected. Turn on Sync Gmail below to start.", "info"),
+    );
+    expect(replace).toHaveBeenCalledWith("/settings");
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("says when Google didn't grant Gmail", async () => {
+    routerState.querystring = "gmail=0";
+    render(Settings);
+    await vi.waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith("Gmail wasn't connected: Google didn't give permission to read mail."),
+    );
+    expect(replace).toHaveBeenCalledWith("/settings");
+  });
+
+  it("handles a later return to the same open page", async () => {
+    routerState.querystring = "gmail=1";
+    render(Settings);
+    await vi.waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+    routerState.querystring = ""; // what replace("/settings") does
+    flushSync();
+    routerState.querystring = "gmail=0";
+    flushSync();
+    expect(showToast).toHaveBeenLastCalledWith("Gmail wasn't connected: Google didn't give permission to read mail.");
+    expect(replace).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores other query values", async () => {
+    routerState.querystring = "gmail=yes";
+    render(Settings);
+    await screen.findByRole("form", { name: "Gmail settings" });
+    expect(showToast).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("shows the Backups card right after the backup-sheet card", async () => {
