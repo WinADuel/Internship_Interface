@@ -18,6 +18,16 @@ def test_application_writes_schedule_applications_tab(logged_in_client, sheet_sy
     assert sheet_sync_recorder.scheduled == [["Applications"]] * 4
 
 
+def test_application_writes_that_touch_rounds_also_schedule_interviews_tab(logged_in_client, sheet_sync_recorder):
+    a = logged_in_client.post(
+        "/api/applications", json={"company": "Stripe", "role_title": "SWE", "interview_datetime": "2099-03-05T14:30:00Z"}
+    ).json()
+    logged_in_client.patch(f"/api/applications/{a['id']}", json={"company": "Stripe Inc"})
+    logged_in_client.patch(f"/api/applications/{a['id']}", json={"role_title": "SWE Intern"})
+    logged_in_client.patch(f"/api/applications/{a['id']}", json={"notes": "n"})
+    assert sheet_sync_recorder.scheduled == [["Applications", "Interviews"]] * 3 + [["Applications"]]
+
+
 def test_reads_and_failed_writes_schedule_nothing(logged_in_client, sheet_sync_recorder):
     logged_in_client.get("/api/applications")
     logged_in_client.get("/api/contacts")

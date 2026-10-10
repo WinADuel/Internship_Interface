@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createApplication, updateApplication } from "../api/applications";
-  import { isoToLocalInput, localInputToIso } from "../format";
+  import { formatDateTime, localInputToIso } from "../format";
   import { upsertApplication } from "../stores/applications";
   import { showToast } from "../stores/toast";
   import { KANBAN_COLUMNS } from "../kanban/grouping";
@@ -28,7 +28,10 @@
   let priority = $state<Priority>(initial?.priority ?? "medium");
   let dateApplied = $state(initial?.dateApplied ?? "");
   let followUpDate = $state(initial?.followUpDate ?? "");
-  let interview = $state(isoToLocalInput(initial?.interviewDatetime ?? null));
+  // Create only: becomes the application's first interview round. When editing,
+  // the next interview is derived from the rounds and shown read-only.
+  let interview = $state("");
+  const uid = $props.id();
   let jobLink = $state(initial?.jobLink ?? "");
   let resumeVersion = $state(initial?.resumeVersion ?? "");
   let contactPerson = $state(initial?.contactPerson ?? "");
@@ -63,14 +66,13 @@
       error = "Interview date and time is not valid.";
       return;
     }
-    const input: ApplicationInput = {
+    const input: Omit<ApplicationInput, "interviewDatetime"> = {
       company: company.trim(),
       roleTitle: roleTitle.trim(),
       status,
       priority,
       dateApplied: dateApplied || null,
       followUpDate: followUpDate || null,
-      interviewDatetime: interviewIso,
       jobLink: orNull(jobLink),
       resumeVersion: orNull(resumeVersion),
       contactPerson: orNull(contactPerson),
@@ -82,7 +84,9 @@
     };
     submitting = true;
     try {
-      const saved = initial ? await updateApplication(initial.id, input) : await createApplication(input);
+      const saved = initial
+        ? await updateApplication(initial.id, input)
+        : await createApplication({ ...input, interviewDatetime: interviewIso });
       upsertApplication(saved);
       onsaved?.(saved);
     } catch (err) {
@@ -118,7 +122,19 @@
     <label>Date applied <input type="date" bind:value={dateApplied} /></label>
     <label>Follow-up date <input type="date" bind:value={followUpDate} /></label>
   </div>
-  <label>Interview date and time <input type="datetime-local" bind:value={interview} /></label>
+  {#if initial}
+    <div class="readonly">
+      <span class="label">Next interview</span>
+      <span>{initial.interviewDatetime ? formatDateTime(initial.interviewDatetime) : "None scheduled"}</span>
+      <span class="hint">Set by the application's interview rounds. <a href="#/interviews">Manage rounds</a></span>
+    </div>
+  {:else}
+    <label>
+      Interview date and time
+      <input type="datetime-local" bind:value={interview} aria-describedby="{uid}-first-round" />
+    </label>
+    <span class="hint" id="{uid}-first-round">Optional: adds the application's first interview round.</span>
+  {/if}
 
   <label>Job link <input bind:value={jobLink} inputmode="url" autocomplete="off" /></label>
   <label>Google Doc link <input bind:value={googleDocLink} inputmode="url" autocomplete="off" /></label>
@@ -145,4 +161,7 @@
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
   .actions { display: flex; gap: 0.5rem; }
   .error { color: #b3261e; margin: 0; }
+  .readonly { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9rem; }
+  .readonly .label { font-size: 0.85rem; font-weight: 600; }
+  .hint { font-size: 0.8rem; font-weight: 400; color: #666; }
 </style>

@@ -28,6 +28,13 @@ class ContactCreate(BaseModel):
     notes: str | None = None
     application_id: int | None = None
 
+    @model_validator(mode="after")
+    def _typed_email_is_found(self) -> "ContactCreate":
+        # The user typed this address, so it is known unless they say otherwise.
+        if self.email and "email_confidence" not in self.model_fields_set:
+            self.email_confidence = EmailConfidence.FOUND
+        return self
+
 
 class ContactUpdate(BaseModel):
     """Every user-editable field; omitted means unchanged. Status, dates and

@@ -94,3 +94,39 @@ class UnsupportedCareersSiteError(Exception):
 
 class DuplicateWatchCompanyError(Exception):
     """That job board is already on the watchlist."""
+
+
+class InterviewRoundNotFoundError(Exception):
+    """No interview round exists with the requested id."""
+
+
+class StoryNotFoundError(Exception):
+    """No story-bank story exists with the requested id."""
+
+
+class ContactNotOnApplicationError(Exception):
+    """The contact belongs to a different application than the interview round."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class StoryArchivedError(Exception):
+    """An archived story can't be newly linked to an interview round."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class RoundNotScheduledError(Exception):
+    """The interview round has no scheduled time (a calendar event needs one)."""
+
+
+class PrepBriefNotFoundError(Exception):
+    """The application has no company brief yet."""
+
+
+class QueueItemWrongKindError(Exception):
+    """The research queue item is of a different kind than the delivery."""

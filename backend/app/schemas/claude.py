@@ -13,6 +13,7 @@ from app.models.research_queue import QueueKind
 
 MAX_BATCH = 25
 MAX_SOURCES = 20
+MAX_BRIEF_LENGTH = 12_000
 
 
 def _drop_nul(value: str) -> str:
@@ -69,6 +70,14 @@ class FollowupIn(_ClaudeIn):
 
 class FollowupsBatchIn(_ClaudeIn):
     followups: list[FollowupIn] = Field(max_length=MAX_BATCH)
+
+
+class BriefIn(_ClaudeIn):
+    """A company brief for a pending `interview_brief` queue item (Phase 4)."""
+
+    queue_item_id: int
+    body: _text(MAX_BRIEF_LENGTH, required=True)
+    sources: list[SourceIn] = Field(default_factory=list, max_length=MAX_SOURCES)
 
 
 class QueueResultIn(_ClaudeIn):

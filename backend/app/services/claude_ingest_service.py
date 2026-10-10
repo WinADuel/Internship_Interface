@@ -13,10 +13,13 @@ from urllib.parse import urlsplit
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.application import Application
 from app.models.contact import Contact, ContactKind, ContactOrigin, ContactStatus, EmailConfidence
 from app.models.research_queue import QueueKind, QueueState, ResearchQueueItem
-from app.schemas.claude import ContactIn, ContactsBatchIn, FollowupsBatchIn, IngestResultOut
-from app.services import research_queue_service
+from app.models.prep_brief import PrepBrief
+from app.schemas.claude import BriefIn, ContactIn, ContactsBatchIn, FollowupsBatchIn, IngestResultOut
+from app.services import prep_brief_service, research_queue_service
+from app.services.errors import ApplicationNotFoundError, QueueItemNotPendingError, QueueItemWrongKindError
 from app.services.nudges import needs_followup_draft
 from app.services.settings_service import get_settings, nudge_settings
 
@@ -42,6 +45,18 @@ def is_single_email(value: str | None) -> bool:
     return bool(value) and _SINGLE_EMAIL_RE.fullmatch(value) is not None
 
 
+# Queue kinds that /work hands to the job, and the subset that /contacts
+# answers. A brief request is answered only by /briefs.
+WORK_KINDS = (
+    QueueKind.PROFESSOR_PERSON,
+    QueueKind.PROFESSOR_SEARCH,
+    QueueKind.COMPANY_CONTACTS,
+    QueueKind.INTERVIEW_BRIEF,
+)
+CONTACT_KINDS = (QueueKind.PROFESSOR_PERSON, QueueKind.PROFESSOR_SEARCH, QueueKind.COMPANY_CONTACTS)
+BRIEF_DONE_NOTE = "brief saved"
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -58,7 +73,7 @@ def is_safe_url(url: str | None) -> bool:
 
 def get_work(db: Session, today: date) -> dict:
     settings = get_settings(db)
-    queue = research_queue_service.pending_items(db, limit=settings.claude_job_max_items)
+    queue = research_queue_service.pending_items(db, limit=settings.claude_job_max_items, kinds=WORK_KINDS)
     active = list(
         db.scalars(select(Contact).where(Contact.archived.is_(False)).order_by(Contact.id))
     )
@@ -147,7 +162,11 @@ def upsert_contacts(db: Session, batch: ContactsBatchIn, now: datetime | None = 
     created = updated = skipped = 0
     for item in batch.contacts:
         queue_item = db.get(ResearchQueueItem, item.queue_item_id)
-        if queue_item is None or queue_item.state != QueueState.PENDING:
+        if (
+            queue_item is None
+            or queue_item.state != QueueState.PENDING
+            or queue_item.kind not in CONTACT_KINDS
+        ):
             skipped += 1
             continue
         fields = _sanitized(item)
@@ -203,6 +222,35 @@ def apply_followups(db: Session, batch: FollowupsBatchIn) -> IngestResultOut:
         updated += 1
     db.commit()
     return IngestResultOut(created=0, updated=updated, skipped=skipped)
+
+
+def save_brief(db: Session, data: BriefIn, now: datetime | None = None) -> PrepBrief:
+    """Stores the company brief for a pending `interview_brief` item and marks
+    the item done. The application's brief is replaced, not appended to.
+    Sources with non-http(s) URLs are dropped. If the application was deleted
+    after the request, the item is marked failed and nothing is stored.
+    The item is row-locked, so a second save of it at the same time waits,
+    then finds it done (409) instead of adding a second brief."""
+    now = now or _now()
+    item = research_queue_service.lock_item(db, data.queue_item_id)
+    if item.kind != QueueKind.INTERVIEW_BRIEF:
+        raise QueueItemWrongKindError(item.id)
+    if item.state != QueueState.PENDING:
+        raise QueueItemNotPendingError(item.id)
+    if item.application_id is None or db.get(Application, item.application_id) is None:
+        research_queue_service.fail_item(db, item.id, "application deleted", now=now)
+        raise ApplicationNotFoundError(item.application_id)
+    brief = prep_brief_service.find_brief(db, item.application_id)
+    if brief is None:
+        brief = PrepBrief(application_id=item.application_id)
+        db.add(brief)
+    brief.body = data.body
+    brief.sources = [s.model_dump() for s in data.sources if is_safe_url(s.url)]
+    item.state = QueueState.DONE
+    item.result_note = BRIEF_DONE_NOTE
+    item.completed_at = now
+    db.commit()
+    return brief
 
 
 def complete_queue_item(db: Session, item_id: int, note: str) -> ResearchQueueItem:

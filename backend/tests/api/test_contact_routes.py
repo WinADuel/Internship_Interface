@@ -51,6 +51,15 @@ def test_create_action_history_round_trip(logged_in_client):
     assert activity[0]["contact_id"] == c["id"] and activity[0]["new_status"] == "sent"
 
 
+def test_typed_email_counts_as_found(logged_in_client):
+    # A manually added contact's email was typed by the user (Contacts page or
+    # a prep page's "Add interviewer"), so it is a known address, not "not found".
+    assert _create(logged_in_client, email="jane@stanford.edu")["email_confidence"] == "found"
+    assert _create(logged_in_client)["email_confidence"] == "not_found"
+    guessed = _create(logged_in_client, email="j.lee@stanford.edu", email_confidence="pattern_guess")
+    assert guessed["email_confidence"] == "pattern_guess"
+
+
 def test_backdated_action_requires_timezone(logged_in_client):
     c = _create(logged_in_client)
     r = logged_in_client.post(f"/api/contacts/{c['id']}/actions", json={"action": "sent", "on": "2026-10-01T09:00:00"})

@@ -9,6 +9,9 @@ _NON_NULLABLE_FIELDS = ("company", "role_title", "status", "priority")
 
 
 class ApplicationCreate(BaseModel):
+    """`interview_datetime`, when given, becomes the application's first
+    interview round (Phase 4); the column itself is derived from rounds."""
+
     company: str
     role_title: str
     date_applied: date | None = None
@@ -27,6 +30,9 @@ class ApplicationCreate(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
+    """No `interview_datetime`: it is derived from the interview rounds
+    (Phase 4), and a value sent here is ignored like any unknown field."""
+
     company: str | None = None
     role_title: str | None = None
     date_applied: date | None = None
@@ -40,7 +46,6 @@ class ApplicationUpdate(BaseModel):
     source: str | None = None
     priority: Priority | None = None
     follow_up_date: date | None = None
-    interview_datetime: datetime | None = None
     google_doc_link: str | None = None
 
     @model_validator(mode="after")
