@@ -351,7 +351,7 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:30";'
 	info "time zone: $timezone"
 	printf '\nNext:\n'
 	if ((deploy_has_key)); then
-		info "1. Keep this root window open. In a NEW terminal on your Mac, check you can log in:"
+		info "1. Keep this root window open. In a NEW terminal on your computer, check you can log in:"
 		info "     ssh $DEPLOY_USER@$ip"
 		info "2. As $DEPLOY_USER, add the GitHub deploy key and clone the repo"
 		info "   (docs/deploy/server-setup.md, step 5)."
