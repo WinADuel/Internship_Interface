@@ -8,10 +8,16 @@ You only do steps 1 to 10 once. Step 11 is for later, when you update or fix thi
 **Before you start**
 
 - Allow an afternoon. Most of it is waiting (domain, builds).
-- The commands are for your **Mac**. Open **Terminal**: press Cmd+Space, type `Terminal`, press Enter.
+- You can do this from your **Mac** or your **Windows PC**. Pick one and use it for steps 2 to 7; the other one is added at the end ("Use the other computer too" in step 11).
+  - **Mac:** open **Terminal**: press Cmd+Space, type `Terminal`, press Enter.
+  - **Windows:** open **PowerShell**: press the Windows key, type `PowerShell`, press Enter. (Not "Command Prompt": some commands below only work in PowerShell.)
+    Check SSH is there: `ssh -V` prints a version. If it says it isn't recognised, open **Settings → System → Optional features → Add a feature**, install **OpenSSH Client**, and open a new PowerShell window.
+- Where the Mac and Windows commands differ, the guide shows both. Everything you type once you're logged in to the server is the same on both.
 - Anything in `<angle brackets>` is a placeholder. Replace the whole thing, brackets too.
   For example, `ssh root@<IP>` becomes `ssh root@203.0.113.10`.
-- Copy commands exactly. To paste into Terminal, press Cmd+V.
+- Copy commands exactly.
+  - **Mac:** paste with Cmd+V, copy with Cmd+C.
+  - **Windows:** paste with Ctrl+V or a right-click. To copy text from the window, select it with the mouse and press Ctrl+C (with nothing selected, Ctrl+C stops the running command instead).
 - You'll make several secrets. Keep a password manager open (1Password, Bitwarden, iCloud Keychain's Passwords app...).
   Never send a secret by chat or email.
 
@@ -45,22 +51,30 @@ You only do steps 1 to 10 once. Step 11 is for later, when you update or fix thi
 
 ## 2. SSH key and the droplet
 
-An SSH key lets your Mac log in to the server without a password. You make it once.
+An SSH key lets your computer log in to the server without a password. You make it once.
 
-1. In Terminal on your Mac:
+1. In Terminal (Mac) or PowerShell (Windows), the same command on both:
 
    ```
    ssh-keygen -t ed25519 -C "tracker"
    ```
 
-   - "Enter file in which to save the key": just press Enter (keeps the default, `~/.ssh/id_ed25519`).
+   - "Enter file in which to save the key": just press Enter (keeps the default: `~/.ssh/id_ed25519` on the Mac, `C:\Users\<you>\.ssh\id_ed25519` on Windows).
      If it says the file already exists, you already have a key: type `n` and use that one.
    - "Enter passphrase": type a passphrase, press Enter, then type it again. Save it in your password manager.
      (Nothing shows while you type. That's normal.)
-2. Copy the **public** half of the key:
+2. Copy the **public** half of the key.
+
+   Mac:
 
    ```
    pbcopy < ~/.ssh/id_ed25519.pub
+   ```
+
+   Windows (PowerShell):
+
+   ```
+   Get-Content $HOME\.ssh\id_ed25519.pub | Set-Clipboard
    ```
 
    Nothing prints. The key is now on your clipboard. (The file without `.pub` is the private key. Never share it.)
@@ -68,7 +82,7 @@ An SSH key lets your Mac log in to the server without a password. You make it on
    - **Region:** New York (any New York datacenter).
    - **Image:** OS → **Ubuntu**, version **24.04 (LTS) x64**.
    - **Size:** Droplet Type **Basic**, CPU options **Regular** (SSD), then the **$6/mo** plan (1 GB / 1 CPU, 25 GB disk).
-   - **Authentication method:** **SSH Key** → **New SSH Key**. Paste (Cmd+V) into the box, name it `MacBook`, and click **Add SSH Key**.
+   - **Authentication method:** **SSH Key** → **New SSH Key**. Paste (Cmd+V or Ctrl+V) into the box, name it `MacBook` or `Windows PC`, and click **Add SSH Key**.
      Make sure it's ticked.
    - **Backups:** optional. Weekly backups cost about $1.20 a month. They're a second safety net; the app makes its own backups too.
    - **Hostname:** `tracker`.
@@ -85,14 +99,26 @@ You can make the droplet bigger later (2 GB, $12 a month) if builds run out of m
 
 This runs once. It makes a `deploy` user for you to log in as, turns off password and root login, turns on the firewall, installs Docker, turns on automatic security updates, adds swap space and sets the time zone.
 
-1. On your Mac, go to your copy of the repo and get the latest code. Use your real folder:
+1. On your computer, go to your copy of the repo and get the latest code. Use your real folder.
+
+   Mac:
 
    ```
    cd ~/Internship_Interface
    git checkout main
    git pull
    ```
-2. Copy the script to the server:
+
+   Windows (PowerShell; if the repo is on your OneDrive desktop):
+
+   ```
+   cd $HOME\OneDrive\Desktop\Internship_Interface
+   git checkout main
+   git pull
+   ```
+
+   If Windows asks "Deletion of directory '.git/objects/..' failed. Should I try again?", type `n`. OneDrive is holding the folder; the update itself worked.
+2. Copy the script to the server (the same command on both):
 
    ```
    scp ops/server/bootstrap.sh root@<IP>:
@@ -121,11 +147,11 @@ This runs once. It makes a `deploy` user for you to log in as, turns off passwor
     firewall:  on; open: 22/tcp (SSH), 80/tcp, 443/tcp, 443/udp
     ...
 Next:
-    1. Keep this root window open. In a NEW terminal on your Mac, check you can log in:
+    1. Keep this root window open. In a NEW terminal on your computer, check you can log in:
          ssh deploy@<IP>
 ```
 
-4. **Keep the root window open.** Open a **new** Terminal window (Cmd+N) and log in as `deploy`:
+4. **Keep the root window open.** Open a **new** window (Mac: Cmd+N in Terminal; Windows: open PowerShell again from the Start menu) and log in as `deploy`:
 
    ```
    ssh deploy@<IP>
@@ -143,7 +169,11 @@ Next:
   If you're locked out completely, destroy the droplet and start step 2 again. Nothing is on it yet.
 - Running `bootstrap.sh` twice is safe. It skips what's already done.
 
-**Tip:** to stop your Mac asking for the key passphrase every time, run `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` once.
+**Tip:** to stop the computer asking for the key passphrase every time:
+- **Mac:** run `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` once.
+- **Windows:** open PowerShell **as administrator** (right-click PowerShell → **Run as administrator**) and run
+  `Get-Service ssh-agent | Set-Service -StartupType Automatic; Start-Service ssh-agent`.
+  Then, in a normal PowerShell window, run `ssh-add $HOME\.ssh\id_ed25519` once.
 
 ---
 
@@ -162,13 +192,22 @@ You can do this while `bootstrap.sh` runs.
 
    Click **Add**.
 4. Skip `www`. The server only answers on the bare domain, so a `www` record isn't needed. Don't add an `AAAA` record either.
-5. Check it from your Mac. Repeat every few minutes until it prints your IP:
+5. Check it from your computer. Repeat every few minutes until it prints your IP.
+
+   Mac:
 
    ```
    dig +short yourdomain.com
    ```
 
+   Windows (PowerShell):
+
+   ```
+   (Resolve-DnsName yourdomain.com -Type A -DnsOnly).IPAddress
+   ```
+
 **What you should see:** just your IP, like `203.0.113.10`. It usually takes 5 to 30 minutes, sometimes a few hours.
+On Windows, a red error ("DNS name does not exist") just means it isn't ready yet.
 
 **If it goes wrong:** if it prints another address too, a parking record is still there. Delete it.
 If nothing prints after a few hours, check the record's Host is blank and the Answer is the droplet's IPv4.
@@ -188,7 +227,7 @@ Do all of this logged in as `deploy` (`ssh deploy@<IP>`).
    cat ~/.ssh/github_deploy.pub
    ```
 
-   It prints one line starting with `ssh-ed25519`. Select the whole line and copy it (Cmd+C).
+   It prints one line starting with `ssh-ed25519`. Select the whole line and copy it (Mac: Cmd+C; Windows: Ctrl+C while it's selected).
 2. On GitHub, open the repo **WinADuel/Internship_Interface** → **Settings** → **Deploy keys** → **Add deploy key**.
    - **Title:** `tracker server`
    - **Key:** paste the line.
@@ -260,7 +299,7 @@ Check you pasted the whole `.pub` line into **Deploy keys** on the right repo, a
    nano .env
    ```
 
-   Move with the arrow keys. Delete the old value with Backspace. Paste with Cmd+V. Set each line like this:
+   Move with the arrow keys. Delete the old value with Backspace. Paste with Cmd+V on the Mac, or Ctrl+V or a right-click on Windows. Set each line like this:
 
    - `DOMAIN=yourdomain.com` (just the name: no `https://`, no slash)
    - `CONTACT_EMAIL=` your email. It is shown on the public About and Privacy pages, and Google needs it there to publish the app (step 8).
@@ -318,7 +357,7 @@ Check you pasted the whole `.pub` line into **Deploy keys** on the right repo, a
    ```
 
    - Type a password twice (nothing shows while you type).
-   - It prints a QR code. If it looks broken, make the window bigger or zoom out (Cmd+-).
+   - It prints a QR code. If it looks broken, make the window bigger or zoom out (Mac: Cmd+-; Windows: Ctrl+-, or Ctrl and scroll down).
    - Scan it with your authenticator app. It's a **new** entry, separate from your Mac/PC copies (they have their own accounts).
      If your app allows it, rename it to something like "Tracker server".
    - Type the 6-digit code. **What you should see:** `Account ready. Log in at /#/login.`
@@ -494,11 +533,19 @@ It saves a copy of the current data first, replaces everything, and restarts the
 
 **From a Google Drive copy** (if the server's own backups are gone):
 
-1. In Google Drive, open **Internship Tracker Backups** and download the newest `tracker-....dump.enc` to your Mac.
-2. Copy it to the server, from your Mac:
+1. In Google Drive, open **Internship Tracker Backups** and download the newest `tracker-....dump.enc` to your computer.
+2. Copy it to the server, from your computer.
+
+   Mac:
 
    ```
    scp ~/Downloads/tracker-<date>.dump.enc deploy@<IP>:
+   ```
+
+   Windows (PowerShell):
+
+   ```
+   scp $HOME\Downloads\tracker-<date>.dump.enc deploy@<IP>:
    ```
 3. On the server:
 
@@ -540,14 +587,30 @@ These never touch your data.
   Drive keeps the newest 30 encrypted copies. A backup bigger than 100 MB isn't copied to Drive; Settings → Backups then shows an error. (Yours is far smaller.)
 - **Security updates** install by themselves. If one needs a reboot, the server restarts at 04:30 and the app comes back on its own.
 - **Keep `.env` safe:** it lives on the server (only `deploy` can read it) and in your password manager. Update the password manager copy whenever you change it.
-- **From the Windows PC:** PowerShell has `ssh` built in. Make a key there with `ssh-keygen -t ed25519 -C "tracker-pc"`,
-  copy it with `Get-Content ~\.ssh\id_ed25519.pub | Set-Clipboard`, then on the server (from your Mac) add it as a new line in `~/.ssh/authorized_keys` with `nano`.
+
+### Use the other computer too
+
+The server only lets in keys it knows, so the second computer's key has to be added from the first one.
+
+1. **On the second computer**, make a key and copy its public half:
+   - Windows (PowerShell): `ssh-keygen -t ed25519 -C "tracker-pc"`, then `Get-Content $HOME\.ssh\id_ed25519.pub | Set-Clipboard`.
+   - Mac (Terminal): `ssh-keygen -t ed25519 -C "tracker-mac"`, then `pbcopy < ~/.ssh/id_ed25519.pub`.
+
+   Paste it into a note in your password manager so you can reach it from the first computer. It's the public half, so this is safe.
+2. **On the first computer**, log in (`ssh deploy@<IP>`) and open the list of allowed keys:
+
+   ```
+   nano ~/.ssh/authorized_keys
+   ```
+
+   Go to the end with the arrow keys, press Enter for a new line, paste the key (one line starting with `ssh-ed25519`), then save with Ctrl+O, Enter, and exit with Ctrl+X.
+3. **On the second computer**, check it works: `ssh deploy@<IP>`.
 
 ### Troubleshooting
 
 | Problem | What to check |
 |---|---|
-| The site doesn't load | `dig +short yourdomain.com` shows the droplet's IP (DNS). `docker compose ps` shows everything `Up`. The firewall allows 80 and 443 (`sudo ufw status`). |
+| The site doesn't load | `dig +short yourdomain.com` (Windows: `(Resolve-DnsName yourdomain.com -Type A -DnsOnly).IPAddress`) shows the droplet's IP (DNS). `docker compose ps` shows everything `Up`. The firewall allows 80 and 443 (`sudo ufw status`). |
 | Certificate or "not secure" errors | DNS must point at the droplet before the first deploy. `docker compose logs caddy --tail 50` shows why. Caddy retries by itself once DNS is right. |
 | The build runs out of memory ("killed") | Resize the droplet to 2 GB in DigitalOcean (droplet → **Resize**), then `ops/server/deploy.sh` again. |
 | Google says `redirect_uri_mismatch` | `GOOGLE_REDIRECT_URI` in `.env` and the URI in Google Cloud (step 8) must match exactly. After editing `.env`, run `ops/server/deploy.sh` to apply it. |
