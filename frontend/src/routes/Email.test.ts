@@ -119,11 +119,11 @@ describe("Email updates page", () => {
     expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
   });
 
-  it("says Reconnect when sync is on but the Gmail permission was lost", async () => {
+  it("says Connect when sync is on but no inbox is connected", async () => {
     vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ gmailGranted: false, gmailSyncEnabled: true }));
     vi.mocked(listSuggestions).mockResolvedValue([]);
     render(Email);
-    expect(await screen.findByRole("link", { name: "Reconnect Gmail in Settings" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Connect Gmail in Settings" })).toBeInTheDocument();
   });
 
   it("says when sync is off", async () => {

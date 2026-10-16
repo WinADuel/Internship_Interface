@@ -202,7 +202,7 @@ describe("Settings page", () => {
     routerState.querystring = "gmail=1";
     render(Settings);
     await vi.waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith("Gmail connected. Turn on Sync Gmail below to start.", "info"),
+      expect(showToast).toHaveBeenCalledWith("Gmail inbox connected. Sync Gmail must be on below for it to be read.", "info"),
     );
     expect(replace).toHaveBeenCalledWith("/settings");
     expect(showToast).toHaveBeenCalledTimes(1);
