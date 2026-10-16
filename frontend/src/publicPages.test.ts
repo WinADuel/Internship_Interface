@@ -61,6 +61,12 @@ describe("privacy page", () => {
     expect(html).toContain("no email data is ever given to it");
   });
 
+  it("says Gmail access can cover several inboxes and removing one deletes its data", () => {
+    expect(html).toMatch(/more than one inbox[\s\S]*own access token/);
+    expect(html).toMatch(/<strong>Remove<\/strong> next to an inbox stops reading it and deletes\s+its access token and everything stored from it/);
+    expect(html).toContain("in each connected Google account");
+  });
+
   it("says what cookies and browser storage are for", () => {
     expect(html).toContain("Cookies are used only to keep you signed in");
     expect(html).toContain("dashboard layout is saved in your own browser");
