@@ -14,7 +14,7 @@
   </header>
   <main>
     <h1>Privacy policy</h1>
-    <p class="muted">Last updated: 2026-10-09</p>
+    <p class="muted">Last updated: 2026-10-16</p>
     <p>
       Internship Tracker is a personal app with a single user, its owner. This page explains
       what it stores and what it does with Google access.
@@ -50,8 +50,10 @@
         (confirmations, interview invitations, assessments, offers and rejections), replies from
         tracked contacts, emails the owner sent to a tracked contact, and applications to
         companies not yet in the tracker, and suggest the matching change. It is asked for
-        only when the owner presses <strong>Connect Gmail</strong> in Settings, separately from
-        the Drive permissions.
+        only when the owner presses <strong>Connect Gmail</strong> or <strong>Add another
+        inbox</strong> in Settings, on its own and separately from the Drive permissions. The
+        owner can connect more than one inbox (for example a personal Gmail and a school Google
+        account); each has its own access token, stored encrypted.
       </li>
     </ul>
 
@@ -59,9 +61,9 @@
     <ul>
       <li>
         <strong>What is read:</strong> for recent mail in the Inbox and Sent folders (not
-        Promotions, Social or chats), the sender, recipients, subject and date headers and the
-        short preview text Gmail itself provides. Message bodies and attachments are never
-        downloaded.
+        Promotions, Social or chats) of each connected inbox, the sender, recipients, subject
+        and date headers and the short preview text Gmail itself provides, and the inbox's own
+        email address. Message bodies and attachments are never downloaded.
       </li>
       <li>
         <strong>What is kept:</strong> only for an email the app suggests an update from: its
@@ -71,20 +73,24 @@
         invitations sent through a job-application system (such as Greenhouse or Lever) by a
         company the owner doesn't track yet, so it can be offered as a new application.
         Mail that matches nothing is not stored; the app keeps only the date up to which it
-        has checked. Decided suggestions are deleted after 90 days.
+        has checked each inbox, and each inbox's address. Decided suggestions are deleted after
+        90 days.
       </li>
       <li>
         <strong>What it is used for:</strong> showing the owner suggested updates on the
         Email updates page, which the owner accepts or dismisses: a change to a tracked
         application, marking a contact as replied, marking a contact as emailed (from the
         recipients of mail the owner sent), or adding a company not yet tracked. The app never
-        sends, changes or deletes email.
+        sends, changes or deletes email. The owner's dashboard also lists recent replies and
+        interview, offer and rejection emails among these, one line each.
       </li>
       <li>
         <strong>How to turn it off:</strong> untick <strong>Sync Gmail</strong> in Settings to
-        stop reading mail, and remove the app's access at
+        stop reading mail. <strong>Remove</strong> next to an inbox stops reading it and deletes
+        its access token and everything stored from it (changes the owner already accepted in
+        the tracker stay). Remove the app's access at
         <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>
-        to withdraw the permission entirely.
+        in each connected Google account to withdraw the permission entirely.
       </li>
     </ul>
     <p>

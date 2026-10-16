@@ -421,20 +421,26 @@ Gmail's read permission (`gmail.readonly`) is one Google calls *restricted*. A p
 2. Open **Google Auth Platform → Data Access** → **Add or remove scopes**. Find `.../auth/gmail.readonly` (filter for "gmail.readonly"), tick it, click **Update**, then **Save**.
    - If the console then wants a review before the app can stay published, remove the scope again and save: the tracker asks for it at sign-in anyway, and the unverified-app screen covers it.
 3. In the tracker, go to **Settings → Gmail** and click **Connect Gmail**.
+   - Google shows its account chooser: pick the Google account whose mail you want tracked.
    - Google shows **"Google hasn't verified this app"** again. Click **Advanced** → **Go to ... (unsafe)**.
    - Tick the box that lets the app **read your email**, then **Continue**.
 
-   You land back on Settings with "Gmail connected", and the card says **Gmail: Connected**.
+   You land back on Settings with "Gmail connected", and the Gmail card lists the inbox by its address.
    If it says Gmail wasn't connected, the box wasn't ticked: click **Connect Gmail** and try again.
+   This asks only for mail access: your Drive and Docs connection (Essays, backups) stays as it is.
 4. Tick **Sync Gmail** and click **Save Gmail settings**. The defaults are fine: check every 30 minutes, and look back 30 days on the first sync.
    Leave **Apply some updates automatically** off at first; turn it on later if you want confirmations and contact replies applied without asking (rejections, interviews, assessments and offers always wait for you).
 5. Press **Sync now**. **What you should see:** "Checked N emails: M updates found." and **Email updates** in the menu with a count when there is something to review.
-   After this, the `gmail-sync` service checks by itself on the interval you chose.
+   After this, the `gmail-sync` service checks by itself on the interval you chose. The Dashboard's **Email replies** block shows a one-line preview of each reply to your cold emails, and of interview, offer and rejection emails.
+6. **Another inbox (optional).** If you also send cold emails from another Google account (a school account, say), click **Add another inbox** in the Gmail card, pick that account in Google's chooser, and go through the clicks in step 3 again. Each inbox shows its own address, last sync and any error. One sync covers every inbox, and the settings (interval, look-back, auto-apply) apply to all of them.
+   Every inbox must be a Gmail or Google Workspace account. A school or work account may only allow apps its administrator approved: if Google says access is blocked, only that administrator can allow it.
 
 **Good to know:**
-- Changing your Google account password disconnects the whole Google connection, not just Gmail: backups to Drive, Essays and Gmail sync all use the same one (Google's rule for mail access). Settings then shows "Last sync failed: ... reconnect Google and allow Gmail in Settings" with a **Reconnect Gmail** link; click it and go through step 3 again. That reconnects all three.
-  Don't use **Connect Google Docs** on the Essays page for this while Gmail sync is on: it reconnects only Drive and Docs and drops Gmail, and Settings then says "Gmail permission missing: use Reconnect Gmail in Settings".
-- To stop it, untick **Sync Gmail**. To withdraw the permission completely, remove the app at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) (that also disconnects Docs and backups until you connect Google again).
+- Each inbox has its own Google sign-in. If one stops working (you changed that Google account's password, or removed the app's access), its line in Settings says "reconnect this inbox in Settings": click **Reconnect** next to it and go through step 3 with that account. The other inboxes keep syncing meanwhile.
+  If that account is also the one Essays and backups use, and they then say to reconnect Google too, use **Connect Google Docs** on the Essays page as well (step 8).
+- **Connect Google Docs** on the Essays page reconnects only Drive and Docs. It no longer touches Gmail sync.
+- **Remove** next to an inbox stops reading it and deletes its email updates from the tracker. Changes you already accepted (statuses, rounds, contacts) stay.
+- To stop it, untick **Sync Gmail**. To withdraw the permission completely, remove the app at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) in each Google account you connected. Removing an inbox in Settings doesn't do that for you, because for the account Essays and backups use it would end their access too; removing the app there disconnects Docs and backups until you connect Google again.
 - The console clicks above were written from Google's documentation and are confirmed during the live setup; if a screen looks different, the names (Gmail API, Data Access, `gmail.readonly`) stay the same.
 
 ---
@@ -617,5 +623,8 @@ The server only lets in keys it knows, so the second computer's key has to be ad
 | Login gives an error (500) after moving servers | `TOKEN_ENCRYPTION_KEY` changed. See [Moving to a new server](../../README.md#moving-to-a-new-server) in the README. |
 | `deploy.sh` says files were changed on the server | Someone edited code on the server. Undo it with `git checkout -- <file>`. |
 | `bootstrap.sh` stops with "Could not get lock /var/lib/dpkg/lock-frontend" | A new droplet installs its first security updates right after it starts. The script waits up to 10 minutes for them. If it still stops, wait a few more minutes and run `bash bootstrap.sh` again. |
-| Settings → Gmail shows "reconnect Google and allow Gmail" or "Gmail permission missing" | Gmail access was removed, your Google password changed (that disconnects backups and Essays too), or Google was reconnected with **Connect Google Docs**, which leaves Gmail out. Click **Reconnect Gmail** in Settings and tick every box, including read-your-email (step 8, "Turn on Gmail sync"). It reconnects Drive and Docs as well. |
-| Settings shows "Off-site copy failed" | Read the message. If it ends in "reconnect Google in Settings", connect Google again: with **Reconnect Gmail** in Settings if you use Gmail sync (it reconnects everything), otherwise with **Connect Google Docs** on the Essays page (step 8). |
+| An inbox in Settings → Gmail says "reconnect this inbox in Settings" | That Google account's password changed or the app's access was removed there. Click **Reconnect** next to the inbox, pick the same account and tick read-your-email (step 8, "Turn on Gmail sync"). The other inboxes are not affected. |
+| Settings → Gmail says "No Gmail inbox connected" | Gmail sync is on but every inbox was removed. Click **Connect Gmail**, or untick **Sync Gmail**. |
+| An inbox shows "Gmail inbox, address shown after the next sync" | It was connected before the tracker could read more than one inbox; the next sync reads its address (and merges it into a line with the same address, if you added one). If instead it says "reconnect this inbox", its old sign-in no longer works, so the address can't be read: click **Reconnect**, pick the account, and once the new line with the address syncs, **Remove** the old one (its unreviewed email updates go; anything you accepted stays). |
+| Connecting an inbox ends with "Gmail wasn't connected" or Google says access is blocked | The read-your-email box wasn't ticked: try again and tick it. For a school or work account, its administrator may not allow the app; only they can change that. |
+| Settings shows "Off-site copy failed" | Read the message. If it ends in "reconnect Google in Settings", connect Google again with **Connect Google Docs** on the Essays page (step 8). Gmail's **Reconnect** buttons don't reconnect Drive. |
