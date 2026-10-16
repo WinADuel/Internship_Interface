@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 
 from app.db.session import engine as app_engine
 from app.models.application import Application, ApplicationStatus
@@ -16,6 +16,7 @@ from app.models.email_suggestion import EmailDirection, EmailSuggestion, Suggest
 from app.services import settings_service
 from app.services.errors import GoogleAuthError
 from app.services.gmail import sync
+from app.services.google_docs_service import GOOGLE_SCOPE, store_token
 from app.services.gmail.client import GMAIL_RECONNECT_HINT, GmailError, GmailMessage, GoogleGmailClient
 from app.services.gmail.sync import (
     BASE_QUERY,
@@ -26,9 +27,9 @@ from app.services.gmail.sync import (
     parse_message,
     run_sync,
 )
-from app.services.google_docs_service import GOOGLE_SCOPE, store_token
+from app.models.gmail_account import GmailAccount
 from app.services.sheet_sync_service import CONTACT_TABS
-from tests.services.gmail.fakes import FakeGmailClient, grant_gmail, message, ms
+from tests.services.gmail.fakes import FakeGmailClient, FakeInboxes, grant_gmail, message, ms
 
 NOW = datetime(2026, 10, 9, 12, tzinfo=UTC)
 
@@ -68,6 +69,15 @@ def _newsletter(mid: str, when: datetime) -> GmailMessage:
     return message(mid, when, from_="Deals <deals@shop.com>", subject="Big sale")
 
 
+def _inbox(db) -> GmailAccount:
+    db.expire_all()
+    return db.scalars(select(GmailAccount)).one()
+
+
+def _cursor(db) -> str | None:
+    return _inbox(db).history_cursor
+
+
 def _suggestions(db) -> list[EmailSuggestion]:
     return list(db.scalars(select(EmailSuggestion).order_by(EmailSuggestion.id)))
 
@@ -84,7 +94,7 @@ def test_does_nothing_until_gmail_is_granted(db_session):
     settings_service.get_settings(db_session).gmail_sync_enabled = True
     db_session.commit()
 
-    def factory(db):
+    def factory(db, account):
         raise AssertionError("no client without the Gmail permission")
 
     assert run_sync(db_session, factory, now=NOW).status == "not_granted"
@@ -114,7 +124,7 @@ def test_first_run_looks_back_and_stores_only_matched_mail(db_session, settings,
     assert (row.from_name, row.from_email, row.direction) == ("Stripe Recruiting", "recruiting@stripe.com", EmailDirection.INBOUND)
     assert row.received_at == _ago(days=2)
     db_session.refresh(settings)
-    assert settings.gmail_history_cursor == str(ms(_ago(days=1)))
+    assert _cursor(db_session) == str(ms(_ago(days=1)))
     assert settings.gmail_last_sync_at == NOW and settings.gmail_last_error is None
 
 
@@ -157,7 +167,7 @@ def test_a_run_fetches_at_most_max_fetch_oldest_first(db_session, settings, stri
 
     report = run_sync(db_session, gmail.factory, now=NOW)
     assert gmail.gets == ["a1", "a2"] and report.more
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=2)))
+    assert _cursor(db_session) == str(ms(_ago(days=2)))
 
     gmail.gets.clear()
     report = run_sync(db_session, gmail.factory, now=NOW)
@@ -176,11 +186,12 @@ def test_an_error_mid_run_keeps_what_was_done_and_the_next_run_continues(db_sess
     report = run_sync(db_session, gmail.factory, now=NOW)
 
     assert report.status == "error"
-    assert report.error == "gmail get rejected (status 429); it will retry next run"
+    assert report.error == "me@gmail.com: gmail get rejected (status 429); it will retry next run"
     assert [s.gmail_message_id for s in _suggestions(db_session)] == ["a1"]
     row = settings_service.get_settings(db_session)
-    assert row.gmail_history_cursor == str(ms(_ago(days=3)))
+    assert _cursor(db_session) == str(ms(_ago(days=3)))
     assert row.gmail_last_error == report.error
+    assert _inbox(db_session).last_error == "gmail get rejected (status 429); it will retry next run"
     assert row.gmail_last_sync_at == _ago(days=1)  # only a clean run moves it
 
     gmail.fail_on.clear()
@@ -189,6 +200,7 @@ def test_an_error_mid_run_keeps_what_was_done_and_the_next_run_continues(db_sess
     assert [s.gmail_message_id for s in _suggestions(db_session)] == ["a1", "a3"]
     row = settings_service.get_settings(db_session)
     assert row.gmail_last_error is None and row.gmail_last_sync_at == NOW
+    assert _inbox(db_session).last_error is None and _inbox(db_session).last_sync_at == NOW
 
 
 def test_a_deleted_message_is_skipped(db_session, settings):
@@ -199,14 +211,24 @@ def test_a_deleted_message_is_skipped(db_session, settings):
     assert report.status == "ok" and report.fetched == 1
 
 
-def test_google_refusing_the_token_says_reconnect(db_session, settings):
-    def factory(db):
-        raise GoogleAuthError("google token request rejected (status 400)")
+def test_google_refusing_the_token_says_reconnect_this_inbox(db_session, settings):
+    def factory(db, account):
+        raise GoogleAuthError("google token request rejected (status 400)", reconnect=True)
 
     report = run_sync(db_session, factory, now=NOW)
     assert report.status == "error"
-    assert report.error == f"google token request rejected (status 400); {GMAIL_RECONNECT_HINT}"
+    assert GMAIL_RECONNECT_HINT == "reconnect this inbox in Settings"
+    assert _inbox(db_session).last_error == f"google token request rejected (status 400); {GMAIL_RECONNECT_HINT}"
+    assert report.error == f"me@gmail.com: google token request rejected (status 400); {GMAIL_RECONNECT_HINT}"
     assert settings_service.get_settings(db_session).gmail_last_error == report.error
+
+
+def test_a_google_outage_says_it_will_retry(db_session, settings):
+    def factory(db, account):
+        raise GoogleAuthError("google token request rejected (status 503)")
+
+    run_sync(db_session, factory, now=NOW)
+    assert _inbox(db_session).last_error == "google token request rejected (status 503); it will retry next run"
 
 
 def test_an_unexpected_crash_is_recorded_by_type_only(db_session, settings):
@@ -217,7 +239,7 @@ def test_an_unexpected_crash_is_recorded_by_type_only(db_session, settings):
 
     gmail.list_message_ids = broken_list
     report = run_sync(db_session, gmail.factory, now=NOW)
-    assert report.error == "gmail sync failed unexpectedly (RuntimeError)"
+    assert report.error == "me@gmail.com: gmail sync failed unexpectedly (RuntimeError)"
     assert gmail.closed
 
 
@@ -228,12 +250,12 @@ def test_a_message_that_always_fails_is_skipped_and_logged_by_type_and_id_only(
     not quote the email (a database error's text can carry its fields)."""
     real_store = sync.store_suggestion
 
-    def store(db, message, headers, proposal):
+    def store(db, message, headers, proposal, account_id):
         if message.id == "a2":
             raise sqlalchemy_exc.StatementError(
                 "insert failed", "INSERT ...", {"subject": headers.subject}, ValueError("Secret subject")
             )
-        return real_store(db, message, headers, proposal)
+        return real_store(db, message, headers, proposal, account_id)
 
     monkeypatch.setattr(sync, "store_suggestion", store)
     secret = message(
@@ -251,7 +273,7 @@ def test_a_message_that_always_fails_is_skipped_and_logged_by_type_and_id_only(
     assert report.status == "ok" and report.error is None
     assert (report.fetched, report.suggested, report.skipped) == (3, 2, 1)
     assert [s.gmail_message_id for s in _suggestions(db_session)] == ["a1", "a3"]
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=1)))
+    assert _cursor(db_session) == str(ms(_ago(days=1)))
     logged = "\n".join(r.getMessage() + (r.exc_text or "") for r in caplog.records)
     assert "gmail sync skipped message a2 (StatementError)" in logged
     assert "Secret" not in logged and "stripe.com" not in logged
@@ -302,11 +324,11 @@ def test_a_capped_run_moves_the_cursor_only_to_the_last_message_handled(db_sessi
 
     assert gmail.gets == ["first", "mid"] and report.more
     # Not the newest date handled (a day ago): "late" is older than that.
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=3)))
+    assert _cursor(db_session) == str(ms(_ago(days=3)))
     report = run_sync(db_session, gmail.factory, now=NOW)
     assert [s.gmail_message_id for s in _suggestions(db_session)] == ["first", "late"]
     assert not report.more
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=2)))
+    assert _cursor(db_session) == str(ms(_ago(days=2)))
 
 
 def test_an_error_stop_moves_the_cursor_only_to_the_last_message_handled(db_session, settings, stripe):
@@ -315,7 +337,7 @@ def test_an_error_stop_moves_the_cursor_only_to_the_last_message_handled(db_sess
     report = run_sync(db_session, gmail.factory, now=NOW)
 
     assert report.status == "error"
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=3)))
+    assert _cursor(db_session) == str(ms(_ago(days=3)))
     gmail.fail_on.clear()
     run_sync(db_session, gmail.factory, now=NOW)
     assert [s.gmail_message_id for s in _suggestions(db_session)] == ["first", "late"]
@@ -328,23 +350,23 @@ def test_a_capped_run_that_cannot_move_the_cursor_still_makes_progress(db_sessio
     monkeypatch.setattr(sync, "MAX_FETCH", 2)
     gmail = _out_of_order(first=_newsletter("first", _ago(days=1)))
     run_sync(db_session, gmail.factory, now=NOW)
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=3)))
+    assert _cursor(db_session) == str(ms(_ago(days=3)))
 
     gmail.gets.clear()
     run_sync(db_session, gmail.factory, now=NOW)
     assert gmail.gets == ["first", "mid"]
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=1)))
+    assert _cursor(db_session) == str(ms(_ago(days=1)))
 
 
 def test_a_complete_run_moves_the_cursor_to_the_newest_message(db_session, settings, stripe):
     run_sync(db_session, _out_of_order().factory, now=NOW)
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(_ago(days=1)))
+    assert _cursor(db_session) == str(ms(_ago(days=1)))
 
 
 def test_a_future_dated_message_does_not_move_the_cursor_past_now(db_session, settings, stripe):
     gmail = FakeGmailClient([_newsletter("future", NOW + timedelta(days=30))])
     run_sync(db_session, gmail.factory, now=NOW)
-    assert settings_service.get_settings(db_session).gmail_history_cursor == str(ms(NOW))
+    assert _cursor(db_session) == str(ms(NOW))
 
     # Mail that arrives later is still found.
     later = NOW + timedelta(hours=2)
@@ -383,23 +405,33 @@ def test_turning_sync_off_stops_a_running_sync(db_session, settings, stripe):
     assert report.status == "disabled"
     assert gmail.gets == ["a1", "a2"] and _suggestions(db_session) == []
     row = settings_service.get_settings(db_session)
-    assert row.gmail_history_cursor == str(ms(_ago(days=2)))
+    assert _cursor(db_session) == str(ms(_ago(days=2)))
     assert row.gmail_last_sync_at is None and row.gmail_last_error is None
+    assert _inbox(db_session).last_sync_at is None
     assert gmail.closed
 
 
-def test_losing_the_gmail_permission_stops_a_running_sync_and_says_so(db_session, settings, stripe):
-    def drive_only_reconnect():
-        store_token(db_session, {"refresh_token": "refresh"}, GOOGLE_SCOPE)
+def test_removing_the_only_inbox_stops_a_running_sync_and_says_so(db_session, settings, stripe):
+    def remove_inbox():
+        db_session.execute(delete(GmailAccount))
+        db_session.flush()
 
-    gmail = _Hooked(_three(), "a1", drive_only_reconnect)
+    gmail = _Hooked(_three(), "a1", remove_inbox)
 
     report = run_sync(db_session, gmail.factory, now=NOW)
 
     assert report.status == "not_granted" and gmail.gets == ["a1"]
-    row = settings_service.get_settings(db_session)
-    assert row.gmail_last_error == GMAIL_PERMISSION_MISSING
-    assert row.gmail_history_cursor == str(ms(_ago(days=3)))
+    assert settings_service.get_settings(db_session).gmail_last_error == GMAIL_PERMISSION_MISSING
+    assert _suggestions(db_session) == []
+
+
+def test_reconnecting_google_docs_does_not_stop_gmail_sync(db_session, settings, stripe):
+    def drive_only_reconnect():
+        store_token(db_session, {"refresh_token": "refresh"}, GOOGLE_SCOPE)
+
+    gmail = _Hooked(_three(), "a1", drive_only_reconnect)
+    report = run_sync(db_session, gmail.factory, now=NOW)
+    assert report.status == "ok" and gmail.gets == ["a1", "a2", "a3"]
 
 
 def test_a_successful_run_clears_the_permission_error(db_session, settings):
@@ -426,7 +458,7 @@ def test_the_real_client_only_ever_asks_for_metadata(db_session, settings, strip
             return httpx.Response(200, json={"messages": [{"id": "18c1"}]})
         return httpx.Response(200, json=full)
 
-    report = run_sync(db_session, lambda db: GoogleGmailClient("tok", transport=httpx.MockTransport(handler)), now=NOW)
+    report = run_sync(db_session, lambda db, account: GoogleGmailClient("tok", transport=httpx.MockTransport(handler)), now=NOW)
 
     assert report.suggested == 1
     assert len(requests) == 2
@@ -559,14 +591,22 @@ def test_one_pending_add_suggestion_per_untracked_company(db_session, settings):
     assert (row.kind, row.proposed_company) == (SuggestionKind.NEW_APPLICATION, "Rivian")
 
 
-def test_the_real_client_factory_uses_a_fresh_access_token(db_session, monkeypatch):
-    monkeypatch.setattr(sync, "get_valid_access_token", lambda db: "fresh-token")
-    client = sync.google_gmail_client(db_session)
+def test_the_real_client_factory_uses_the_inboxs_own_token(db_session, monkeypatch):
+    other = grant_gmail(db_session, "other@gmail.com", refresh_token="other-refresh")
+    calls = []
+
+    def post(url, data=None, **kwargs):
+        calls.append(data)
+        return httpx.Response(200, json={"access_token": "fresh-token"}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", post)
+    client = sync.google_gmail_client(db_session, other)
     try:
         assert isinstance(client, GoogleGmailClient)
         assert client._client.headers["authorization"] == "Bearer fresh-token"
     finally:
         client.close()
+    assert [c["refresh_token"] for c in calls] == ["other-refresh"]
 
 
 def test_auto_apply_in_a_run_and_the_snapshot_follows_it(db_session, settings):
@@ -611,3 +651,234 @@ def test_a_suggestion_that_already_does_not_apply_is_kept_as_stale(db_session, s
     run_sync(db_session, FakeGmailClient([_rejection("a1", _ago(days=1))]).factory, now=NOW)
     (row,) = _suggestions(db_session)
     assert row.state == SuggestionState.STALE  # kept so the message isn't fetched again
+
+
+# More than one inbox (Phase 7 spec §4).
+
+
+@pytest.fixture()
+def two_inboxes(db_session, settings):
+    """The settings fixture's inbox (me@gmail.com) and a school one."""
+    personal = db_session.scalars(select(GmailAccount)).one()
+    school = grant_gmail(db_session, "me@school.edu")
+    return personal, school
+
+
+def _by_inbox(db) -> list[tuple[int, str]]:
+    return [(s.gmail_account_id, s.gmail_message_id) for s in _suggestions(db)]
+
+
+def _account(db, account_id) -> GmailAccount | None:
+    db.expire_all()
+    return db.get(GmailAccount, account_id)
+
+
+def test_every_inbox_is_synced_oldest_first_with_its_own_cursor(db_session, two_inboxes, stripe):
+    personal, school = two_inboxes
+    # Message ids are per mailbox: the same id in two inboxes is two emails.
+    a = FakeGmailClient([_rejection("x1", _ago(days=3)), _newsletter("a2", _ago(days=2))])
+    b = FakeGmailClient([_rejection("x1", _ago(days=1))], address="me@school.edu")
+    inboxes = FakeInboxes({personal.id: a, school.id: b})
+
+    report = run_sync(db_session, inboxes, now=NOW)
+
+    assert report.status == "ok" and report.error is None
+    assert inboxes.opened == [personal.id, school.id]
+    assert (report.listed, report.fetched, report.suggested) == (3, 3, 2)  # summed over inboxes
+    assert sorted(_by_inbox(db_session)) == sorted([(personal.id, "x1"), (school.id, "x1")])
+    assert _account(db_session, personal.id).history_cursor == str(ms(_ago(days=2)))
+    assert _account(db_session, school.id).history_cursor == str(ms(_ago(days=1)))
+    assert a.closed and b.closed
+    assert [i.status for i in report.inboxes] == ["ok", "ok"]
+    for account_id in (personal.id, school.id):
+        assert _account(db_session, account_id).last_sync_at == NOW
+    row = settings_service.get_settings(db_session)
+    assert row.gmail_last_sync_at == NOW and row.gmail_last_error is None
+
+    # The next run asks each inbox from its own cursor, and a message stored
+    # for one inbox isn't fetched again from it.
+    a.gets.clear()
+    b.gets.clear()
+    run_sync(db_session, inboxes, now=NOW)
+    assert a.queries[-1] == f"{BASE_QUERY} after:{int((_ago(days=2) - timedelta(hours=1)).timestamp())}"
+    assert b.queries[-1] == f"{BASE_QUERY} after:{int((_ago(days=1) - timedelta(hours=1)).timestamp())}"
+    assert a.gets == ["a2"] and b.gets == []
+
+
+def test_one_inbox_failing_does_not_stop_the_other(db_session, two_inboxes, stripe):
+    personal, school = two_inboxes
+    settings_service.get_settings(db_session).gmail_last_sync_at = _ago(days=1)
+    db_session.commit()
+    b = FakeGmailClient([_rejection("b1", _ago(days=1))], address="me@school.edu")
+    refused = GoogleAuthError("google token request rejected (status 400)", reconnect=True)
+    inboxes = FakeInboxes({personal.id: refused, school.id: b})
+
+    report = run_sync(db_session, inboxes, now=NOW)
+
+    assert report.status == "error"
+    assert inboxes.opened == [personal.id, school.id]
+    assert _by_inbox(db_session) == [(school.id, "b1")]
+    failed = _account(db_session, personal.id)
+    assert failed.last_error == "google token request rejected (status 400); reconnect this inbox in Settings"
+    assert failed.last_sync_at is None
+    synced = _account(db_session, school.id)
+    assert synced.last_error is None and synced.last_sync_at == NOW
+    row = settings_service.get_settings(db_session)
+    # At least one inbox synced; the error names the failing one.
+    assert row.gmail_last_sync_at == NOW
+    assert row.gmail_last_error == report.error == (
+        "me@gmail.com: google token request rejected (status 400); reconnect this inbox in Settings"
+    )
+
+    # Fixed: the next run clears both.
+    inboxes.by_account[personal.id] = FakeGmailClient()
+    assert run_sync(db_session, inboxes, now=NOW).status == "ok"
+    assert _account(db_session, personal.id).last_error is None
+    assert settings_service.get_settings(db_session).gmail_last_error is None
+
+
+def test_a_gmail_error_mid_inbox_keeps_its_progress_and_moves_on(db_session, two_inboxes, stripe):
+    personal, school = two_inboxes
+    a = FakeGmailClient(
+        [_rejection("a1", _ago(days=3)), _newsletter("a2", _ago(days=2))],
+        fail_on={"a2": GmailError("gmail get rejected (status 500); it will retry next run", status=500)},
+    )
+    b = FakeGmailClient([_rejection("b1", _ago(days=1))], fail_on={"b1": GmailError("gmail get rejected (status 429)", status=429)})
+    report = run_sync(db_session, FakeInboxes({personal.id: a, school.id: b}), now=NOW)
+
+    assert _by_inbox(db_session) == [(personal.id, "a1")]
+    assert _account(db_session, personal.id).history_cursor == str(ms(_ago(days=3)))
+    assert _account(db_session, school.id).history_cursor is None
+    assert report.error == (
+        "me@gmail.com: gmail get rejected (status 500); it will retry next run;"
+        " me@school.edu: gmail get rejected (status 429)"
+    )
+    # No inbox synced cleanly: the summary's last-sync time stays.
+    assert settings_service.get_settings(db_session).gmail_last_sync_at is None
+
+
+def test_an_inbox_carried_over_from_phase_6_learns_its_address(db_session, settings, stripe):
+    carried = db_session.scalars(select(GmailAccount)).one()
+    carried.email = None
+    db_session.commit()
+    gmail = FakeGmailClient([_rejection("a1", _ago(days=1))], address="me@gmail.com")
+
+    report = run_sync(db_session, gmail.factory, now=NOW)
+
+    assert report.status == "ok" and gmail.profiles == 1
+    assert _account(db_session, carried.id).email == "me@gmail.com"
+    assert _by_inbox(db_session) == [(carried.id, "a1")]
+    run_sync(db_session, gmail.factory, now=NOW)
+    assert gmail.profiles == 1  # only while the address is unknown
+
+
+def test_a_carried_over_inbox_already_connected_again_merges_into_it(db_session, settings, stripe):
+    carried = db_session.scalars(select(GmailAccount)).one()
+    carried.email = None
+    carried.history_cursor = str(ms(_ago(days=5)))
+    db_session.commit()
+    again = grant_gmail(db_session, "me@gmail.com")  # Connect Gmail with the same account
+    for n, (account, mid) in enumerate([(carried, "old1"), (carried, "both"), (again, "both")]):
+        db_session.add(
+            EmailSuggestion(
+                gmail_account_id=account.id,
+                gmail_message_id=mid,
+                gmail_thread_id=f"t{n}",
+                received_at=_ago(days=4),
+                direction=EmailDirection.INBOUND,
+                kind=SuggestionKind.REJECTION,
+                application_id=stripe.id,
+            )
+        )
+    db_session.commit()
+    old_inbox = FakeGmailClient(address="me@gmail.com")
+    new_inbox = FakeGmailClient([_rejection("new1", _ago(days=1))], address="me@gmail.com")
+    inboxes = FakeInboxes({carried.id: old_inbox, again.id: new_inbox})
+
+    report = run_sync(db_session, inboxes, now=NOW)
+
+    assert report.status == "ok"
+    assert inboxes.opened == [carried.id, again.id]
+    assert old_inbox.queries == [] and old_inbox.closed
+    assert _account(db_session, carried.id) is None
+    assert sorted(_by_inbox(db_session)) == sorted([(again.id, "old1"), (again.id, "both"), (again.id, "new1")])
+    assert [i.status for i in report.inboxes] == ["merged", "ok"]
+
+
+def test_a_profile_failure_is_recorded_on_that_inbox(db_session, two_inboxes):
+    personal, school = two_inboxes
+    personal.email = None
+    db_session.commit()
+
+    class NoProfile(FakeGmailClient):
+        def get_profile(self):
+            raise GmailError("gmail profile rejected (status 401); reconnect this inbox in Settings", status=401)
+
+    b = FakeGmailClient(address="me@school.edu")
+    report = run_sync(db_session, FakeInboxes({personal.id: NoProfile(), school.id: b}), now=NOW)
+
+    assert _account(db_session, personal.id).email is None
+    assert report.error == "Gmail inbox: gmail profile rejected (status 401); reconnect this inbox in Settings"
+    assert b.queries and _account(db_session, school.id).last_sync_at == NOW
+
+
+def test_removing_one_inbox_mid_run_stops_only_its_turn(db_session, two_inboxes, stripe):
+    personal, school = two_inboxes
+    personal_id = personal.id
+
+    def remove_personal():
+        db_session.execute(delete(GmailAccount).where(GmailAccount.id == personal_id))
+        db_session.flush()
+
+    a = _Hooked(_three(), "a1", remove_personal)
+    b = FakeGmailClient([_rejection("b1", _ago(days=1))], address="me@school.edu")
+    report = run_sync(db_session, FakeInboxes({personal_id: a, school.id: b}), now=NOW)
+
+    assert report.status == "ok" and report.error is None
+    assert a.gets == ["a1"] and a.closed
+    assert [i.status for i in report.inboxes] == ["removed", "ok"]
+    assert _by_inbox(db_session) == [(school.id, "b1")]
+    assert settings_service.get_settings(db_session).gmail_last_sync_at == NOW
+
+
+def test_turning_sync_off_mid_run_ends_the_whole_run(db_session, two_inboxes, stripe):
+    personal, school = two_inboxes
+
+    def turn_off():
+        settings_service.get_settings(db_session).gmail_sync_enabled = False
+        db_session.flush()
+
+    a = _Hooked(_three(), "a2", turn_off)
+    inboxes = FakeInboxes({personal.id: a, school.id: FakeGmailClient(address="me@school.edu")})
+
+    report = run_sync(db_session, inboxes, now=NOW)
+
+    assert report.status == "disabled" and inboxes.opened == [personal.id]
+    assert _account(db_session, personal.id).history_cursor == str(ms(_ago(days=2)))
+    assert _account(db_session, personal.id).last_sync_at is None
+    assert settings_service.get_settings(db_session).gmail_last_sync_at is None
+
+
+def test_mail_from_any_inbox_is_matched_against_the_same_contacts(db_session, two_inboxes):
+    personal, school = two_inboxes
+    settings_service.get_settings(db_session).gmail_auto_apply = True
+    contact = Contact(kind=ContactKind.COMPANY, name="Sam", organization="Ramp", email="sam@ramp.com")
+    db_session.add(contact)
+    db_session.commit()
+    # The cold email went out from the school inbox; Sam replies to it there,
+    # and a later note arrives at the personal one.
+    a = FakeGmailClient([message("r2", _ago(hours=1), from_="Sam <sam@ramp.com>", subject="Re: hi again")])
+    b = FakeGmailClient(
+        [
+            message("s1", _ago(days=2), from_="Me <me@school.edu>", to="sam@ramp.com", labels=("SENT",)),
+            message("r1", _ago(days=1), from_="Sam <sam@ramp.com>", subject="Re: hello", snippet="Happy to chat"),
+        ],
+        address="me@school.edu",
+    )
+    run_sync(db_session, FakeInboxes({personal.id: a, school.id: b}), now=NOW)
+
+    db_session.refresh(contact)
+    assert contact.status == ContactStatus.REPLIED
+    kinds = {(s.gmail_account_id, s.gmail_message_id): s.kind for s in _suggestions(db_session)}
+    assert kinds[(school.id, "s1")] == SuggestionKind.CONTACT_SENT
+    assert kinds[(school.id, "r1")] == SuggestionKind.CONTACT_REPLY

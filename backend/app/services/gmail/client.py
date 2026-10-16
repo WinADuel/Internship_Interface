@@ -2,10 +2,10 @@
 Behind a Protocol so the sync's tests use a fake; the real client takes an
 httpx transport so its own tests run against httpx.MockTransport.
 
-It only ever lists message ids and fetches messages with
-`format=metadata` and a fixed header list: bodies, attachments and raw
-messages are never requested. Errors never include tokens or response
-bodies."""
+It only ever reads the inbox's address (`users.getProfile`), lists message
+ids and fetches messages with `format=metadata` and a fixed header list:
+bodies, attachments and raw messages are never requested. Errors never
+include tokens or response bodies."""
 
 import re
 from dataclasses import dataclass, field
@@ -15,13 +15,19 @@ from urllib.parse import quote
 import httpx
 
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+GMAIL_PROFILE_API = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 METADATA_HEADERS = ("From", "To", "Cc", "Subject", "Date")
-GMAIL_RECONNECT_HINT = "reconnect Google and allow Gmail in Settings"
+# Each inbox has its own token (Phase 7 spec §4): only that one needs it.
+GMAIL_RECONNECT_HINT = "reconnect this inbox in Settings"
+MAX_ADDRESS = 320
 _TIMEOUT = httpx.Timeout(20.0)
 _PAGE_SIZE = 500  # Gmail's maximum for messages.list
 # Gmail message and thread ids are hex strings; anything else is refused
 # before it can reach a URL path or the Open in Gmail link.
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+# An inbox address as Gmail's profile gives it: no spaces, controls, quotes
+# or angle brackets, one "@" with something on each side.
+_ADDRESS_RE = re.compile(r"^[^\s@\x00-\x1f\x7f\"<>]+@[^\s@\x00-\x1f\x7f\"<>/]+$")
 # 403 reasons that a reconnect would not fix. Only these fixed strings are
 # ever shown; nothing from the response body is echoed.
 _403_REASONS = {
@@ -56,6 +62,8 @@ class GmailMessage:
 
 
 class GmailClient(Protocol):
+    def get_profile(self) -> str: ...
+
     def list_message_ids(self, query: str, max_ids: int) -> tuple[list[str], bool]: ...
 
     def get_metadata(self, message_id: str) -> GmailMessage | None: ...
@@ -65,6 +73,16 @@ class GmailClient(Protocol):
 
 def is_gmail_id(value) -> bool:
     return isinstance(value, str) and bool(_ID_RE.fullmatch(value))
+
+
+def normalize_address(value) -> str | None:
+    """An inbox address, lower-cased, or None when it isn't one."""
+    if not isinstance(value, str):
+        return None
+    address = value.strip().casefold()
+    if len(address) > MAX_ADDRESS or not _ADDRESS_RE.fullmatch(address):
+        return None
+    return address
 
 
 def _403_reason(response: httpx.Response) -> str | None:
@@ -123,6 +141,14 @@ class GoogleGmailClient:
         if not isinstance(data, dict):
             raise GmailError(f"gmail {op} returned no json")
         return data
+
+    def get_profile(self) -> str:
+        """The inbox's address, lower-cased (allowed by gmail.readonly)."""
+        data = self._json(self._get("profile", GMAIL_PROFILE_API, {"fields": "emailAddress"}), "profile")
+        address = normalize_address(data.get("emailAddress"))
+        if address is None:
+            raise GmailError("gmail profile returned no usable address")
+        return address
 
     def list_message_ids(self, query: str, max_ids: int) -> tuple[list[str], bool]:
         """Ids of the messages matching `query`, as Gmail orders them (newest

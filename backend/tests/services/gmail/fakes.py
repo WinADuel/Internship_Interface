@@ -3,12 +3,18 @@
 import re
 from datetime import datetime
 
+from app.core.security import encrypt_value
+from app.models.gmail_account import GmailAccount
 from app.services.gmail.client import GmailError, GmailMessage
-from app.services.google_docs_service import GMAIL_SCOPE, GOOGLE_SCOPE, store_token
+from app.services.google_docs_service import GMAIL_SCOPE
 
 
-def grant_gmail(db) -> None:
-    store_token(db, {"refresh_token": "refresh"}, f"{GOOGLE_SCOPE} {GMAIL_SCOPE}")
+def grant_gmail(db, email: str | None = "me@gmail.com", refresh_token: str = "refresh") -> GmailAccount:
+    """Connect an inbox (`email=None`: one carried over from Phase 6)."""
+    account = GmailAccount(email=email, encrypted_refresh_token=encrypt_value(refresh_token), scopes=GMAIL_SCOPE)
+    db.add(account)
+    db.commit()
+    return account
 
 
 def ms(when: datetime) -> int:
@@ -41,16 +47,24 @@ def message(
 
 
 class FakeGmailClient:
-    """Lists the messages it holds, newest first, honouring the query's
-    `after:<seconds>` (the query is recorded); `fail_on` makes a get raise
-    for that id."""
+    """One inbox (`address`). Lists the messages it holds, newest first,
+    honouring the query's `after:<seconds>` (the query is recorded);
+    `fail_on` makes a get raise for that id."""
 
-    def __init__(self, messages=(), fail_on: dict[str, GmailError] | None = None):
+    def __init__(
+        self, messages=(), fail_on: dict[str, GmailError] | None = None, address: str = "me@gmail.com"
+    ):
         self.messages = {m.id: m for m in messages}
         self.fail_on = fail_on or {}
+        self.address = address
         self.queries: list[str] = []
         self.gets: list[str] = []
+        self.profiles = 0
         self.closed = False
+
+    def get_profile(self) -> str:
+        self.profiles += 1
+        return self.address
 
     def add(self, *messages: GmailMessage) -> None:
         for m in messages:
@@ -73,5 +87,22 @@ class FakeGmailClient:
     def close(self) -> None:
         self.closed = True
 
-    def factory(self, db):
+    def factory(self, db, account):
         return self
+
+
+class FakeInboxes:
+    """A Gmail client factory over several fake inboxes, chosen by the
+    account's id; records the order the inboxes were opened in. An entry
+    that is an exception is raised instead (e.g. a refused token)."""
+
+    def __init__(self, by_account: dict[int, "FakeGmailClient | Exception"]):
+        self.by_account = by_account
+        self.opened: list[int] = []
+
+    def __call__(self, db, account):
+        self.opened.append(account.id)
+        client = self.by_account[account.id]
+        if isinstance(client, Exception):
+            raise client
+        return client
