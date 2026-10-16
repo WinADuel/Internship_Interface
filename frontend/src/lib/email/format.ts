@@ -1,4 +1,4 @@
-import type { EmailSuggestion, SuggestionKind, SuggestionState } from "../types/email";
+import type { EmailSuggestion, GmailAccount, HighlightTab, SuggestionKind, SuggestionState } from "../types/email";
 
 /** What the email is, as a short tag on its card. */
 export const KIND_LABELS: Record<SuggestionKind, string> = {
@@ -29,6 +29,7 @@ export const STATE_LABELS: Record<SuggestionState, string> = {
   accepted: "Accepted",
   dismissed: "Dismissed",
   auto_applied: "Applied automatically",
+  stale: "Out of date",
 };
 
 /** The Open in Gmail link, only when it really points at Gmail over https; else null. */
@@ -58,7 +59,7 @@ const APPLICATION_KINDS: ReadonlySet<SuggestionKind> = new Set<SuggestionKind>([
 ]);
 
 /** "Dana Lee, MIT", or just the name when the organization is blank. */
-function contactLabel(contact: NonNullable<EmailSuggestion["contact"]>): string {
+export function contactLabel(contact: NonNullable<EmailSuggestion["contact"]>): string {
   const organization = contact.organization.trim();
   return organization ? `${contact.name}, ${organization}` : contact.name;
 }
@@ -80,4 +81,30 @@ export function matchLabel(s: EmailSuggestion, { withApplication = true } = {}):
   }
   if (s.contact) return contactLabel(s.contact);
   return application;
+}
+
+/** The sender's name, else the address: the short form for a one-line row. */
+export function senderName(s: Pick<EmailSuggestion, "fromName" | "fromEmail">): string {
+  return s.fromName.trim() || s.fromEmail.trim() || "Unknown sender";
+}
+
+/** "Oct 14": the day an email arrived, in the viewer's time zone; unparseable text is returned as is. */
+export function shortDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/**
+ * What a Dashboard row names: the contact ("Dana Lee, MIT") on the Cold
+ * emails tab, the application ("Acme — SWE Intern") on the others.
+ */
+export function highlightMatch(s: EmailSuggestion, tab: HighlightTab): string | null {
+  if (tab === "replies" && s.contact) return contactLabel(s.contact);
+  if (s.application) return `${s.application.company} — ${s.application.roleTitle}`;
+  return matchLabel(s);
+}
+
+/** An inbox's address, or what to call one carried over from before it was known. */
+export function inboxLabel(account: Pick<GmailAccount, "email">): string {
+  return account.email ?? "Gmail inbox, address shown after the next sync";
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import DashboardGrid from "../lib/components/DashboardGrid.svelte";
+  import EmailReplies from "../lib/components/widgets/EmailReplies.svelte";
   import RecentActivityFeed from "../lib/components/widgets/RecentActivityFeed.svelte";
   import RemindersList from "../lib/components/widgets/RemindersList.svelte";
   import BucketPreview from "../lib/components/widgets/BucketPreview.svelte";
@@ -20,6 +21,7 @@
     { id: "needs-attention", x: 0, y: 8, w: 12, h: 4, settings: {} },
     { id: "new-postings", x: 0, y: 12, w: 6, h: 4, settings: {} },
     { id: "interviews", x: 6, y: 12, w: 6, h: 4, settings: {} },
+    { id: "email-replies", x: 0, y: 16, w: 12, h: 4, settings: {} },
   ];
 
   const titles: Record<string, string> = {
@@ -30,6 +32,7 @@
     "needs-attention": "Needs attention",
     "new-postings": "New postings",
     interviews: "Upcoming interviews",
+    "email-replies": "Email replies",
   };
 
   let grid: { updateSettings: (id: string, s: Record<string, unknown>) => void } | undefined;
@@ -68,6 +71,8 @@
       <NewPostings />
     {:else if id === "interviews"}
       <UpcomingInterviews />
+    {:else if id === "email-replies"}
+      <EmailReplies />
     {/if}
   </section>
 {/snippet}

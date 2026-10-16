@@ -3,7 +3,7 @@
   import { acceptSuggestion, dismissSuggestion } from "../../api/email";
   import { ACTION_LABELS, KIND_LABELS, STATE_LABELS, matchLabel, safeGmailUrl, senderLabel } from "../../email/format";
   import { formatDateTime } from "../../format";
-  import { afterAccept, refreshEmailStatus } from "../../stores/email";
+  import { afterAccept, emailStatus, refreshEmailStatus } from "../../stores/email";
   import { showToast } from "../../stores/toast";
   import type { AcceptInput, EmailSuggestion } from "../../types/email";
   import type { InterviewRoundFields } from "../../types/interview";
@@ -39,6 +39,10 @@
   const match = $derived(matchLabel(suggestion, { withApplication: !compact }));
   const needsForm = $derived(suggestion.kind === "interview" || suggestion.kind === "new_application");
   const headingId = $derived(`email-subject-${suggestion.id}${compact ? "-c" : ""}`);
+  // With more than one inbox connected, say which one received the email (a sent email's sender already says).
+  const inbox = $derived(
+    ($emailStatus?.accounts?.length ?? 0) > 1 && suggestion.direction === "inbound" ? suggestion.accountEmail : null,
+  );
 
   /**
    * Accept; a 404/409 means the list is out of date, so it is reloaded.
@@ -119,7 +123,7 @@
     <time datetime={suggestion.receivedAt}>{formatDateTime(suggestion.receivedAt)}</time>
   </div>
   <strong class="subject" id={headingId}>{suggestion.subject || "(no subject)"}</strong>
-  <span class="sender">From {senderLabel(suggestion)}</span>
+  <span class="sender">From {senderLabel(suggestion)}{#if inbox}{" "}to {inbox}{/if}</span>
   {#if suggestion.snippet}<p class="snippet">{suggestion.snippet}</p>{/if}
   {#if match}<p class="match">Matched: {match}</p>{/if}
   {#if pending}
