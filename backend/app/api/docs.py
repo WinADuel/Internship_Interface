@@ -1,8 +1,10 @@
 import logging
+import re
 import secrets
 from collections.abc import Callable
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -35,13 +37,17 @@ STATE_COOKIE_PATH = "/api/docs/google"
 # reads the flow only from a state that matched the cookie, so the marker is
 # as trustworthy as the CSRF check itself. token_urlsafe never emits ".".
 GMAIL_STATE_PREFIX = "gmail."
+# Reconnect on an inbox without an address (carried over from Phase 6) also
+# names that inbox: "gmail.<id>.<random>". Like the prefix, it is read only
+# from a state that matched the cookie.
+_INBOX_STATE = re.compile(r"^gmail\.([0-9]{1,18})\.")
 
 
 @router.get("/google/authorize")
-def google_authorize(gmail: bool = False) -> RedirectResponse:
+def google_authorize(gmail: bool = False, inbox: Annotated[int | None, Query(ge=1)] = None) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     if gmail:
-        state = GMAIL_STATE_PREFIX + state
+        state = GMAIL_STATE_PREFIX + (f"{inbox}." if inbox is not None else "") + state
     response = RedirectResponse(
         google_docs_service.get_authorization_url(state, gmail=gmail), status_code=302
     )
@@ -103,7 +109,11 @@ def google_callback(
             if google_docs_service.GMAIL_SCOPE not in scopes.split():
                 return _finish("/#/settings?gmail=0")
             address = _inbox_address(token_response, gmail_client_factory)
-            gmail_accounts.upsert_account(db, address, token_response, scopes)
+            inbox = _INBOX_STATE.match(state)
+            if inbox is not None:
+                gmail_accounts.reconnect_unaddressed(db, int(inbox.group(1)), address, token_response, scopes)
+            else:
+                gmail_accounts.upsert_account(db, address, token_response, scopes)
         else:
             google_docs_service.store_token(db, token_response, scopes=scopes)
     except (GoogleAuthError, GmailError) as exc:
