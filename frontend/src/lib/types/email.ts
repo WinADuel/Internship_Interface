@@ -12,8 +12,8 @@ export type SuggestionKind =
   | "contact_reply"
   | "contact_sent"
   | "new_application";
-/** `stale` suggestions are never listed, so the frontend doesn't see that state. */
-export type SuggestionState = "pending" | "accepted" | "dismissed" | "auto_applied";
+/** `stale` (out of date) appears only in the Dashboard's email highlights; the suggestion lists leave it out. */
+export type SuggestionState = "pending" | "accepted" | "dismissed" | "auto_applied" | "stale";
 export type SuggestionFilter = "pending" | "decided" | "all";
 export type EmailDirection = "inbound" | "sent";
 
@@ -56,6 +56,8 @@ export interface EmailSuggestion {
   contact: SuggestionContact | null;
   createdAt: string;
   decidedAt: string | null;
+  /** The connected inbox the email was found in; null when its address isn't known yet. */
+  accountEmail: string | null;
 }
 
 /** Optional Accept details: an interview's round as edited, or a new application's names. */
@@ -65,12 +67,25 @@ export interface AcceptInput {
   roleTitle?: string;
 }
 
+/** One connected Gmail inbox (Phase 7 spec §4). */
+export interface GmailAccount {
+  id: number;
+  /** Null only for an inbox carried over from before Phase 7, until its next sync reads the address. */
+  email: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+}
+
 export interface EmailStatus {
+  /** True when at least one inbox is connected. */
   gmailGranted: boolean;
   gmailSyncEnabled: boolean;
   gmailLastSyncAt: string | null;
   gmailLastError: string | null;
   pendingCount: number;
+  /** The connected inboxes, oldest first. */
+  accounts: GmailAccount[];
 }
 
 export interface EmailSyncResult extends EmailStatus {
@@ -79,4 +94,18 @@ export interface EmailSyncResult extends EmailStatus {
   suggested: number;
   autoApplied: number;
   more: boolean;
+}
+
+/** The Dashboard's Email replies tabs: replies from contacts, then three application kinds. */
+export type HighlightTab = "replies" | "interview" | "offer" | "rejection";
+
+export interface HighlightList {
+  /** Every match, of which `items` are the newest few. */
+  count: number;
+  items: EmailSuggestion[];
+}
+
+export interface EmailHighlights {
+  gmailGranted: boolean;
+  tabs: Record<HighlightTab, HighlightList>;
 }

@@ -58,6 +58,7 @@ export async function runEmailSync(): Promise<EmailSyncResult> {
     gmailLastSyncAt: result.gmailLastSyncAt,
     gmailLastError: result.gmailLastError,
     pendingCount: result.pendingCount,
+    accounts: result.accounts,
   });
   return result;
 }

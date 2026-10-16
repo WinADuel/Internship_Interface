@@ -1,7 +1,7 @@
 import type { Application } from "../types/application";
 import type { Contact } from "../types/contact";
 import type { Posting, ScanStatus, WatchCompany } from "../types/discovery";
-import type { EmailStatus, EmailSuggestion } from "../types/email";
+import type { EmailStatus, EmailSuggestion, GmailAccount } from "../types/email";
 import type {
   InterviewRound,
   InterviewRoundDetail,
@@ -215,6 +215,18 @@ export function fakeSuggestion(overrides: Partial<EmailSuggestion> = {}): EmailS
     contact: null,
     createdAt: "2026-10-08T15:05:00Z",
     decidedAt: null,
+    accountEmail: "me@gmail.com",
+    ...overrides,
+  };
+}
+
+export function fakeGmailAccount(overrides: Partial<GmailAccount> = {}): GmailAccount {
+  return {
+    id: 1,
+    email: "me@gmail.com",
+    lastSyncAt: null,
+    lastError: null,
+    createdAt: "2026-10-01T12:00:00Z",
     ...overrides,
   };
 }
@@ -226,6 +238,7 @@ export function fakeEmailStatus(overrides: Partial<EmailStatus> = {}): EmailStat
     gmailLastSyncAt: null,
     gmailLastError: null,
     pendingCount: 0,
+    accounts: [fakeGmailAccount()],
     ...overrides,
   };
 }
