@@ -1,6 +1,7 @@
 """Email updates (Phase 6 spec §4, §7): the suggestions Gmail sync found,
 Accept and Dismiss, the status for Settings and the nav badge, and Sync
-now; the connected inboxes (Phase 7 spec §4). Cookie auth only; the Claude token is refused like on every other
+now; the Dashboard's Email replies block and the connected inboxes (Phase 7
+spec §3, §4). Cookie auth only; the Claude token is refused like on every other
 cookie route, and no email data is reachable from /api/claude."""
 
 from typing import Annotated
@@ -15,10 +16,12 @@ from app.models.contact import Contact
 from app.models.email_suggestion import EmailSuggestion
 from app.schemas.email import (
     AcceptIn,
+    EmailHighlightsOut,
     EmailStatusOut,
     EmailSuggestionOut,
     EmailSyncOut,
     GmailAccountOut,
+    HighlightTabOut,
     SuggestionApplicationOut,
     SuggestionContactOut,
 )
@@ -42,6 +45,7 @@ router = APIRouter(
 )
 
 MAX_LIMIT = 200
+MAX_HIGHLIGHTS = 20
 NOT_GRANTED = "connect Gmail in Settings first"
 NOT_ENABLED = "turn on Gmail sync in Settings first"
 # EmailSuggestionOut fields read straight off the row; the rest are built.
@@ -111,6 +115,25 @@ def list_suggestions(
 ):
     rows = suggestions.list_suggestions(db, state, application_id=application_id, limit=limit)
     return _many(db, rows)
+
+
+@router.get("/highlights", response_model=EmailHighlightsOut)
+def email_highlights(
+    limit: Annotated[int, Query(ge=1, le=MAX_HIGHLIGHTS)] = 8,
+    db: Session = Depends(get_db),
+):
+    """The Dashboard's Email replies tabs: cold email replies (mail from a
+    tracked contact), interviews, offers and rejections, newest first."""
+    tabs = suggestions.highlights(db, limit=limit)
+    rows = [s for _, items in tabs.values() for s in items]
+    by_id = {o.id: o for o in _many(db, rows)}
+    return EmailHighlightsOut(
+        gmail_granted=is_gmail_granted(db),
+        tabs={
+            tab: HighlightTabOut(count=count, items=[by_id[s.id] for s in items])
+            for tab, (count, items) in tabs.items()
+        },
+    )
 
 
 @router.get("/accounts", response_model=list[GmailAccountOut])

@@ -119,3 +119,23 @@ class EmailSyncOut(EmailStatusOut):
     auto_applied: int
     more: bool
 
+
+class HighlightTabOut(BaseModel):
+    """`count` is every email the tab's rule matches; `items` the newest."""
+
+    count: int
+    items: list[EmailSuggestionOut]
+
+
+class HighlightTabsOut(BaseModel):
+    replies: HighlightTabOut
+    interview: HighlightTabOut
+    offer: HighlightTabOut
+    rejection: HighlightTabOut
+
+
+class EmailHighlightsOut(BaseModel):
+    """The Dashboard's Email replies block (Phase 7 spec §3)."""
+
+    gmail_granted: bool
+    tabs: HighlightTabsOut

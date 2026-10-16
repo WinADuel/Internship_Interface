@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.models.application import Application, ApplicationStatus
 from app.models.contact import Contact
-from app.models.email_suggestion import EmailSuggestion, SuggestionKind, SuggestionState
+from app.models.email_suggestion import EmailDirection, EmailSuggestion, SuggestionKind, SuggestionState
 from app.models.gmail_account import GmailAccount
 from app.models.interview import InterviewKind
 from app.schemas.application import ApplicationCreate
@@ -53,6 +53,11 @@ _SETTLED = (ApplicationStatus.REJECTED, ApplicationStatus.OFFER)
 ASSESSMENT_FOLLOW_UP = timedelta(days=7)
 DEFAULT_ROLE = "Role not given"
 GMAIL_THREAD_URL = "https://mail.google.com/mail/u/{inbox}/#all/{thread_id}"
+# The Dashboard's Email replies tabs (Phase 7 spec §3): "replies" is mail
+# from a tracked contact, the others are application emails of that kind.
+HIGHLIGHT_KINDS = {"interview": K.INTERVIEW, "offer": K.OFFER, "rejection": K.REJECTION}
+HIGHLIGHT_TABS = ("replies", *HIGHLIGHT_KINDS)
+
 StateFilter = Literal["pending", "decided", "all"]
 
 
@@ -210,6 +215,34 @@ def account_emails(db: Session, suggestions: list[EmailSuggestion]) -> dict[int,
     if not ids:
         return {}
     return {row.id: row.email for row in db.execute(select(GmailAccount.id, GmailAccount.email).where(GmailAccount.id.in_(ids)))}
+
+
+def highlights(
+    db: Session, limit: int = 8, now: datetime | None = None
+) -> dict[str, tuple[int, list[EmailSuggestion]]]:
+    """The Dashboard's Email replies tabs, each as (total, newest `limit`):
+    inbound mail in any state but dismissed (pending, accepted, applied
+    automatically or out of date), newest email first. A contact's reply
+    that is also, say, an interview invitation is in both tabs."""
+    refresh_stale(db, now)
+    base = (
+        EmailSuggestion.direction == EmailDirection.INBOUND,
+        EmailSuggestion.state != SuggestionState.DISMISSED,
+    )
+    rules = {"replies": EmailSuggestion.contact_id.is_not(None)}
+    rules.update({tab: EmailSuggestion.kind == kind for tab, kind in HIGHLIGHT_KINDS.items()})
+    tabs = {}
+    for tab in HIGHLIGHT_TABS:
+        where = (*base, rules[tab])
+        count = db.scalar(select(func.count()).select_from(EmailSuggestion).where(*where))
+        items = db.scalars(
+            select(EmailSuggestion)
+            .where(*where)
+            .order_by(EmailSuggestion.received_at.desc(), EmailSuggestion.id.desc())
+            .limit(limit)
+        )
+        tabs[tab] = (count, list(items))
+    return tabs
 
 
 def dismiss(db: Session, suggestion_id: int, now: datetime | None = None) -> EmailSuggestion:
