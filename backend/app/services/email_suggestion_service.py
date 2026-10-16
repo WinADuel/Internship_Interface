@@ -16,6 +16,7 @@ someone tries to accept it."""
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from urllib.parse import quote
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.models.application import Application, ApplicationStatus
 from app.models.contact import Contact
 from app.models.email_suggestion import EmailSuggestion, SuggestionKind, SuggestionState
+from app.models.gmail_account import GmailAccount
 from app.models.interview import InterviewKind
 from app.schemas.application import ApplicationCreate
 from app.schemas.email import AcceptIn
@@ -50,8 +52,7 @@ _BEFORE_INTERVIEW = (ApplicationStatus.WISHLIST, ApplicationStatus.APPLIED, Appl
 _SETTLED = (ApplicationStatus.REJECTED, ApplicationStatus.OFFER)
 ASSESSMENT_FOLLOW_UP = timedelta(days=7)
 DEFAULT_ROLE = "Role not given"
-GMAIL_THREAD_URL = "https://mail.google.com/mail/u/0/#all/{thread_id}"
-
+GMAIL_THREAD_URL = "https://mail.google.com/mail/u/{inbox}/#all/{thread_id}"
 StateFilter = Literal["pending", "decided", "all"]
 
 
@@ -65,8 +66,12 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def gmail_url(thread_id: str) -> str:
-    return GMAIL_THREAD_URL.format(thread_id=thread_id)
+def gmail_url(thread_id: str, account_email: str | None = None) -> str:
+    """The thread in Gmail, in the inbox it came from (`/mail/u/<address>/`),
+    or the browser's first signed-in account when the address isn't known.
+    Thread ids are checked by the sync; the address is URL-encoded."""
+    inbox = quote(account_email, safe="@") if account_email else "0"
+    return GMAIL_THREAD_URL.format(inbox=inbox, thread_id=quote(thread_id, safe=""))
 
 
 def round_kind(suggestion: EmailSuggestion) -> InterviewKind | None:
@@ -197,6 +202,14 @@ def related(db: Session, suggestions: list[EmailSuggestion]) -> tuple[dict[int, 
         {c.id: c for c in db.scalars(select(Contact).where(Contact.id.in_(contact_ids)))} if contact_ids else {}
     )
     return applications, contacts
+
+
+def account_emails(db: Session, suggestions: list[EmailSuggestion]) -> dict[int, str | None]:
+    """The address of each inbox the suggestions came from, by inbox id."""
+    ids = {s.gmail_account_id for s in suggestions if s.gmail_account_id is not None}
+    if not ids:
+        return {}
+    return {row.id: row.email for row in db.execute(select(GmailAccount.id, GmailAccount.email).where(GmailAccount.id.in_(ids)))}
 
 
 def dismiss(db: Session, suggestion_id: int, now: datetime | None = None) -> EmailSuggestion:

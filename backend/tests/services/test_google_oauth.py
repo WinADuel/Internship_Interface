@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from app.core.config import settings
-from app.core.security import decrypt_value
+from app.core.security import decrypt_value, encrypt_value
 from app.models.oauth_token import OAuthToken
 from app.services.errors import GoogleAuthError
 from app.services.google_docs_service import (
@@ -15,9 +15,11 @@ from app.services.google_docs_service import (
     get_valid_access_token,
     granted_scopes,
     is_gmail_granted,
+    refresh_access_token,
     requested_scope,
     store_token,
 )
+from tests.services.gmail.fakes import grant_gmail
 
 
 def fake_post_returning(payload, status_code=200, calls=None):
@@ -147,17 +149,17 @@ def test_default_authorization_url_never_asks_for_gmail():
     assert "include_granted_scopes" not in q
 
 
-def test_gmail_authorization_url_adds_readonly_scope_incrementally():
+def test_gmail_authorization_url_asks_for_gmail_readonly_alone_with_the_account_chooser():
     q = parse_qs(urlparse(get_authorization_url("s", gmail=True)).query)
-    assert q["scope"] == [f"{DRIVE} {GMAIL}"]
-    assert q["include_granted_scopes"] == ["true"]
-    assert q["access_type"] == ["offline"] and q["prompt"] == ["consent"]
+    assert q["scope"] == [GMAIL]
+    assert "include_granted_scopes" not in q
+    assert q["access_type"] == ["offline"] and q["prompt"] == ["consent select_account"]
     assert "gmail.send" not in q["scope"][0] and "gmail.modify" not in q["scope"][0]
 
 
 def test_requested_scope():
     assert requested_scope() == GOOGLE_SCOPE == DRIVE
-    assert requested_scope(gmail=True) == f"{DRIVE} {GMAIL}"
+    assert requested_scope(gmail=True) == GMAIL
     assert GMAIL_SCOPE == GMAIL
 
 
@@ -180,12 +182,36 @@ def test_granted_scopes(response, expected):
     assert granted_scopes(response, "requested scopes") == expected
 
 
-def test_is_gmail_granted(db_session):
+def test_is_gmail_granted_means_an_inbox_is_connected(db_session):
     assert is_gmail_granted(db_session) is False
-    store_token(db_session, {"refresh_token": "rt"}, scopes=DRIVE)
+    # The Drive/Docs connection has no say, even with the Gmail scope.
+    store_token(db_session, {"refresh_token": "rt"}, scopes=f"{DRIVE} {GMAIL}")
     assert is_gmail_granted(db_session) is False
-    store_token(db_session, {}, scopes=f"{DRIVE} {GMAIL}")
+    grant_gmail(db_session)
     assert is_gmail_granted(db_session) is True
-    # A substring of another scope does not count.
-    store_token(db_session, {}, scopes=f"{GMAIL}.extra")
-    assert is_gmail_granted(db_session) is False
+
+
+@pytest.mark.parametrize(("status", "reconnect"), [(400, True), (401, True), (403, False), (500, False)])
+def test_a_refused_refresh_says_whether_reconnecting_helps(db_session, monkeypatch, status, reconnect):
+    store_token(db_session, {"refresh_token": "rt"}, scopes="a")
+    monkeypatch.setattr(httpx, "post", fake_post_returning({"error": "invalid_grant"}, status))
+    with pytest.raises(GoogleAuthError) as exc:
+        get_valid_access_token(db_session)
+    assert exc.value.reconnect is reconnect
+    assert str(exc.value) == f"google token request rejected (status {status})"
+
+
+def test_a_network_error_is_not_a_reason_to_reconnect(monkeypatch):
+    def boom(*a, **k):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(httpx, "post", boom)
+    with pytest.raises(GoogleAuthError) as exc:
+        refresh_access_token(encrypt_value("rt"))
+    assert exc.value.reconnect is False
+
+
+def test_an_unreadable_stored_token_needs_a_reconnect():
+    with pytest.raises(GoogleAuthError) as exc:
+        refresh_access_token(b"not a fernet token")
+    assert exc.value.reconnect is True

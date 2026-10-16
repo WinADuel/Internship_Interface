@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -35,13 +35,23 @@ class SuggestionState(str, enum.Enum):
 class EmailSuggestion(Base):
     """One matched email and the update it suggests (Phase 6 spec §5). Only
     matched emails are stored, and only their headers and Gmail's snippet,
-    capped by the sync; never a body. Decided rows are deleted after 90 days."""
+    capped by the sync; never a body. Decided rows are deleted after 90 days.
+
+    Gmail message ids are per mailbox, so a message is unique within its
+    inbox (`gmail_account_id`, Phase 7 spec §4). Removing the inbox deletes
+    its suggestions."""
 
     __tablename__ = "email_suggestions"
-    __table_args__ = (Index("ix_email_suggestions_state_received_at", "state", "received_at"),)
+    __table_args__ = (
+        Index("ix_email_suggestions_state_received_at", "state", "received_at"),
+        UniqueConstraint("gmail_account_id", "gmail_message_id", name="uq_email_suggestions_account_message"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    gmail_message_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    gmail_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("gmail_accounts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    gmail_message_id: Mapped[str] = mapped_column(Text, nullable=False)
     gmail_thread_id: Mapped[str] = mapped_column(Text, nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     direction: Mapped[EmailDirection] = mapped_column(

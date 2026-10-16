@@ -94,7 +94,8 @@ class SettingsOut(BaseModel):
     gmail_auto_apply: bool
     gmail_last_sync_at: datetime | None
     gmail_last_error: str | None
-    # Computed from the stored Google token, not settings columns.
+    # Computed, not settings columns: the Drive/Docs connection is stored,
+    # and at least one Gmail inbox is connected.
     google_connected: bool = False
     gmail_granted: bool = False
 

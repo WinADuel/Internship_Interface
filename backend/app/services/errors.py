@@ -15,7 +15,14 @@ class ApplicationNotFoundError(Exception):
 
 
 class GoogleAuthError(Exception):
-    """Google OAuth failed or the app is not connected to Google."""
+    """Google OAuth failed or the app is not connected to Google.
+    `reconnect` is set when only connecting again can fix it (Google
+    refused the stored token, or it can't be read); not for a network
+    error or a Google outage."""
+
+    def __init__(self, message: str, reconnect: bool = False):
+        super().__init__(message)
+        self.reconnect = reconnect
 
 
 class GoogleNotConnectedError(Exception):

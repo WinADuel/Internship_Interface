@@ -1,11 +1,11 @@
 """Gmail sync (Phase 6 spec §6), run as its own Docker Compose service:
 `python -m app.jobs.gmail_sync`. Syncs once a minute after start-up, then
-every `gmail_sync_minutes` minutes (re-read before each wait). While sync is
-off or Gmail isn't granted a run does nothing but the retention cleanup. A
-run that crashed is retried in ten minutes. Sync now uses the same
-`run_sync`; the advisory lock keeps the two from overlapping. Changes made
-by auto-apply are copied to the backup sheet right after the run, as a
-click in the app would."""
+every `gmail_sync_minutes` minutes (re-read before each wait); each run
+covers every connected inbox. While sync is off or no inbox is connected a
+run does nothing but the retention cleanup. A run that crashed is retried
+in ten minutes. Sync now uses the same `run_sync`; the advisory lock keeps
+the two from overlapping. Changes made by auto-apply are copied to the
+backup sheet right after the run, as a click in the app would."""
 
 import logging
 import time
