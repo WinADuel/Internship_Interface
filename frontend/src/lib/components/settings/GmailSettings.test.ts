@@ -93,6 +93,16 @@ describe("GmailSettings", () => {
     expect(await screen.findByText("Gmail inbox, address shown after the next sync")).toBeInTheDocument();
   });
 
+  it("Reconnect on an inbox without an address names that inbox", async () => {
+    vi.mocked(listGmailAccounts).mockResolvedValue([fakeGmailAccount({ id: 7, email: null }), personal]);
+    render(GmailSettings, { settings: settings({ gmailGranted: true }) });
+    const reconnects = await screen.findAllByRole("link", { name: /^Reconnect / });
+    expect(reconnects.map((a) => a.getAttribute("href"))).toEqual([
+      "/api/docs/google/authorize?gmail=1&inbox=7",
+      "/api/docs/google/authorize?gmail=1",
+    ]);
+  });
+
   it("Remove asks first, then removes the inbox and refreshes the email status", async () => {
     vi.mocked(listGmailAccounts).mockResolvedValue([personal, school]);
     vi.mocked(removeGmailAccount).mockResolvedValue(undefined);
@@ -230,6 +240,24 @@ describe("GmailSettings", () => {
     expect(screen.queryByText("Last sync: never")).toBeNull();
     // The inboxes as the sync left them (a carried-over inbox learns its address).
     expect(screen.getByText("learned@gmail.com")).toBeInTheDocument();
+  });
+
+  it("an inbox removed while Sync now runs doesn't come back with the sync's answer", async () => {
+    vi.mocked(listGmailAccounts).mockResolvedValue([personal, school]);
+    vi.mocked(removeGmailAccount).mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    let answer!: (result: Awaited<ReturnType<typeof syncEmailNow>>) => void;
+    vi.mocked(syncEmailNow).mockReturnValue(new Promise((r) => (answer = r)));
+    render(GmailSettings, { settings: settings({ gmailGranted: true, gmailSyncEnabled: true }) });
+    await screen.findByText("you@school.edu");
+    await fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Remove you@school.edu" }));
+    await vi.waitFor(() => expect(screen.queryByText("you@school.edu")).toBeNull());
+    // The sync read the list before the removal.
+    answer({ ...fakeEmailStatus({ accounts: [personal, school] }), ok: true, fetched: 0, suggested: 0, autoApplied: 0, more: false });
+    expect(await screen.findByText(/^Checked 0 emails/)).toBeInTheDocument();
+    expect(screen.getByText("me@gmail.com")).toBeInTheDocument();
+    expect(screen.queryByText("you@school.edu")).toBeNull();
   });
 
   it("with no inbox left, shows the run's last error and offers Connect Gmail", async () => {

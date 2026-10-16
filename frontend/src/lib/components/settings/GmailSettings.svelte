@@ -44,6 +44,12 @@
   // slow list can't bring back an inbox just removed.
   let accountsSeq = 0;
 
+  // Reconnect on an inbox without an address yet (carried over from before
+  // inboxes had addresses) names it, so the consent gives that inbox its
+  // address and new sign-in instead of adding a second line for the account.
+  const reconnectUrl = (account: GmailAccount) =>
+    account.email ? CONNECT_GMAIL_URL : `${CONNECT_GMAIL_URL}&inbox=${account.id}`;
+
   async function loadAccounts() {
     const seq = ++accountsSeq;
     accountsFailed = false;
@@ -128,10 +134,12 @@
   async function sync() {
     syncing = true;
     announcement = "";
+    // The inboxes as this sync left them, unless a removal or a newer list
+    // came meanwhile (it would bring back an inbox just removed).
+    const seq = ++accountsSeq;
     try {
       const result = await runEmailSync();
-      accountsSeq += 1;
-      accounts = result.accounts;
+      if (seq === accountsSeq) accounts = result.accounts;
       lastSyncAt = result.gmailLastSyncAt;
       lastError = result.gmailLastError;
       announcement = syncSummary(result);
@@ -169,7 +177,7 @@
           <span class="muted small">Last sync: {account.lastSyncAt ? formatDateTime(account.lastSyncAt) : "never"}</span>
           {#if account.lastError}<span class="error small">{account.lastError}</span>{/if}
           <span class="inbox-actions">
-            <a href={CONNECT_GMAIL_URL} aria-label="Reconnect {inboxLabel(account)}">Reconnect</a>
+            <a href={reconnectUrl(account)} aria-label="Reconnect {inboxLabel(account)}">Reconnect</a>
             <button
               type="button"
               aria-label="Remove {inboxLabel(account)}"

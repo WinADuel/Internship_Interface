@@ -323,3 +323,101 @@ def test_cancelled_consent_stores_nothing_and_returns(logged_in_client, db_sessi
 def test_cancelled_consent_still_checks_state(logged_in_client):
     _authorize(logged_in_client)
     assert _callback(logged_in_client, "wrong", code=None).status_code == 400
+
+
+# Reconnect on an inbox carried over from Phase 6 (no address yet).
+
+
+def _suggest(db_session, account, mid, state="pending"):
+    from datetime import UTC, datetime
+
+    from app.models.email_suggestion import EmailDirection, EmailSuggestion, SuggestionKind
+
+    row = EmailSuggestion(
+        gmail_account_id=account.id,
+        gmail_message_id=mid,
+        gmail_thread_id=f"t{mid}",
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+        direction=EmailDirection.INBOUND,
+        kind=SuggestionKind.REJECTION,
+        state=state,
+    )
+    db_session.add(row)
+    db_session.commit()
+    return row
+
+
+def _reconnect(client, monkeypatch, inbox_id, refresh="new"):
+    response = client.get(f"/api/docs/google/authorize?gmail=1&inbox={inbox_id}", follow_redirects=False)
+    assert response.status_code == 302
+    state = client.cookies.get("google_oauth_state")
+    assert state.startswith(f"gmail.{inbox_id}.")
+    assert parse_qs(urlparse(response.headers["location"]).query)["state"] == [state]
+    monkeypatch.setattr(httpx, "post", fake_post_returning({**TOKENS, "refresh_token": refresh, "scope": GMAIL}))
+    return _callback(client, state)
+
+
+def test_reconnect_gives_the_unaddressed_inbox_its_address(logged_in_client, db_session, monkeypatch, gmail_profile):
+    carried = grant_gmail(db_session, None, refresh_token="broken")
+    carried.history_cursor = "1760000000000"
+    carried.last_error = "google token request rejected (status 400); reconnect this inbox in Settings"
+    db_session.commit()
+    kept = _suggest(db_session, carried, "m1", state="accepted")
+
+    assert _reconnect(logged_in_client, monkeypatch, carried.id).headers["location"] == "/#/settings?gmail=1"
+
+    (account,) = _accounts(db_session)
+    assert account.id == carried.id and account.email == "me@gmail.com"
+    assert decrypt_value(account.encrypted_refresh_token) == "new"
+    assert account.history_cursor == "1760000000000" and account.last_error is None
+    assert db_session.get(type(kept), kept.id).gmail_account_id == carried.id
+
+
+def test_reconnect_merges_the_unaddressed_inbox_into_one_with_its_address(
+    logged_in_client, db_session, monkeypatch, gmail_profile
+):
+    carried = grant_gmail(db_session, None, refresh_token="broken")
+    again = grant_gmail(db_session, "me@gmail.com", refresh_token="older")
+    only_old = _suggest(db_session, carried, "m1", state="accepted")
+    _suggest(db_session, carried, "m2")
+    both = _suggest(db_session, again, "m2")
+    carried_id = carried.id
+
+    assert _reconnect(logged_in_client, monkeypatch, carried_id).headers["location"] == "/#/settings?gmail=1"
+
+    (account,) = _accounts(db_session)
+    assert account.id == again.id and decrypt_value(account.encrypted_refresh_token) == "new"
+    rows = db_session.query(type(both)).order_by(type(both).id).all()
+    assert [(r.id, r.gmail_account_id, r.gmail_message_id) for r in rows] == [
+        (only_old.id, again.id, "m1"),
+        (both.id, again.id, "m2"),
+    ]
+    assert db_session.get(GmailAccount, carried_id) is None
+
+
+def test_reconnect_naming_an_addressed_or_unknown_inbox_is_a_plain_connect(
+    logged_in_client, db_session, monkeypatch, gmail_profile
+):
+    school = grant_gmail(db_session, "me@school.edu", refresh_token="school")
+    gmail_profile.address = "me@gmail.com"
+    for inbox_id in (school.id, 999999):
+        assert _reconnect(logged_in_client, monkeypatch, inbox_id).status_code == 302
+    accounts = _accounts(db_session)
+    assert [a.email for a in accounts] == ["me@school.edu", "me@gmail.com"]
+    assert decrypt_value(accounts[0].encrypted_refresh_token) == "school"
+
+
+@pytest.mark.parametrize("inbox", ["0", "-1", "x", "1.5"])
+def test_authorize_refuses_a_bad_inbox_id(logged_in_client, inbox):
+    assert logged_in_client.get(f"/api/docs/google/authorize?gmail=1&inbox={inbox}", follow_redirects=False).status_code == 422
+
+
+def test_an_inbox_id_cannot_be_slipped_into_the_state(logged_in_client, db_session, monkeypatch):
+    carried = grant_gmail(db_session, None)
+    _gmail_authorize(logged_in_client)
+    state = logged_in_client.cookies.get("google_oauth_state")
+    calls = []
+    monkeypatch.setattr(httpx, "post", fake_post_returning(TOKENS, calls=calls))
+    forged = state.replace("gmail.", f"gmail.{carried.id}.", 1)
+    assert _callback(logged_in_client, forged).status_code == 400
+    assert calls == []

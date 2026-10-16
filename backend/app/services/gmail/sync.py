@@ -41,7 +41,7 @@ from email.header import decode_header, make_header
 from email.utils import getaddresses, parseaddr
 from typing import Literal
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.application import Application
@@ -224,13 +224,24 @@ def delete_old_decided(db: Session, now: datetime) -> int:
 
 
 def _known_ids(db: Session, account_id: int, ids: list[str]) -> set[str]:
-    """The ids the inbox already stored (message ids are per mailbox)."""
+    """The ids the inbox already stored (message ids are per mailbox), and
+    those stored without a known mailbox: suggestions without an inbox, or
+    of an inbox carried over from Phase 6 whose address isn't known yet. The
+    latter may be this same mailbox reconnected under its address, so its
+    mail must not come back as new suggestions; ids of different mailboxes
+    don't collide in practice."""
     if not ids:
         return set()
+    unaddressed = select(GmailAccount.id).where(GmailAccount.email.is_(None))
     return set(
         db.scalars(
             select(EmailSuggestion.gmail_message_id).where(
-                EmailSuggestion.gmail_account_id == account_id, EmailSuggestion.gmail_message_id.in_(ids)
+                EmailSuggestion.gmail_message_id.in_(ids),
+                or_(
+                    EmailSuggestion.gmail_account_id == account_id,
+                    EmailSuggestion.gmail_account_id.is_(None),
+                    EmailSuggestion.gmail_account_id.in_(unaddressed),
+                ),
             )
         )
     )
@@ -410,19 +421,9 @@ def _learn_address(db: Session, client: GmailClient, account: GmailAccount) -> G
         account.email = address
         db.commit()
         return account
-    held = select(EmailSuggestion.gmail_message_id).where(EmailSuggestion.gmail_account_id == other.id)
-    db.execute(
-        delete(EmailSuggestion).where(
-            EmailSuggestion.gmail_account_id == account.id, EmailSuggestion.gmail_message_id.in_(held)
-        )
-    )
-    db.execute(
-        update(EmailSuggestion).where(EmailSuggestion.gmail_account_id == account.id).values(gmail_account_id=other.id)
-    )
-    db.execute(delete(GmailAccount).where(GmailAccount.id == account.id))
+    accounts.merge_into(db, account.id, other.id)
     db.commit()
     db.expire_all()
-    logger.info("gmail sync: inbox %d is %d's address; merged into it", account.id, other.id)
     return None
 
 
@@ -520,6 +521,9 @@ def run_sync(
             return SyncReport("busy", deleted=deleted)
         report = SyncReport("ok", deleted=deleted)
         for account_id in [a.id for a in accounts.list_accounts(db)]:
+            if not get_settings(db).gmail_sync_enabled:
+                report.status = "disabled"  # turned off after the last inbox's turn
+                break
             account = db.get(GmailAccount, account_id)
             if account is None:
                 continue  # merged into another inbox, or removed, meanwhile

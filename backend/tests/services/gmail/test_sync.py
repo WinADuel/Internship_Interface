@@ -882,3 +882,55 @@ def test_mail_from_any_inbox_is_matched_against_the_same_contacts(db_session, tw
     kinds = {(s.gmail_account_id, s.gmail_message_id): s.kind for s in _suggestions(db_session)}
     assert kinds[(school.id, "s1")] == SuggestionKind.CONTACT_SENT
     assert kinds[(school.id, "r1")] == SuggestionKind.CONTACT_REPLY
+
+
+def test_mail_held_by_an_unaddressed_inbox_or_no_inbox_is_not_suggested_again(db_session, two_inboxes, stripe):
+    """The Phase 6 inbox can't learn its address (its token broke) and was
+    reconnected as a new inbox: the new one's first sync must not bring back
+    what the old one already holds, accepted or not."""
+    personal, school = two_inboxes
+    carried = grant_gmail(db_session, None, refresh_token="broken")
+    db_session.add_all(
+        [
+            EmailSuggestion(
+                gmail_account_id=account_id,
+                gmail_message_id=mid,
+                gmail_thread_id=f"t{mid}",
+                received_at=_ago(days=3),
+                direction=EmailDirection.INBOUND,
+                kind=SuggestionKind.REJECTION,
+                application_id=stripe.id,
+                state=SuggestionState.ACCEPTED,
+                decided_at=_ago(days=2),
+            )
+            for account_id, mid in ((carried.id, "a1"), (None, "a2"))
+        ]
+    )
+    db_session.commit()
+    a = FakeGmailClient([_rejection("a1", _ago(days=3)), _rejection("a2", _ago(days=3)), _rejection("a3", _ago(days=1))])
+    refused = GoogleAuthError("google token request rejected (status 400)", reconnect=True)
+    b = FakeGmailClient(address="me@school.edu")
+
+    run_sync(db_session, FakeInboxes({personal.id: a, school.id: b, carried.id: refused}), now=NOW)
+
+    assert a.gets == ["a3"]
+    assert set(_by_inbox(db_session)) == {(carried.id, "a1"), (None, "a2"), (personal.id, "a3")}
+
+
+def test_turning_sync_off_between_inboxes_ends_the_run(db_session, two_inboxes):
+    personal, school = two_inboxes
+
+    class TurnsOffWhenDone(FakeGmailClient):
+        def close(self):
+            # As the Settings page would, in its own committed request.
+            super().close()
+            settings_service.get_settings(db_session).gmail_sync_enabled = False
+            db_session.commit()
+
+    inboxes = FakeInboxes({personal.id: TurnsOffWhenDone(), school.id: FakeGmailClient(address="me@school.edu")})
+
+    report = run_sync(db_session, inboxes, now=NOW)
+
+    assert report.status == "disabled" and inboxes.opened == [personal.id]
+    assert _account(db_session, personal.id).last_sync_at == NOW  # its own turn was complete
+    assert _account(db_session, school.id).last_sync_at is None
