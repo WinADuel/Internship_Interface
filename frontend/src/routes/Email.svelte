@@ -115,7 +115,7 @@
   {:else if status && !status.gmailGranted}
     <p>
       Gmail isn't connected.
-      <a href="#/settings">{status.gmailSyncEnabled ? "Reconnect Gmail in Settings" : "Connect Gmail in Settings"}</a>
+      <a href="#/settings">Connect Gmail in Settings</a>
       to find application updates in your mail.
     </p>
   {:else if status && !status.gmailSyncEnabled}

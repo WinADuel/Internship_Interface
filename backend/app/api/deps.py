@@ -14,6 +14,7 @@ from app.models.claude_token import ClaudeToken
 from app.services import claude_token_service
 from app.services.backup.dump import run_dump
 from app.services.discovery.http import DiscoveryHttp, HttpxDiscoveryHttp
+from app.services.gmail.client import GmailClient, GoogleGmailClient
 from app.services.gmail.sync import GmailClientFactory, google_gmail_client
 from app.services.sheet_sync_service import SheetSyncScheduler, google_sheets_client
 from app.services.sheets_client import SheetsClient
@@ -81,3 +82,9 @@ def get_backup_dump() -> Callable[..., Path]:
 def get_gmail_client_factory() -> GmailClientFactory:
     """Builds the Gmail client for Sync now; overridden in tests."""
     return google_gmail_client
+
+
+def get_gmail_token_client_factory() -> Callable[[str], GmailClient]:
+    """Builds a Gmail client from a new access token, for the Connect Gmail
+    callback's profile lookup (the inbox's address); overridden in tests."""
+    return GoogleGmailClient

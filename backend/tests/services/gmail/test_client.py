@@ -20,7 +20,8 @@ class FakeGmail:
     """Scripted Gmail API: `pages` for messages.list (by page token) and
     `messages` for messages.get; records every request."""
 
-    def __init__(self, pages=None, messages=None, status=None, body=None):
+    def __init__(self, pages=None, messages=None, status=None, body=None, profile=None):
+        self.profile = profile if profile is not None else {"emailAddress": "Me@Gmail.com", "messagesTotal": 3}
         self.pages = pages or {}
         self.messages = messages or {}
         self.status = status
@@ -32,6 +33,8 @@ class FakeGmail:
         if self.status is not None:
             return httpx.Response(self.status, json=self.body or {"error": {"message": "secret body text"}})
         path = request.url.path
+        if path.endswith("/users/me/profile"):
+            return httpx.Response(200, json=self.profile)
         if path.endswith("/users/me/messages"):
             token = request.url.params.get("pageToken", "")
             return httpx.Response(200, json=self.pages.get(token, {}))
@@ -209,3 +212,34 @@ def test_non_json_responses_are_errors():
     client = GoogleGmailClient(TOKEN, transport=httpx.MockTransport(lambda r: httpx.Response(200, content=json.dumps([1]))))
     with pytest.raises(GmailError, match="no json"):
         client.get_metadata("abc")
+
+
+def test_get_profile_reads_the_inbox_address_lower_cased():
+    fake = FakeGmail()
+    client = fake.client()
+    assert client.get_profile() == "me@gmail.com"
+    client.close()
+    (request,) = fake.requests
+    assert request.method == "GET"
+    assert str(request.url).startswith("https://gmail.googleapis.com/gmail/v1/users/me/profile")
+    assert request.url.params.get("fields") == "emailAddress"
+    assert request.headers["authorization"] == f"Bearer {TOKEN}"
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [{}, {"emailAddress": None}, {"emailAddress": 42}, {"emailAddress": "no-at-sign"}, {"emailAddress": "a b@c.com"},
+     {"emailAddress": "<x@y.com>"}, {"emailAddress": "x@" + "y" * 400}, {"emailAddress": "x@y.com/../z"}],
+)
+def test_get_profile_refuses_an_unusable_address(profile):
+    with pytest.raises(GmailError) as exc:
+        FakeGmail(profile=profile).client().get_profile()
+    assert str(exc.value) == "gmail profile returned no usable address"
+
+
+def test_get_profile_failure_says_reconnect_and_leaks_nothing():
+    with pytest.raises(GmailError) as exc:
+        FakeGmail(status=401).client().get_profile()
+    assert exc.value.reconnect and exc.value.status == 401
+    assert str(exc.value) == f"gmail profile rejected (status 401); {GMAIL_RECONNECT_HINT}"
+    assert TOKEN not in str(exc.value) and "secret body" not in str(exc.value)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fakeSuggestion } from "../testing/fixtures";
-import { matchLabel, safeGmailUrl, senderLabel } from "./format";
+import { STATE_LABELS, highlightMatch, inboxLabel, matchLabel, safeGmailUrl, senderLabel, senderName, shortDate } from "./format";
 
 describe("safeGmailUrl", () => {
   it("keeps https Gmail links", () => {
@@ -70,5 +70,40 @@ describe("matchLabel", () => {
     const contact = { id: 4, name: "Dana Lee", organization: " ", status: "sent" as const };
     expect(matchLabel(fakeSuggestion({ kind: "contact_reply", contact, contactId: 4 }))).toBe("Dana Lee");
     expect(matchLabel(fakeSuggestion({ kind: "contact_sent", contact: { ...contact, organization: "" } }))).toBe("Dana Lee");
+  });
+});
+
+describe("Dashboard row helpers", () => {
+  it("keeps a per-inbox Gmail link", () => {
+    expect(safeGmailUrl("https://mail.google.com/mail/u/you%40school.edu/#all/t1")).toBe(
+      "https://mail.google.com/mail/u/you%40school.edu/#all/t1",
+    );
+  });
+
+  it("names the sender by name, else address", () => {
+    expect(senderName({ fromName: " Dana Lee ", fromEmail: "dana@mit.edu" })).toBe("Dana Lee");
+    expect(senderName({ fromName: "", fromEmail: "dana@mit.edu" })).toBe("dana@mit.edu");
+    expect(senderName({ fromName: " ", fromEmail: "" })).toBe("Unknown sender");
+  });
+
+  it("writes the day as month and day", () => {
+    expect(shortDate(new Date(2026, 9, 14, 12).toISOString())).toBe("Oct 14");
+    expect(shortDate("garbage")).toBe("garbage");
+  });
+
+  it("names the contact on Cold emails and the application elsewhere", () => {
+    const s = fakeSuggestion({
+      kind: "interview",
+      contact: { id: 5, name: "Dana Lee", organization: "Acme", status: "replied" },
+    });
+    expect(highlightMatch(s, "replies")).toBe("Dana Lee, Acme");
+    expect(highlightMatch(s, "interview")).toBe("Acme — SWE Intern");
+    expect(highlightMatch(fakeSuggestion({ application: null, contact: null }), "offer")).toBeNull();
+  });
+
+  it("labels an inbox and the out-of-date state", () => {
+    expect(inboxLabel({ email: "you@school.edu" })).toBe("you@school.edu");
+    expect(inboxLabel({ email: null })).toBe("Gmail inbox, address shown after the next sync");
+    expect(STATE_LABELS.stale).toBe("Out of date");
   });
 });

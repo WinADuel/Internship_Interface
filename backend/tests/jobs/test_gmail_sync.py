@@ -105,7 +105,7 @@ def test_sync_on_without_the_gmail_permission_is_logged(caplog):
     with caplog.at_level(logging.INFO, logger="app.jobs.gmail_sync"):
         gmail_sync._log(SyncReport("not_granted"))
     assert [r.getMessage() for r in caplog.records] == [
-        "gmail sync is on but cannot run: Gmail permission missing: use Reconnect Gmail in Settings"
+        "gmail sync is on but cannot run: No Gmail inbox connected: use Connect Gmail in Settings"
     ]
 
 

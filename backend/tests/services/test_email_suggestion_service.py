@@ -461,3 +461,10 @@ def test_without_auto_apply_safe_kinds_wait(db_session):
 
 def test_gmail_url_is_built_from_the_thread_id():
     assert service.gmail_url("18c2f0a1") == "https://mail.google.com/mail/u/0/#all/18c2f0a1"
+
+
+def test_gmail_url_opens_the_inbox_the_email_came_from():
+    assert service.gmail_url("18c2f0a1", "you@school.edu") == "https://mail.google.com/mail/u/you@school.edu/#all/18c2f0a1"
+    # Anything but the "@" is URL-encoded, so the address can't leave the path.
+    assert service.gmail_url("t1", "a+b/c?#@x.com") == "https://mail.google.com/mail/u/a%2Bb%2Fc%3F%23@x.com/#all/t1"
+    assert service.gmail_url("t1", None) == "https://mail.google.com/mail/u/0/#all/t1"

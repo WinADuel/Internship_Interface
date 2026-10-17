@@ -1,11 +1,12 @@
 """Email updates (Phase 6 spec §4, §7): the suggestions Gmail sync found,
 Accept and Dismiss, the status for Settings and the nav badge, and Sync
-now. Cookie auth only; the Claude token is refused like on every other
+now; the Dashboard's Email replies block and the connected inboxes (Phase 7
+spec §3, §4). Cookie auth only; the Claude token is refused like on every other
 cookie route, and no email data is reachable from /api/claude."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_gmail_client_factory, get_sheet_sync_scheduler
@@ -15,9 +16,12 @@ from app.models.contact import Contact
 from app.models.email_suggestion import EmailSuggestion
 from app.schemas.email import (
     AcceptIn,
+    EmailHighlightsOut,
     EmailStatusOut,
     EmailSuggestionOut,
     EmailSyncOut,
+    GmailAccountOut,
+    HighlightTabOut,
     SuggestionApplicationOut,
     SuggestionContactOut,
 )
@@ -28,6 +32,7 @@ from app.services.errors import (
     SuggestionNotPendingError,
     SuggestionStaleError,
 )
+from app.services.gmail import accounts as gmail_accounts
 from app.services.gmail.sync import GmailClientFactory, run_sync
 from app.services.google_docs_service import is_gmail_granted
 from app.services.settings_service import get_settings
@@ -40,13 +45,14 @@ router = APIRouter(
 )
 
 MAX_LIMIT = 200
+MAX_HIGHLIGHTS = 20
 NOT_GRANTED = "connect Gmail in Settings first"
 NOT_ENABLED = "turn on Gmail sync in Settings first"
 # EmailSuggestionOut fields read straight off the row; the rest are built.
 _COLUMNS = tuple(
     name
     for name in EmailSuggestionOut.model_fields
-    if name not in {"gmail_url", "round_kind", "application", "contact"}
+    if name not in {"gmail_url", "account_email", "round_kind", "application", "contact"}
 )
 
 
@@ -54,20 +60,33 @@ def _out(
     suggestion: EmailSuggestion,
     applications: dict[int, Application],
     contacts: dict[int, Contact],
+    inboxes: dict[int, str | None],
 ) -> EmailSuggestionOut:
     application = applications.get(suggestion.application_id)
     contact = contacts.get(suggestion.contact_id)
+    account_email = inboxes.get(suggestion.gmail_account_id)
     return EmailSuggestionOut(
         **{name: getattr(suggestion, name) for name in _COLUMNS},
-        gmail_url=suggestions.gmail_url(suggestion.gmail_thread_id),
+        gmail_url=suggestions.gmail_url(suggestion.gmail_thread_id, account_email),
+        account_email=account_email,
         round_kind=suggestions.round_kind(suggestion),
         application=SuggestionApplicationOut.model_validate(application) if application else None,
         contact=SuggestionContactOut.model_validate(contact) if contact else None,
     )
 
 
+def _many(db: Session, rows: list[EmailSuggestion]) -> list[EmailSuggestionOut]:
+    applications, contacts = suggestions.related(db, rows)
+    inboxes = suggestions.account_emails(db, rows)
+    return [_out(s, applications, contacts, inboxes) for s in rows]
+
+
 def _one(db: Session, suggestion: EmailSuggestion) -> EmailSuggestionOut:
-    return _out(suggestion, *suggestions.related(db, [suggestion]))
+    return _many(db, [suggestion])[0]
+
+
+def _accounts(db: Session) -> list[GmailAccountOut]:
+    return [GmailAccountOut.model_validate(a) for a in gmail_accounts.list_accounts(db)]
 
 
 def _status(db: Session) -> dict:
@@ -78,6 +97,7 @@ def _status(db: Session) -> dict:
         "gmail_last_sync_at": settings.gmail_last_sync_at,
         "gmail_last_error": settings.gmail_last_error,
         "pending_count": suggestions.pending_count(db),
+        "accounts": _accounts(db),
     }
 
 
@@ -94,8 +114,41 @@ def list_suggestions(
     db: Session = Depends(get_db),
 ):
     rows = suggestions.list_suggestions(db, state, application_id=application_id, limit=limit)
-    applications, contacts = suggestions.related(db, rows)
-    return [_out(s, applications, contacts) for s in rows]
+    return _many(db, rows)
+
+
+@router.get("/highlights", response_model=EmailHighlightsOut)
+def email_highlights(
+    limit: Annotated[int, Query(ge=1, le=MAX_HIGHLIGHTS)] = 8,
+    db: Session = Depends(get_db),
+):
+    """The Dashboard's Email replies tabs: cold email replies (mail from a
+    tracked contact), interviews, offers and rejections, newest first."""
+    tabs = suggestions.highlights(db, limit=limit)
+    rows = [s for _, items in tabs.values() for s in items]
+    by_id = {o.id: o for o in _many(db, rows)}
+    return EmailHighlightsOut(
+        gmail_granted=is_gmail_granted(db),
+        tabs={
+            tab: HighlightTabOut(count=count, items=[by_id[s.id] for s in items])
+            for tab, (count, items) in tabs.items()
+        },
+    )
+
+
+@router.get("/accounts", response_model=list[GmailAccountOut])
+def list_accounts(db: Session = Depends(get_db)):
+    """The connected Gmail inboxes, oldest first."""
+    return _accounts(db)
+
+
+@router.delete("/accounts/{account_id}", status_code=204)
+def remove_account(account_id: int, db: Session = Depends(get_db)):
+    """Remove an inbox and its stored email updates. Changes already applied
+    to applications and contacts stay; nothing is revoked at Google."""
+    if not gmail_accounts.delete_account(db, account_id):
+        raise HTTPException(status_code=404, detail="gmail inbox not found")
+    return Response(status_code=204)
 
 
 @router.post("/suggestions/{suggestion_id}/accept", response_model=EmailSuggestionOut)
