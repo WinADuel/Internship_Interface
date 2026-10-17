@@ -18,7 +18,13 @@ vi.mock("../lib/api/discovery", () => ({
   listPostings: vi.fn().mockResolvedValue({ items: [], total: 0 }),
 }));
 vi.mock("../lib/api/interviews", () => ({ listRounds: vi.fn().mockResolvedValue([]) }));
-vi.mock("../lib/api/email", () => ({ getEmailStatus: vi.fn().mockResolvedValue({ pendingCount: 0 }) }));
+vi.mock("../lib/api/email", () => ({
+  getEmailStatus: vi.fn().mockResolvedValue({ pendingCount: 0, accounts: [] }),
+  getEmailHighlights: vi.fn().mockResolvedValue({
+    gmailGranted: true,
+    tabs: Object.fromEntries(["replies", "interview", "offer", "rejection"].map((t) => [t, { count: 0, items: [] }])),
+  }),
+}));
 vi.mock("../lib/api/applications", async (orig) => ({
   ...(await orig<typeof import("../lib/api/applications")>()),
   getRecentActivity: vi.fn().mockResolvedValue([]),
@@ -36,10 +42,11 @@ beforeEach(() => {
 });
 
 describe("Dashboard route", () => {
-  it("loads applications on mount and renders all seven widgets", () => {
+  it("loads applications on mount and renders all eight widgets", () => {
     const { container } = render(Dashboard);
     expect(load).toHaveBeenCalledTimes(1);
-    for (const id of ["activity", "reminders", "buckets", "snapshot", "needs-attention", "new-postings", "interviews"]) {
+    const ids = ["activity", "reminders", "buckets", "snapshot", "needs-attention", "new-postings", "interviews", "email-replies"];
+    for (const id of ids) {
       expect(container.querySelector(`[data-widget="${id}"]`)).not.toBeNull();
     }
   });
@@ -60,7 +67,7 @@ describe("Dashboard route", () => {
       JSON.stringify([{ id: "activity", x: 0, y: 0, w: 6, h: 4, settings: {} }]),
     );
     const { container } = render(Dashboard);
-    expect(container.querySelectorAll("[data-widget]")).toHaveLength(7);
+    expect(container.querySelectorAll("[data-widget]")).toHaveLength(8);
     expect(container.querySelector('[data-widget="needs-attention"]')).not.toBeNull();
     expect(container.querySelector('[data-widget="new-postings"]')).not.toBeNull();
   });
@@ -95,6 +102,24 @@ describe("Dashboard route", () => {
     const card = container.querySelector('[data-widget="interviews"]');
     expect(card?.querySelector("h2")?.textContent).toBe("Upcoming interviews");
     expect(await screen.findByText(/No interviews in the next 14 days/)).toBeInTheDocument();
+    expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("30");
+  });
+
+  it("adds Email replies to a saved pre-Phase-7 layout, keeping saved positions and settings", async () => {
+    const old = [
+      { id: "activity", x: 6, y: 0, w: 6, h: 4, settings: {} },
+      { id: "reminders", x: 0, y: 0, w: 6, h: 4, settings: { withinDays: 30 } },
+      { id: "buckets", x: 0, y: 4, w: 6, h: 4, settings: {} },
+      { id: "snapshot", x: 6, y: 4, w: 6, h: 4, settings: {} },
+      { id: "needs-attention", x: 0, y: 8, w: 12, h: 4, settings: {} },
+      { id: "new-postings", x: 0, y: 12, w: 6, h: 4, settings: {} },
+      { id: "interviews", x: 6, y: 12, w: 6, h: 4, settings: {} },
+    ];
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(old));
+    const { container } = render(Dashboard);
+    const card = container.querySelector('[data-widget="email-replies"]');
+    expect(card?.querySelector("h2")?.textContent).toBe("Email replies");
+    expect(await screen.findByText("No cold email replies yet.")).toBeInTheDocument();
     expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("30");
   });
 

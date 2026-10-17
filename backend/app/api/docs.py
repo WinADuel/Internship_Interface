@@ -1,14 +1,19 @@
 import logging
+import re
 import secrets
+from collections.abc import Callable
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_gmail_token_client_factory
 from app.core.config import settings
 from app.db.session import get_db
 from app.services import google_docs_service
+from app.services.gmail import accounts as gmail_accounts
+from app.services.gmail.client import GmailClient, GmailError
 from app.services.errors import (
     GoogleAuthError,
     GoogleDocsFetchError,
@@ -32,13 +37,17 @@ STATE_COOKIE_PATH = "/api/docs/google"
 # reads the flow only from a state that matched the cookie, so the marker is
 # as trustworthy as the CSRF check itself. token_urlsafe never emits ".".
 GMAIL_STATE_PREFIX = "gmail."
+# Reconnect on an inbox without an address (carried over from Phase 6) also
+# names that inbox: "gmail.<id>.<random>". Like the prefix, it is read only
+# from a state that matched the cookie.
+_INBOX_STATE = re.compile(r"^gmail\.([0-9]{1,18})\.")
 
 
 @router.get("/google/authorize")
-def google_authorize(gmail: bool = False) -> RedirectResponse:
+def google_authorize(gmail: bool = False, inbox: Annotated[int | None, Query(ge=1)] = None) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     if gmail:
-        state = GMAIL_STATE_PREFIX + state
+        state = GMAIL_STATE_PREFIX + (f"{inbox}." if inbox is not None else "") + state
     response = RedirectResponse(
         google_docs_service.get_authorization_url(state, gmail=gmail), status_code=302
     )
@@ -60,12 +69,26 @@ def _finish(location: str) -> RedirectResponse:
     return response
 
 
+def _inbox_address(token_response: dict, client_factory: Callable[[str], GmailClient]) -> str:
+    """The new inbox's address, from Gmail's profile, read with the access
+    token the consent just returned."""
+    access_token = token_response.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise GoogleAuthError("google did not return an access token")
+    client = client_factory(access_token)
+    try:
+        return client.get_profile()
+    finally:
+        client.close()
+
+
 @router.get("/google/callback")
 def google_callback(
     request: Request,
     state: str,
     code: str | None = None,
     db: Session = Depends(get_db),
+    gmail_client_factory: Callable[[str], GmailClient] = Depends(get_gmail_token_client_factory),
 ) -> RedirectResponse:
     expected = request.cookies.get(STATE_COOKIE)
     if not expected or not secrets.compare_digest(state.encode(), expected.encode()):
@@ -79,15 +102,27 @@ def google_callback(
     try:
         token_response = google_docs_service.exchange_code_for_token(code)
         scopes = google_docs_service.granted_scopes(token_response, requested)
-        google_docs_service.store_token(db, token_response, scopes=scopes)
-    except GoogleAuthError as exc:
-        # The service scrubs its messages (status codes and exception types only,
-        # never tokens or response bodies), so they are safe to log.
+        if gmail:
+            # A Connect Gmail consent adds (or reconnects) one inbox and
+            # never touches the Drive/Docs connection. Nothing is stored
+            # when the Gmail box wasn't ticked.
+            if google_docs_service.GMAIL_SCOPE not in scopes.split():
+                return _finish("/#/settings?gmail=0")
+            address = _inbox_address(token_response, gmail_client_factory)
+            inbox = _INBOX_STATE.match(state)
+            if inbox is not None:
+                gmail_accounts.reconnect_unaddressed(db, int(inbox.group(1)), address, token_response, scopes)
+            else:
+                gmail_accounts.upsert_account(db, address, token_response, scopes)
+        else:
+            google_docs_service.store_token(db, token_response, scopes=scopes)
+    except (GoogleAuthError, GmailError) as exc:
+        # The services scrub their messages (status codes and exception types
+        # only, never tokens or response bodies), so they are safe to log.
         logger.warning("google oauth callback failed: %s", exc)
         raise HTTPException(status_code=502, detail="google authorization failed")
     if gmail:
-        granted = google_docs_service.GMAIL_SCOPE in scopes.split()
-        return _finish(f"/#/settings?gmail={int(granted)}")
+        return _finish("/#/settings?gmail=1")
     return _finish("/#/essays?connected=1")
 
 

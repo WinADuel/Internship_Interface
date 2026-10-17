@@ -20,9 +20,12 @@ ROUTES = [
     ("POST", "/api/email/suggestions/{suggestion_id}/dismiss"),
     ("GET", "/api/email/status"),
     ("POST", "/api/email/sync"),
+    ("GET", "/api/email/highlights"),
+    ("GET", "/api/email/accounts"),
+    ("DELETE", "/api/email/accounts/{account_id}"),
 ]
 # Concrete paths for the auth and Claude-token boundary tests.
-PATHS = [(method, path.replace("{suggestion_id}", "1")) for method, path in ROUTES]
+PATHS = [(method, path.replace("{suggestion_id}", "1").replace("{account_id}", "1")) for method, path in ROUTES]
 RECEIVED = datetime(2026, 10, 8, 15, 30, tzinfo=UTC)
 K = SuggestionKind
 
@@ -87,6 +90,7 @@ def test_list_shape(logged_in_client, db_session, stripe):
         "gmail_message_id": "m1",
         "gmail_thread_id": "18c2f0a1",
         "gmail_url": "https://mail.google.com/mail/u/0/#all/18c2f0a1",
+        "account_email": None,
         "received_at": "2026-10-08T15:30:00Z",
         "direction": "inbound",
         "from_name": "Stripe Recruiting",
@@ -221,6 +225,7 @@ def test_status(logged_in_client, db_session, stripe):
         "gmail_last_sync_at": None,
         "gmail_last_error": None,
         "pending_count": 1,
+        "accounts": [],
     }
 
 
@@ -246,7 +251,7 @@ def test_sync_now_needs_gmail_and_the_setting(logged_in_client, db_session, gmai
 
 def test_sync_now_runs_a_sync(logged_in_client, db_session, gmail, stripe, sheet_sync_recorder):
     _enable(db_session)
-    grant_gmail(db_session)
+    inbox = grant_gmail(db_session)
     gmail.add(
         message(
             "a1",
@@ -272,6 +277,15 @@ def test_sync_now_runs_a_sync(logged_in_client, db_session, gmail, stripe, sheet
         "suggested": 1,
         "auto_applied": 0,
         "more": False,
+        "accounts": [
+            {
+                "id": inbox.id,
+                "email": "me@gmail.com",
+                "last_sync_at": body["gmail_last_sync_at"],
+                "last_error": None,
+                "created_at": body["accounts"][0]["created_at"],
+            }
+        ],
     }
     assert body["gmail_last_sync_at"] is not None
     assert sheet_sync_recorder.scheduled == []
@@ -296,12 +310,13 @@ def test_sync_now_reports_a_failed_run(logged_in_client, db_session, gmail):
     grant_gmail(db_session)
 
     def failing(query, max_ids):
-        raise GmailError("gmail list rejected (status 401); reconnect Google and allow Gmail in Settings", status=401)
+        raise GmailError("gmail list rejected (status 401); reconnect this inbox in Settings", status=401)
 
     gmail.list_message_ids = failing
     body = logged_in_client.post("/api/email/sync").json()
     assert body["ok"] is False
-    assert body["gmail_last_error"] == "gmail list rejected (status 401); reconnect Google and allow Gmail in Settings"
+    assert body["gmail_last_error"] == "me@gmail.com: gmail list rejected (status 401); reconnect this inbox in Settings"
+    assert body["accounts"][0]["last_error"] == "gmail list rejected (status 401); reconnect this inbox in Settings"
 
 
 def test_sync_now_is_409_while_a_sync_is_running(logged_in_client, db_session, gmail, _engine):
@@ -317,3 +332,185 @@ def test_sync_now_is_409_while_a_sync_is_running(logged_in_client, db_session, g
         other.execute(text("SELECT pg_advisory_unlock_all()"))
         other.rollback()
         other.close()
+
+
+# The Dashboard's Email replies block (Phase 7 spec §3).
+
+
+@pytest.fixture()
+def jane(db_session, stripe):
+    contact = Contact(
+        kind=ContactKind.COMPANY,
+        name="Jane",
+        organization="Stripe",
+        email="jane@stripe.com",
+        status=ContactStatus.SENT,
+        application_id=stripe.id,
+    )
+    db_session.add(contact)
+    db_session.commit()
+    return contact
+
+
+def _ids(tab) -> list[int]:
+    return [item["id"] for item in tab["items"]]
+
+
+def test_highlights_tab_rules(logged_in_client, db_session, stripe, jane):
+    S = SuggestionState
+    # A contact's reply that is also an interview invitation: both tabs.
+    invite = _suggestion(db_session, K.INTERVIEW, stripe, jane, n=1)
+    offer = _suggestion(db_session, K.OFFER, stripe, n=2, state=S.ACCEPTED, decided_at=RECEIVED)
+    stale = _suggestion(db_session, K.REJECTION, stripe, n=3, state=S.STALE, decided_at=RECEIVED)
+    _suggestion(db_session, K.REJECTION, stripe, n=4, state=S.DISMISSED, decided_at=RECEIVED)
+    reply = _suggestion(db_session, K.CONTACT_REPLY, contact=jane, n=5, state=S.AUTO_APPLIED, decided_at=RECEIVED)
+    # Mail you sent is never a reply, even to a contact.
+    _suggestion(db_session, K.CONTACT_SENT, contact=jane, n=6, direction=EmailDirection.SENT)
+    _suggestion(db_session, K.REJECTION, stripe, n=7, direction=EmailDirection.SENT)
+    # Other kinds have no tab.
+    _suggestion(db_session, K.CONFIRMATION, stripe, n=8)
+    _suggestion(db_session, K.ASSESSMENT, stripe, n=9)
+    _suggestion(db_session, K.NEW_APPLICATION, n=10, proposed_company="Rivian")
+
+    r = logged_in_client.get("/api/email/highlights")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["gmail_granted"] is False
+    tabs = body["tabs"]
+    assert set(tabs) == {"replies", "interview", "offer", "rejection"}
+    assert sorted(_ids(tabs["replies"])) == sorted([invite.id, reply.id]) and tabs["replies"]["count"] == 2
+    assert (_ids(tabs["interview"]), tabs["interview"]["count"]) == ([invite.id], 1)
+    assert (_ids(tabs["offer"]), tabs["offer"]["count"]) == ([offer.id], 1)
+    assert (_ids(tabs["rejection"]), tabs["rejection"]["count"]) == ([stale.id], 1)
+    # Items are full EmailSuggestionOut rows, with what they link to.
+    (item,) = tabs["interview"]["items"]
+    assert item["state"] == "pending" and item["contact"]["name"] == "Jane"
+    assert item["application"]["company"] == "Stripe" and item["round_kind"] == "technical"
+    assert item["gmail_url"] == "https://mail.google.com/mail/u/0/#all/18c2f0a1" and item["account_email"] is None
+
+
+def test_highlights_newest_first_and_the_count_is_every_match(logged_in_client, db_session, stripe):
+    old = _suggestion(db_session, K.REJECTION, stripe, n=1, received_at=RECEIVED - timedelta(days=3))
+    first_tie = _suggestion(db_session, K.REJECTION, stripe, n=2)
+    second_tie = _suggestion(db_session, K.REJECTION, stripe, n=3)
+    newest = _suggestion(db_session, K.REJECTION, stripe, n=4, received_at=RECEIVED + timedelta(hours=1))
+
+    tab = logged_in_client.get("/api/email/highlights?limit=3").json()["tabs"]["rejection"]
+    assert tab["count"] == 4
+    # Same date: the later id first.
+    assert _ids(tab) == [newest.id, second_tie.id, first_tie.id]
+    assert old.id not in _ids(tab)
+
+    tabs = logged_in_client.get("/api/email/highlights").json()["tabs"]
+    assert len(tabs["rejection"]["items"]) == 4
+    assert {k: v["count"] for k, v in tabs.items()} == {"replies": 0, "interview": 0, "offer": 0, "rejection": 4}
+
+
+def test_highlights_default_to_eight_rows(logged_in_client, db_session, stripe):
+    for n in range(1, 11):
+        _suggestion(db_session, K.OFFER, stripe, n=n, received_at=RECEIVED + timedelta(minutes=n))
+    tab = logged_in_client.get("/api/email/highlights").json()["tabs"]["offer"]
+    assert tab["count"] == 10 and len(tab["items"]) == 8
+
+
+@pytest.mark.parametrize(("query", "status"), [("limit=0", 422), ("limit=21", 422), ("limit=x", 422), ("limit=1", 200), ("limit=20", 200)])
+def test_highlights_limit(logged_in_client, query, status):
+    assert logged_in_client.get(f"/api/email/highlights?{query}").status_code == status
+
+
+def test_highlights_mark_pending_mail_that_no_longer_applies_as_out_of_date(logged_in_client, db_session, stripe):
+    s = _suggestion(db_session, K.INTERVIEW, stripe)
+    stripe.status = ApplicationStatus.REJECTED
+    db_session.commit()
+    (item,) = logged_in_client.get("/api/email/highlights").json()["tabs"]["interview"]["items"]
+    assert item["id"] == s.id and item["state"] == "stale"
+
+
+def test_highlights_link_each_email_to_its_inbox(logged_in_client, db_session, stripe):
+    personal = grant_gmail(db_session, "me@gmail.com")
+    school = grant_gmail(db_session, "me+jobs@school.edu")
+    _suggestion(db_session, K.OFFER, stripe, n=1, gmail_account_id=personal.id, gmail_thread_id="aaa1")
+    _suggestion(db_session, K.OFFER, stripe, n=2, gmail_account_id=school.id, gmail_thread_id="bbb2", received_at=RECEIVED + timedelta(hours=1))
+
+    body = logged_in_client.get("/api/email/highlights").json()
+
+    assert body["gmail_granted"] is True
+    assert [(i["account_email"], i["gmail_url"]) for i in body["tabs"]["offer"]["items"]] == [
+        ("me+jobs@school.edu", "https://mail.google.com/mail/u/me%2Bjobs@school.edu/#all/bbb2"),
+        ("me@gmail.com", "https://mail.google.com/mail/u/me@gmail.com/#all/aaa1"),
+    ]
+    # The suggestions list carries the inbox too.
+    listed = logged_in_client.get("/api/email/suggestions").json()
+    assert {i["account_email"] for i in listed} == {"me@gmail.com", "me+jobs@school.edu"}
+
+
+# Connected inboxes (Phase 7 spec §4).
+
+
+def test_accounts_list_oldest_first(logged_in_client, db_session):
+    assert logged_in_client.get("/api/email/accounts").json() == []
+    carried = grant_gmail(db_session, None)
+    school = grant_gmail(db_session, "me@school.edu")
+    school.last_error = "gmail list rejected (status 401); reconnect this inbox in Settings"
+    school.last_sync_at = RECEIVED
+    db_session.commit()
+
+    body = logged_in_client.get("/api/email/accounts").json()
+
+    assert body == [
+        {"id": carried.id, "email": None, "last_sync_at": None, "last_error": None, "created_at": body[0]["created_at"]},
+        {
+            "id": school.id,
+            "email": "me@school.edu",
+            "last_sync_at": "2026-10-08T15:30:00Z",
+            "last_error": "gmail list rejected (status 401); reconnect this inbox in Settings",
+            "created_at": body[1]["created_at"],
+        },
+    ]
+    # Nothing secret leaves the server.
+    assert all(set(a) == {"id", "email", "last_sync_at", "last_error", "created_at"} for a in body)
+    status = logged_in_client.get("/api/email/status").json()
+    assert status["accounts"] == body and status["gmail_granted"] is True
+
+
+def test_removing_an_inbox_deletes_its_email_updates_only(logged_in_client, db_session, stripe):
+    personal = grant_gmail(db_session, "me@gmail.com")
+    school = grant_gmail(db_session, "me@school.edu")
+    kept = _suggestion(db_session, K.OFFER, stripe, n=1, gmail_account_id=personal.id)
+    gone = _suggestion(db_session, K.REJECTION, stripe, n=2, gmail_account_id=school.id)
+    accepted = _suggestion(db_session, K.INTERVIEW, stripe, n=3, gmail_account_id=school.id)
+    assert logged_in_client.post(f"/api/email/suggestions/{accepted.id}/accept").status_code == 200
+    gone_ids = [gone.id, accepted.id]
+    school_id = school.id
+    school.last_error = "gmail list rejected (status 500)"
+    settings_service.get_settings(db_session).gmail_last_error = "me@school.edu: gmail list rejected (status 500)"
+    db_session.commit()
+
+    r = logged_in_client.delete(f"/api/email/accounts/{school_id}")
+
+    assert r.status_code == 204 and r.content == b""
+    assert [a["email"] for a in logged_in_client.get("/api/email/accounts").json()] == ["me@gmail.com"]
+    db_session.expire_all()
+    assert db_session.get(EmailSuggestion, kept.id) is not None
+    assert all(db_session.get(EmailSuggestion, i) is None for i in gone_ids)
+    # What was accepted from it stays.
+    db_session.refresh(stripe)
+    assert stripe.status == ApplicationStatus.INTERVIEW
+    # The run summary no longer names the removed inbox.
+    assert logged_in_client.get("/api/email/status").json()["gmail_last_error"] is None
+
+    assert logged_in_client.delete(f"/api/email/accounts/{school_id}").status_code == 404
+    r = logged_in_client.delete("/api/email/accounts/999999")
+    assert r.status_code == 404 and r.json() == {"detail": "gmail inbox not found"}
+
+
+def test_removing_the_last_inbox_disconnects_gmail(logged_in_client, db_session):
+    inbox = grant_gmail(db_session)
+    assert logged_in_client.delete(f"/api/email/accounts/{inbox.id}").status_code == 204
+    assert logged_in_client.get("/api/settings").json()["gmail_granted"] is False
+    assert logged_in_client.get("/api/email/highlights").json()["gmail_granted"] is False
+
+
+def test_remove_inbox_validation(logged_in_client):
+    assert logged_in_client.delete("/api/email/accounts/x").status_code == 422

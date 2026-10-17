@@ -2,9 +2,13 @@ import { apiFetch } from "./client";
 import { keysToCamel, keysToSnake } from "./case";
 import type {
   AcceptInput,
+  EmailHighlights,
   EmailStatus,
   EmailSuggestion,
   EmailSyncResult,
+  GmailAccount,
+  HighlightList,
+  HighlightTab,
   SuggestionApplication,
   SuggestionContact,
   SuggestionFilter,
@@ -43,7 +47,26 @@ export function mapSuggestionFromApi(raw: Raw): EmailSuggestion {
     contact: contact ? keysToCamel<SuggestionContact>(contact) : null,
     createdAt: str(raw.created_at),
     decidedAt: strOrNull(raw.decided_at),
+    accountEmail: strOrNull(raw.account_email),
   };
+}
+
+export function mapAccountFromApi(raw: Raw): GmailAccount {
+  return {
+    id: raw.id as number,
+    email: strOrNull(raw.email),
+    lastSyncAt: strOrNull(raw.last_sync_at),
+    lastError: strOrNull(raw.last_error),
+    createdAt: str(raw.created_at),
+  };
+}
+
+const accountsFrom = (v: unknown): GmailAccount[] =>
+  Array.isArray(v) ? v.filter((a) => obj(a) !== null).map((a) => mapAccountFromApi(a as Raw)) : [];
+
+/** The status fields, with the inboxes mapped (an older server without `accounts` gives []). */
+function mapStatusFromApi(raw: Raw): EmailStatus {
+  return { ...keysToCamel<EmailStatus>(raw), accounts: accountsFrom(raw.accounts) };
 }
 
 export async function listSuggestions(
@@ -75,13 +98,48 @@ export async function dismissSuggestion(id: number): Promise<EmailSuggestion> {
 }
 
 export async function getEmailStatus(): Promise<EmailStatus> {
-  return keysToCamel<EmailStatus>(await apiFetch<Raw>("/api/email/status"));
+  return mapStatusFromApi(await apiFetch<Raw>("/api/email/status"));
 }
 
 /** Runs a Gmail sync now (synchronously) and returns its outcome with the new status. */
 export async function syncEmailNow(): Promise<EmailSyncResult> {
-  return keysToCamel<EmailSyncResult>(await apiFetch<Raw>("/api/email/sync", { method: "POST" }));
+  const raw = await apiFetch<Raw>("/api/email/sync", { method: "POST" });
+  return { ...keysToCamel<EmailSyncResult>(raw), accounts: accountsFrom(raw.accounts) };
 }
 
-/** Where Connect Gmail goes: Google's consent for gmail.readonly, then back to Settings. */
+const HIGHLIGHT_TABS: HighlightTab[] = ["replies", "interview", "offer", "rejection"];
+
+function mapHighlightList(raw: Raw | null): HighlightList {
+  const rows: unknown[] = raw && Array.isArray(raw.items) ? raw.items : [];
+  const items = rows.filter((i) => obj(i) !== null).map((i) => mapSuggestionFromApi(i as Raw));
+  return { count: typeof raw?.count === "number" ? raw.count : items.length, items };
+}
+
+/** The Dashboard's Email replies: each tab's newest `limit` emails (1–20) and its total. */
+export async function getEmailHighlights(limit = 8): Promise<EmailHighlights> {
+  const raw = await apiFetch<Raw>(`/api/email/highlights?limit=${limit}`);
+  const tabs = obj(raw.tabs);
+  return {
+    gmailGranted: raw.gmail_granted === true,
+    tabs: Object.fromEntries(HIGHLIGHT_TABS.map((t) => [t, mapHighlightList(obj(tabs?.[t]))])) as Record<
+      HighlightTab,
+      HighlightList
+    >,
+  };
+}
+
+/** The connected Gmail inboxes, oldest first. */
+export async function listGmailAccounts(): Promise<GmailAccount[]> {
+  return accountsFrom(await apiFetch<unknown>("/api/email/accounts"));
+}
+
+/** Disconnects one inbox; the server deletes its stored email updates. */
+export async function removeGmailAccount(id: number): Promise<void> {
+  await apiFetch<void>(`/api/email/accounts/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Where Connect Gmail, Add another inbox and Reconnect go: Google's account
+ * chooser and consent for gmail.readonly, then back to Settings.
+ */
 export const CONNECT_GMAIL_URL = "/api/docs/google/authorize?gmail=1";

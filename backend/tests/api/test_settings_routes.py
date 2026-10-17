@@ -89,13 +89,17 @@ def test_patch_ranking_settings_validation(logged_in_client):
 
 def test_settings_report_google_and_gmail_connection(logged_in_client, db_session):
     from app.services.google_docs_service import GMAIL_SCOPE, GOOGLE_SCOPE, store_token
+    from tests.services.gmail.fakes import grant_gmail
 
     s = logged_in_client.get("/api/settings").json()
     assert s["google_connected"] is False and s["gmail_granted"] is False
     store_token(db_session, {"refresh_token": "rt"}, scopes=GOOGLE_SCOPE)
     s = logged_in_client.get("/api/settings").json()
     assert s["google_connected"] is True and s["gmail_granted"] is False
+    # The Drive connection's scopes don't count for Gmail: an inbox does.
     store_token(db_session, {}, scopes=f"{GOOGLE_SCOPE} {GMAIL_SCOPE}")
+    assert logged_in_client.get("/api/settings").json()["gmail_granted"] is False
+    grant_gmail(db_session)
     r = logged_in_client.patch("/api/settings", json={"nudge_followup_days": 9})
     assert r.json()["google_connected"] is True and r.json()["gmail_granted"] is True
 

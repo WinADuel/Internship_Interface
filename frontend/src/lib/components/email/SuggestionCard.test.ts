@@ -3,18 +3,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/email", () => ({ acceptSuggestion: vi.fn(), dismissSuggestion: vi.fn() }));
 vi.mock("../../api/interviews", () => ({ createRound: vi.fn(), updateRound: vi.fn() }));
-vi.mock("../../stores/email", () => ({
-  afterAccept: vi.fn().mockResolvedValue(undefined),
-  refreshEmailStatus: vi.fn().mockResolvedValue(null),
-}));
+vi.mock("../../stores/email", async () => {
+  const { writable } = await import("svelte/store");
+  return {
+    afterAccept: vi.fn().mockResolvedValue(undefined),
+    emailStatus: writable(null),
+    refreshEmailStatus: vi.fn().mockResolvedValue(null),
+  };
+});
 vi.mock("../../stores/toast", () => ({ showToast: vi.fn() }));
 
 import { ApiError } from "../../api/client";
 import { acceptSuggestion, dismissSuggestion } from "../../api/email";
 import { createRound } from "../../api/interviews";
-import { afterAccept, refreshEmailStatus } from "../../stores/email";
+import { afterAccept, emailStatus, refreshEmailStatus } from "../../stores/email";
 import { showToast } from "../../stores/toast";
-import { fakeSuggestion } from "../../testing/fixtures";
+import { fakeEmailStatus, fakeGmailAccount, fakeSuggestion } from "../../testing/fixtures";
 import SuggestionCard from "./SuggestionCard.svelte";
 
 beforeEach(() => {
@@ -24,6 +28,7 @@ beforeEach(() => {
   vi.mocked(afterAccept).mockClear();
   vi.mocked(refreshEmailStatus).mockClear();
   vi.mocked(showToast).mockReset();
+  emailStatus.set(null);
 });
 
 describe("SuggestionCard", () => {
@@ -40,6 +45,21 @@ describe("SuggestionCard", () => {
     expect(gmail.getAttribute("href")).toBe("https://mail.google.com/mail/u/0/#all/thread-1");
     expect(gmail.getAttribute("target")).toBe("_blank");
     expect(gmail.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("says which inbox received the email only when more than one is connected", async () => {
+    const two = [fakeGmailAccount({ id: 1 }), fakeGmailAccount({ id: 2, email: "you@school.edu" })];
+    emailStatus.set(fakeEmailStatus({ accounts: [fakeGmailAccount()] }));
+    const { rerender } = render(SuggestionCard, { suggestion: fakeSuggestion({ accountEmail: "you@school.edu" }) });
+    const sender = screen.getByText(/^From Acme Recruiting/);
+    expect(sender.textContent).toBe("From Acme Recruiting <jobs@acme.com>");
+    emailStatus.set(fakeEmailStatus({ accounts: two }));
+    await vi.waitFor(() => expect(sender.textContent).toBe("From Acme Recruiting <jobs@acme.com> to you@school.edu"));
+    // An inbox whose address isn't known yet, or an email you sent: nothing to add.
+    await rerender({ suggestion: fakeSuggestion({ accountEmail: null }) });
+    expect(screen.getByText(/^From Acme Recruiting/).textContent).toBe("From Acme Recruiting <jobs@acme.com>");
+    await rerender({ suggestion: fakeSuggestion({ direction: "sent", accountEmail: "you@school.edu" }) });
+    expect(screen.getByText(/^From Acme Recruiting/).textContent).toBe("From Acme Recruiting <jobs@acme.com>");
   });
 
   it("renders email text as text, never as markup", () => {

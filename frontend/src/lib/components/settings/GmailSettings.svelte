@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { ApiError } from "../../api/client";
-  import { CONNECT_GMAIL_URL } from "../../api/email";
+  import { CONNECT_GMAIL_URL, listGmailAccounts, removeGmailAccount } from "../../api/email";
+  import { inboxLabel } from "../../email/format";
   import { updateSettings } from "../../api/settings";
   import { formatDateTime } from "../../format";
   import { refreshEmailStatus, runEmailSync, syncSummary } from "../../stores/email";
   import { showToast } from "../../stores/toast";
   import type { AppSettings } from "../../types/contact";
+  import type { GmailAccount } from "../../types/email";
 
   let { settings, onsaved }: { settings: AppSettings; onsaved?: (settings: AppSettings) => void } = $props();
 
@@ -33,9 +35,62 @@
   }
   untrack(() => fill(settings));
 
-  const granted = $derived(settings.gmailGranted);
+  // The connected inboxes; null until the first list arrives.
+  let accounts = $state<GmailAccount[] | null>(null);
+  let accountsFailed = $state(false);
+  let removing = $state<number | null>(null);
+  // Bumped when a list request starts and when a removal or Sync now changes
+  // the list: an answer is kept only if nothing newer happened meanwhile, so a
+  // slow list can't bring back an inbox just removed.
+  let accountsSeq = 0;
+
+  // Reconnect on an inbox without an address yet (carried over from before
+  // inboxes had addresses) names it, so the consent gives that inbox its
+  // address and new sign-in instead of adding a second line for the account.
+  const reconnectUrl = (account: GmailAccount) =>
+    account.email ? CONNECT_GMAIL_URL : `${CONNECT_GMAIL_URL}&inbox=${account.id}`;
+
+  async function loadAccounts() {
+    const seq = ++accountsSeq;
+    accountsFailed = false;
+    try {
+      const rows = await listGmailAccounts();
+      if (seq === accountsSeq) accounts = rows;
+    } catch {
+      if (seq === accountsSeq) accountsFailed = true;
+    }
+  }
+
+  onMount(() => {
+    void loadAccounts();
+  });
+
+  async function remove(account: GmailAccount) {
+    const name = account.email ?? "this Gmail inbox";
+    if (!window.confirm(`Remove ${name}? Its email updates are deleted from the tracker. Changes you already accepted stay.`)) {
+      return;
+    }
+    removing = account.id;
+    try {
+      await removeGmailAccount(account.id);
+      accountsSeq += 1;
+      accounts = (accounts ?? []).filter((a) => a.id !== account.id);
+      showToast(`Removed ${name}.`, "info");
+    } catch (err) {
+      showToast(err instanceof ApiError ? `Couldn't remove the inbox: ${err.message}` : "Couldn't remove the inbox.");
+      // Already gone (404): show the list as the server has it.
+      if (err instanceof ApiError && err.status === 404) void loadAccounts();
+    } finally {
+      removing = null;
+      // The pending count and the inbox list behind the nav badge and email cards changed.
+      void refreshEmailStatus();
+    }
+  }
+
+  // Once the list is here it decides; until then the settings' flag does.
+  const granted = $derived(accounts !== null ? accounts.length > 0 : settings.gmailGranted);
   // Sync now needs the saved state: Gmail granted and sync turned on.
-  const canSync = $derived(settings.gmailGranted && settings.gmailSyncEnabled);
+  const canSync = $derived(granted && settings.gmailSyncEnabled);
 
   let saving = $state(false);
   let formError = $state<string | null>(null);
@@ -79,8 +134,12 @@
   async function sync() {
     syncing = true;
     announcement = "";
+    // The inboxes as this sync left them, unless a removal or a newer list
+    // came meanwhile (it would bring back an inbox just removed).
+    const seq = ++accountsSeq;
     try {
       const result = await runEmailSync();
+      if (seq === accountsSeq) accounts = result.accounts;
       lastSyncAt = result.gmailLastSyncAt;
       lastError = result.gmailLastError;
       announcement = syncSummary(result);
@@ -103,16 +162,49 @@
     leaves no trace, and no email goes to Claude.
   </p>
 
-  {#if granted}
-    <p class="connected">Gmail: Connected</p>
+  <h3 id="gmail-inboxes-heading">Inboxes</h3>
+  {#if accounts === null && accountsFailed}
+    <p class="error">Couldn't load your inboxes. <button type="button" onclick={loadAccounts}>Retry</button></p>
+  {:else if accounts === null}
+    <p class="muted">Loading inboxes…</p>
+  {:else if accounts.length === 0}
+    <p class="muted">No inbox connected.</p>
   {:else}
-    <p>
-      <!-- Sync on without the permission: it was lost (Google revoked it, or a Drive-only reconnect dropped it). -->
-      <a class="connect" href={CONNECT_GMAIL_URL}>{settings.gmailSyncEnabled ? "Reconnect Gmail" : "Connect Gmail"}</a>
-      <span class="muted small">
-        Google asks for read-only access to your mail. As a personal app it shows a “Google hasn't verified this
-        app” screen first: choose Advanced, then continue.
-      </span>
+    <ul class="inboxes" aria-labelledby="gmail-inboxes-heading">
+      {#each accounts as account (account.id)}
+        <li>
+          <span class="address" class:pending-address={!account.email}>{inboxLabel(account)}</span>
+          <span class="muted small">Last sync: {account.lastSyncAt ? formatDateTime(account.lastSyncAt) : "never"}</span>
+          {#if account.lastError}<span class="error small">{account.lastError}</span>{/if}
+          <span class="inbox-actions">
+            <a href={reconnectUrl(account)} aria-label="Reconnect {inboxLabel(account)}">Reconnect</a>
+            <button
+              type="button"
+              aria-label="Remove {inboxLabel(account)}"
+              disabled={removing === account.id}
+              onclick={() => remove(account)}
+            >
+              Remove
+            </button>
+          </span>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+  <p>
+    <a class="connect" href={CONNECT_GMAIL_URL}>{granted ? "Add another inbox" : "Connect Gmail"}</a>
+    <span class="muted small">
+      Google asks which account to use and for read-only access to its mail. As a personal app it shows a
+      “Google hasn't verified this app” screen first: choose Advanced, then continue.
+    </span>
+  </p>
+  {#if accounts?.length}
+    <p class="muted small">
+      Remove deletes that inbox's email updates from the tracker but doesn't withdraw the app's access at Google. To
+      withdraw it completely, also remove the app at
+      <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer"
+        >myaccount.google.com/permissions</a
+      >.
     </p>
   {/if}
 
@@ -138,10 +230,7 @@
   </form>
 
   <p>Last sync: {lastSyncAt ? formatDateTime(lastSyncAt) : "never"}</p>
-  {#if lastError}
-    <p class="error">Last sync failed: {lastError}</p>
-    {#if granted}<p><a href={CONNECT_GMAIL_URL}>Reconnect Gmail</a></p>{/if}
-  {/if}
+  {#if lastError}<p class="error">Last sync failed: {lastError}</p>{/if}
   <button type="button" onclick={sync} disabled={syncing || !canSync}>{syncing ? "Syncing…" : "Sync now"}</button>
   {#if !canSync}
     <p class="muted small">
@@ -155,7 +244,13 @@
   .gmail { max-width: 40rem; margin-bottom: 1.5rem; }
   .muted { color: #666; }
   .small { font-size: 0.85rem; }
-  .connected { font-weight: 600; color: #1e5b26; }
+  h3 { font-size: 1rem; margin: 0.75rem 0 0.4rem; }
+  .inboxes { list-style: none; padding: 0; margin: 0 0 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .inboxes li { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.45rem 0.6rem; border: 1px solid #ddd; border-radius: 6px; min-width: 0; }
+  .address { font-weight: 600; overflow-wrap: anywhere; }
+  .pending-address { font-weight: 400; font-style: italic; }
+  .inbox-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.15rem; }
+  .inbox-actions button { font-size: 0.85rem; padding: 0.15rem 0.6rem; }
   .connect { font-weight: 600; margin-right: 0.4rem; }
   form { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.75rem 0; }
   .field { display: flex; flex-direction: column; gap: 0.2rem; }

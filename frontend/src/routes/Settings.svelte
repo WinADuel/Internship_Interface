@@ -57,7 +57,7 @@
     handledQuery = query;
     const result = new URLSearchParams(query).get("gmail");
     if (result !== "1" && result !== "0") return;
-    if (result === "1") showToast("Gmail connected. Turn on Sync Gmail below to start.", "info");
+    if (result === "1") showToast("Gmail inbox connected. Sync Gmail must be on below for it to be read.", "info");
     else showToast("Gmail wasn't connected: Google didn't give permission to read mail.");
     void replace("/settings");
   });

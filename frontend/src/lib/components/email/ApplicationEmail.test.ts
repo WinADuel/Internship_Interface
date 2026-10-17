@@ -2,10 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/email", () => ({ listSuggestions: vi.fn(), acceptSuggestion: vi.fn(), dismissSuggestion: vi.fn() }));
-vi.mock("../../stores/email", () => ({
-  afterAccept: vi.fn().mockResolvedValue(undefined),
-  refreshEmailStatus: vi.fn().mockResolvedValue(null),
-}));
+vi.mock("../../stores/email", async () => {
+  const { writable } = await import("svelte/store");
+  return {
+    afterAccept: vi.fn().mockResolvedValue(undefined),
+    emailStatus: writable(null),
+    refreshEmailStatus: vi.fn().mockResolvedValue(null),
+  };
+});
 vi.mock("../../stores/toast", () => ({ showToast: vi.fn() }));
 
 import { acceptSuggestion, listSuggestions } from "../../api/email";

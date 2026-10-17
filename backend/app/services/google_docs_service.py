@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import decrypt_value, encrypt_value
+from app.models.gmail_account import GmailAccount
 from app.models.oauth_token import OAuthToken
 from app.services.errors import (
     GoogleAuthError,
@@ -25,9 +26,10 @@ GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/drive.file",
 )
 GOOGLE_SCOPE = " ".join(GOOGLE_SCOPES)
-# Gmail sync (Phase 6 spec §2) is a separate, optional consent on top of the
-# scopes above. gmail.readonly is read-only: the app cannot send, delete or
-# label mail. It is requested only by Connect Gmail, never by default.
+# Gmail sync (Phase 6 spec §2) is a separate, optional consent. gmail.readonly
+# is read-only: the app cannot send, delete or label mail. Connect Gmail asks
+# for it alone (Phase 7 spec §4), so each inbox gets a token of its own and
+# the Drive/Docs connection is never touched.
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GOOGLE_PROVIDER = "google"
 _HTTP_TIMEOUT = 10.0
@@ -39,7 +41,7 @@ _DOC_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
 
 def requested_scope(gmail: bool = False) -> str:
     """The space-separated scopes an authorization request asks for."""
-    return f"{GOOGLE_SCOPE} {GMAIL_SCOPE}" if gmail else GOOGLE_SCOPE
+    return GMAIL_SCOPE if gmail else GOOGLE_SCOPE
 
 
 def get_authorization_url(state: str, gmail: bool = False) -> str:
@@ -49,12 +51,12 @@ def get_authorization_url(state: str, gmail: bool = False) -> str:
         "redirect_uri": settings.google_redirect_uri,
         "scope": requested_scope(gmail),
         "access_type": "offline",  # offline + consent so Google returns a refresh_token
-        "prompt": "consent",
+        # Connect Gmail shows Google's account chooser, so another inbox can
+        # be picked. No include_granted_scopes: the inbox's token carries
+        # Gmail only, whichever Google account it is.
+        "prompt": "consent select_account" if gmail else "consent",
         "state": state,
     }
-    if gmail:
-        # Incremental authorization: the new token keeps the scopes already granted.
-        params["include_granted_scopes"] = "true"
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 
 
@@ -75,7 +77,10 @@ def _post_token_request(data: dict) -> dict:
     except httpx.HTTPError as exc:
         raise GoogleAuthError(f"google token request failed ({type(exc).__name__})") from None
     if not response.is_success:
-        raise GoogleAuthError(f"google token request rejected (status {response.status_code})")
+        raise GoogleAuthError(
+            f"google token request rejected (status {response.status_code})",
+            reconnect=response.status_code in (400, 401),
+        )
     try:
         return response.json()
     except ValueError:
@@ -120,19 +125,26 @@ def is_google_connected(db: Session) -> bool:
 
 
 def is_gmail_granted(db: Session) -> bool:
-    """Whether the stored Google connection includes the Gmail read scope."""
-    row = _get_token_row(db)
-    return row is not None and GMAIL_SCOPE in row.scopes.split()
+    """Whether at least one Gmail inbox is connected (Phase 7 spec §4). The
+    Drive/Docs connection has no say in it."""
+    return db.scalar(select(GmailAccount.id).limit(1)) is not None
 
 
 def get_valid_access_token(db: Session) -> str:
+    """A fresh access token for the Drive/Docs connection."""
     row = _get_token_row(db)
     if row is None:
         raise GoogleAuthError("google is not connected")
+    return refresh_access_token(row.encrypted_refresh_token)
+
+
+def refresh_access_token(encrypted_refresh_token: bytes) -> str:
+    """Trade a stored (encrypted) refresh token for an access token. Errors
+    never include response bodies or token values."""
     try:
-        refresh_token = decrypt_value(row.encrypted_refresh_token)
+        refresh_token = decrypt_value(encrypted_refresh_token)
     except InvalidToken:
-        raise GoogleAuthError("stored google token could not be decrypted") from None
+        raise GoogleAuthError("stored google token could not be decrypted", reconnect=True) from None
     data = _post_token_request(
         {
             "refresh_token": refresh_token,

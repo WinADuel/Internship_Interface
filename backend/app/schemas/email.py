@@ -53,7 +53,8 @@ class SuggestionContactOut(BaseModel):
 
 class EmailSuggestionOut(BaseModel):
     """Sender, subject and snippet are untrusted email text: show as text.
-    `gmail_url` is the only link, built from the thread id."""
+    `gmail_url` is the only link, built from the thread id and the inbox.
+    `account_email` is the inbox the email came from (null when unknown)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -61,6 +62,7 @@ class EmailSuggestionOut(BaseModel):
     gmail_message_id: str
     gmail_thread_id: str
     gmail_url: str
+    account_email: str | None
     received_at: datetime
     direction: EmailDirection
     from_name: str
@@ -81,12 +83,29 @@ class EmailSuggestionOut(BaseModel):
     decided_at: datetime | None
 
 
+class GmailAccountOut(BaseModel):
+    """A connected inbox. `email` is null for an inbox carried over from
+    Phase 6 until its first sync reads the address."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str | None
+    last_sync_at: datetime | None
+    last_error: str | None
+    created_at: datetime
+
+
 class EmailStatusOut(BaseModel):
+    """`gmail_last_sync_at` and `gmail_last_error` summarise the last run;
+    `accounts` holds each inbox's own, oldest first."""
+
     gmail_granted: bool
     gmail_sync_enabled: bool
     gmail_last_sync_at: datetime | None
     gmail_last_error: str | None
     pending_count: int
+    accounts: list[GmailAccountOut]
 
 
 class EmailSyncOut(EmailStatusOut):
@@ -99,3 +118,24 @@ class EmailSyncOut(EmailStatusOut):
     suggested: int
     auto_applied: int
     more: bool
+
+
+class HighlightTabOut(BaseModel):
+    """`count` is every email the tab's rule matches; `items` the newest."""
+
+    count: int
+    items: list[EmailSuggestionOut]
+
+
+class HighlightTabsOut(BaseModel):
+    replies: HighlightTabOut
+    interview: HighlightTabOut
+    offer: HighlightTabOut
+    rejection: HighlightTabOut
+
+
+class EmailHighlightsOut(BaseModel):
+    """The Dashboard's Email replies block (Phase 7 spec §3)."""
+
+    gmail_granted: bool
+    tabs: HighlightTabsOut
