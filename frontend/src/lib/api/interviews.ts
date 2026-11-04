@@ -1,5 +1,5 @@
-import { ApiError, apiFetch } from "./client";
-import { keysToSnake } from "./case";
+import { ApiError, apiFetch, jsonInit } from "./client";
+import { keysToSnake, strOrNull } from "./case";
 import type {
   BriefSource,
   ChecklistItem,
@@ -16,8 +16,6 @@ import type {
 
 type Raw = Record<string, unknown>;
 
-const JSON_HEADERS = { "Content-Type": "application/json" };
-
 // POST, GET, PATCH and both PUTs all answer with the round detail (round,
 // application, progress, linked contacts and stories).
 
@@ -25,7 +23,6 @@ const JSON_HEADERS = { "Content-Type": "application/json" };
 const BRIEF_BODY_MAX = 12_000;
 const BRIEF_SOURCES_MAX = 20;
 
-const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 function mapChecklist(raw: unknown): ChecklistItem[] {
@@ -40,19 +37,19 @@ export function mapRoundFromApi(raw: Raw): InterviewRound {
     id: raw.id as number,
     applicationId: raw.application_id as number,
     kind: (raw.kind as InterviewRound["kind"]) ?? "other",
-    title: str(raw.title),
-    scheduledAt: str(raw.scheduled_at),
+    title: strOrNull(raw.title),
+    scheduledAt: strOrNull(raw.scheduled_at),
     durationMinutes: num(raw.duration_minutes),
     format: (raw.format as InterviewRound["format"]) ?? null,
-    location: str(raw.location),
-    interviewers: str(raw.interviewers),
+    location: strOrNull(raw.location),
+    interviewers: strOrNull(raw.interviewers),
     state: (raw.state as InterviewRound["state"]) ?? "scheduled",
     outcome: (raw.outcome as InterviewRound["outcome"]) ?? null,
-    prepNotes: str(raw.prep_notes),
-    questionsToAsk: str(raw.questions_to_ask),
-    reflection: str(raw.reflection),
+    prepNotes: strOrNull(raw.prep_notes),
+    questionsToAsk: strOrNull(raw.questions_to_ask),
+    reflection: strOrNull(raw.reflection),
     checklist: mapChecklist(raw.checklist),
-    thankYouSentAt: str(raw.thank_you_sent_at),
+    thankYouSentAt: strOrNull(raw.thank_you_sent_at),
     createdAt: raw.created_at as string,
     updatedAt: raw.updated_at as string,
   };
@@ -74,8 +71,8 @@ export function mapRoundDetailFromApi(raw: Raw): InterviewRoundDetail {
   const contacts: RoundContact[] = (Array.isArray(raw.contacts) ? (raw.contacts as Raw[]) : []).map((c) => ({
     id: c.id as number,
     name: String(c.name ?? ""),
-    email: str(c.email),
-    title: str(c.title),
+    email: strOrNull(c.email),
+    title: strOrNull(c.title),
   }));
   const stories: RoundStory[] = (Array.isArray(raw.stories) ? (raw.stories as Raw[]) : []).map((s) => ({
     id: s.id as number,
@@ -99,21 +96,13 @@ export async function getRound(id: number): Promise<InterviewRoundDetail> {
 }
 
 export async function createRound(data: InterviewRoundInput): Promise<InterviewRoundDetail> {
-  const raw = await apiFetch<Raw>("/api/interviews", {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify(keysToSnake(data)),
-  });
+  const raw = await apiFetch<Raw>("/api/interviews", jsonInit("POST", keysToSnake(data)));
   return mapRoundDetailFromApi(raw);
 }
 
 /** PATCH; only the keys present on `data` are sent. */
 export async function updateRound(id: number, data: InterviewRoundUpdate): Promise<InterviewRoundDetail> {
-  const raw = await apiFetch<Raw>(`/api/interviews/${id}`, {
-    method: "PATCH",
-    headers: JSON_HEADERS,
-    body: JSON.stringify(keysToSnake(data)),
-  });
+  const raw = await apiFetch<Raw>(`/api/interviews/${id}`, jsonInit("PATCH", keysToSnake(data)));
   return mapRoundDetailFromApi(raw);
 }
 
@@ -123,21 +112,13 @@ export async function deleteRound(id: number): Promise<void> {
 
 /** Replaces the round's tracked interviewers. */
 export async function setRoundContacts(id: number, contactIds: number[]): Promise<InterviewRoundDetail> {
-  const raw = await apiFetch<Raw>(`/api/interviews/${id}/contacts`, {
-    method: "PUT",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ contact_ids: contactIds }),
-  });
+  const raw = await apiFetch<Raw>(`/api/interviews/${id}/contacts`, jsonInit("PUT", { contact_ids: contactIds }));
   return mapRoundDetailFromApi(raw);
 }
 
 /** Replaces the stories planned for the round. */
 export async function setRoundStories(id: number, storyIds: number[]): Promise<InterviewRoundDetail> {
-  const raw = await apiFetch<Raw>(`/api/interviews/${id}/stories`, {
-    method: "PUT",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ story_ids: storyIds }),
-  });
+  const raw = await apiFetch<Raw>(`/api/interviews/${id}/stories`, jsonInit("PUT", { story_ids: storyIds }));
   return mapRoundDetailFromApi(raw);
 }
 

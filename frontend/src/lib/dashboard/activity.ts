@@ -1,3 +1,4 @@
+import { applicationLabel } from "../format";
 import type { ActivityEntry } from "../types/application";
 import type { ContactActivityEntry, ContactKind } from "../types/contact";
 
@@ -16,7 +17,7 @@ export function mergeActivity(apps: ActivityEntry[], contacts: ContactActivityEn
   const items: FeedItem[] = [
     ...apps.map((a) => ({
       kind: "application" as const,
-      label: `${a.company} — ${a.roleTitle}`,
+      label: applicationLabel(a),
       oldStatus: a.oldStatus,
       newStatus: a.newStatus,
       changedAt: a.changedAt,

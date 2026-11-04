@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, jsonInit } from "./client";
 import { keysToCamel, keysToSnake } from "./case";
 import type {
   Contact,
@@ -13,14 +13,6 @@ import type {
 } from "../types/contact";
 
 type Raw = Record<string, unknown>;
-
-const JSON_HEADERS = { "Content-Type": "application/json" };
-
-function post(body?: unknown): RequestInit {
-  return body === undefined
-    ? { method: "POST" }
-    : { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) };
-}
 
 export function mapContactFromApi(raw: Raw): Contact {
   const contact = keysToCamel<Contact>(raw);
@@ -49,15 +41,11 @@ export async function getContact(id: number): Promise<Contact> {
 }
 
 export async function createContact(data: ContactInput): Promise<Contact> {
-  return mapContactFromApi(await apiFetch<Raw>("/api/contacts", post(keysToSnake(data))));
+  return mapContactFromApi(await apiFetch<Raw>("/api/contacts", jsonInit("POST", keysToSnake(data))));
 }
 
 export async function updateContact(id: number, data: ContactUpdate): Promise<Contact> {
-  const raw = await apiFetch<Raw>(`/api/contacts/${id}`, {
-    method: "PATCH",
-    headers: JSON_HEADERS,
-    body: JSON.stringify(keysToSnake(data)),
-  });
+  const raw = await apiFetch<Raw>(`/api/contacts/${id}`, jsonInit("PATCH", keysToSnake(data)));
   return mapContactFromApi(raw);
 }
 
@@ -69,23 +57,23 @@ export async function applyContactAction(
   const body: Raw = { action };
   if (opts.on) body.on = opts.on;
   if (opts.meetingAt) body.meeting_at = opts.meetingAt;
-  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/actions`, post(body)));
+  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/actions`, jsonInit("POST", body)));
 }
 
 export async function moveContactStatus(id: number, status: ContactStatus): Promise<Contact> {
-  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/status`, post({ new_status: status })));
+  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/status`, jsonInit("POST", { new_status: status })));
 }
 
 export async function undoContactAction(id: number): Promise<Contact> {
-  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/undo`, post()));
+  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/undo`, jsonInit("POST")));
 }
 
 export async function snoozeContact(id: number, days: number): Promise<Contact> {
-  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/snooze`, post({ days })));
+  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/snooze`, jsonInit("POST", { days })));
 }
 
 export async function archiveContact(id: number): Promise<Contact> {
-  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/archive`, post()));
+  return mapContactFromApi(await apiFetch<Raw>(`/api/contacts/${id}/archive`, jsonInit("POST")));
 }
 
 export async function getContactHistory(id: number): Promise<ContactHistoryEntry[]> {

@@ -1,9 +1,10 @@
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.time import utc_now as _now
 from app.models.application import Application
 from app.models.research_queue import QueueKind, QueueState, ResearchQueueItem
 from app.schemas.research_queue import QueueItemCreate
@@ -11,10 +12,6 @@ from app.services.errors import AlreadyQueuedError, QueueItemNotFoundError, Queu
 from app.services.interview_service import lock_application
 
 COMPANY_CONTACTS_TARGET = 3
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def enqueue_professor(db: Session, data: QueueItemCreate) -> ResearchQueueItem:

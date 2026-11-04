@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { ApiError } from "../lib/api/client";
+  import { errorMessage } from "../lib/api/client";
   import { createContact } from "../lib/api/contacts";
+  import { blankToNull } from "../lib/format";
   import ContactBoard from "../lib/components/contacts/ContactBoard.svelte";
   import ContactDetailPanel from "../lib/components/contacts/ContactDetailPanel.svelte";
   import { contacts, replaceContact } from "../lib/stores/contacts";
@@ -36,15 +37,15 @@
         kind,
         name: name.trim(),
         organization: organization.trim(),
-        email: email.trim() || null,
-        title: title.trim() || null,
+        email: blankToNull(email),
+        title: blankToNull(title),
       });
       replaceContact(created);
       resetForm();
       adding = false;
       selectedId = created.id;
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't add the contact.");
+      showToast(errorMessage(err, "Couldn't add the contact."));
     } finally {
       saving = false;
     }

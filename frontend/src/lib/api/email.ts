@@ -1,5 +1,5 @@
-import { apiFetch } from "./client";
-import { keysToCamel, keysToSnake } from "./case";
+import { apiFetch, jsonInit } from "./client";
+import { keysToCamel, keysToSnake, strOrNull } from "./case";
 import type {
   AcceptInput,
   EmailHighlights,
@@ -16,9 +16,7 @@ import type {
 
 type Raw = Record<string, unknown>;
 
-const JSON_HEADERS = { "Content-Type": "application/json" };
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
-const strOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const idOrNull = (v: unknown): number | null => (typeof v === "number" ? v : null);
 const obj = (v: unknown): Raw | null => (v && typeof v === "object" ? (v as Raw) : null);
 
@@ -84,12 +82,8 @@ export async function listSuggestions(
 export async function acceptSuggestion(id: number, data: AcceptInput = {}): Promise<EmailSuggestion> {
   const body: Raw = keysToSnake({ company: data.company, roleTitle: data.roleTitle });
   if (data.round) body.round = keysToSnake(data.round);
-  const raw = await apiFetch<Raw>(`/api/email/suggestions/${id}/accept`, {
-    method: "POST",
-    headers: JSON_HEADERS,
-    // undefined values drop out of the JSON, so only the fields given are sent.
-    body: JSON.stringify(body),
-  });
+  // undefined values drop out of the JSON, so only the fields given are sent.
+  const raw = await apiFetch<Raw>(`/api/email/suggestions/${id}/accept`, jsonInit("POST", body));
   return mapSuggestionFromApi(raw);
 }
 
