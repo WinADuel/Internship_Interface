@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { replace, router } from "svelte-spa-router";
-  import { ApiError } from "../lib/api/client";
+  import { errorMessage } from "../lib/api/client";
   import { getSettings, updateSettings } from "../lib/api/settings";
   import BackupSettings from "../lib/components/settings/BackupSettings.svelte";
   import BackupSheetStatus from "../lib/components/settings/BackupSheetStatus.svelte";
@@ -40,7 +40,7 @@
     try {
       fill(await getSettings());
     } catch (err) {
-      loadError = err instanceof ApiError ? err.message : "Couldn't load settings.";
+      loadError = errorMessage(err, "Couldn't load settings.");
     }
   }
 
@@ -78,7 +78,7 @@
       );
       showToast("Settings saved.", "info");
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't save settings.");
+      showToast(errorMessage(err, "Couldn't save settings."));
     } finally {
       saving = false;
     }

@@ -1,3 +1,11 @@
+class MessageError(Exception):
+    """An error that carries its `message` as an attribute (the routes return it as the detail)."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
 class InvalidCredentialsError(Exception):
     """Login failed: wrong username, password, or TOTP code."""
 
@@ -41,12 +49,8 @@ class ContactNotFoundError(Exception):
     """No contact exists with the requested id."""
 
 
-class InvalidTransitionError(Exception):
+class InvalidTransitionError(MessageError):
     """The requested contact status action is not valid from the current status."""
-
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
 
 
 class UndoExpiredError(Exception):
@@ -77,13 +81,12 @@ class PostingNotFoundError(Exception):
     """No discovered posting exists with the requested id."""
 
 
-class InvalidPostingStateError(Exception):
+class InvalidPostingStateError(MessageError):
     """The posting action is not valid from the posting's current state.
     `state` is the posting's state when one exists (e.g. "already saved")."""
 
     def __init__(self, message: str, state: str | None = None):
         super().__init__(message)
-        self.message = message
         self.state = state
 
 
@@ -91,12 +94,8 @@ class WatchCompanyNotFoundError(Exception):
     """No watched company exists with the requested id."""
 
 
-class UnsupportedCareersSiteError(Exception):
+class UnsupportedCareersSiteError(MessageError):
     """The careers URL is not on a job board the watchlist can read."""
-
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
 
 
 class DuplicateWatchCompanyError(Exception):
@@ -111,20 +110,12 @@ class StoryNotFoundError(Exception):
     """No story-bank story exists with the requested id."""
 
 
-class ContactNotOnApplicationError(Exception):
+class ContactNotOnApplicationError(MessageError):
     """The contact belongs to a different application than the interview round."""
 
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
 
-
-class StoryArchivedError(Exception):
+class StoryArchivedError(MessageError):
     """An archived story can't be newly linked to an interview round."""
-
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
 
 
 class RoundNotScheduledError(Exception):

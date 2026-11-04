@@ -9,7 +9,7 @@ after a round write, `CONTACT_TABS` after `set_round_contacts` (it can link a
 contact to the application)."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -17,6 +17,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, contains_eager
 
 from app.core.config import settings
+from app.core.time import as_utc
+from app.core.time import utc_now as _now
 from app.models.application import Application
 from app.models.contact import Contact
 from app.models.interview import InterviewKind, InterviewRound, InterviewState
@@ -57,10 +59,6 @@ KIND_LABELS = {
 RoundScope = Literal["upcoming", "past", "all"]
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 def _new_item_id() -> str:
     return uuid.uuid4().hex[:12]
 
@@ -72,11 +70,6 @@ def default_checklist() -> list[dict]:
 def _checklist_to_db(items: list[ChecklistItem]) -> list[dict]:
     """Stored form of a validated checklist; items without an id get one."""
     return [{"id": item.id or _new_item_id(), "label": item.label, "done": item.done} for item in items]
-
-
-def _aware(value: datetime) -> datetime:
-    """Naive datetimes are taken as UTC (ApplicationCreate accepts either)."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 def lock_application(db: Session, application_id: int) -> Application | None:
@@ -129,7 +122,7 @@ def add_round_for_datetime(db: Session, application: Application, when: datetime
     """The round an interview date given at application create becomes (spec
     §4): `scheduled` if still ahead, `done` if already past, as the 0007
     data migration does for existing dates."""
-    when = _aware(when)
+    when = as_utc(when)  # naive is taken as UTC (ApplicationCreate accepts either)
     state = InterviewState.SCHEDULED if when >= _now() else InterviewState.DONE
     return add_round(
         db, InterviewRoundCreate(application_id=application.id, scheduled_at=when, state=state)
@@ -211,9 +204,11 @@ def set_round_contacts(db: Session, round_id: int, contact_ids: list[int]) -> In
     """Replace the round's tracked interviewers. Each contact must belong to
     the round's application or to none; an unattached one is linked to it."""
     interview_round = get_round(db, round_id)
+    ids = list(dict.fromkeys(contact_ids))
+    found = {c.id: c for c in db.scalars(select(Contact).where(Contact.id.in_(ids)))} if ids else {}
     contacts: list[Contact] = []
-    for contact_id in dict.fromkeys(contact_ids):
-        contact = db.get(Contact, contact_id)
+    for contact_id in ids:
+        contact = found.get(contact_id)
         if contact is None:
             raise ContactNotFoundError(contact_id)
         if contact.application_id not in (None, interview_round.application_id):
@@ -233,9 +228,11 @@ def set_round_stories(db: Session, round_id: int, story_ids: list[int]) -> Inter
     newly linked; one that is already linked stays."""
     interview_round = get_round(db, round_id)
     linked = {story.id for story in interview_round.stories}
+    ids = list(dict.fromkeys(story_ids))
+    found = {s.id: s for s in db.scalars(select(Story).where(Story.id.in_(ids)))} if ids else {}
     stories: list[Story] = []
-    for story_id in dict.fromkeys(story_ids):
-        story = db.get(Story, story_id)
+    for story_id in ids:
+        story = found.get(story_id)
         if story is None:
             raise StoryNotFoundError(story_id)
         if story.archived and story.id not in linked:

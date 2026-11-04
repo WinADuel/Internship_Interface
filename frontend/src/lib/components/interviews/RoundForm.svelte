@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createRound, updateRound } from "../../api/interviews";
-  import { isoToLocalInput, localInputToIso } from "../../format";
+  import { applicationLabel, blankToNull, isoToLocalInput, localInputToIso } from "../../format";
   import { FORMAT_LABELS, INTERVIEW_FORMATS, INTERVIEW_KINDS, KIND_LABELS } from "../../interviews/format";
   import { showToast } from "../../stores/toast";
   import type { Application } from "../../types/application";
@@ -64,8 +64,6 @@
   let error = $state("");
   let saving = $state(false);
 
-  const orNull = (value: string): string | null => value.trim() || null;
-
   async function submit(event: Event) {
     event.preventDefault();
     if (saving) return;
@@ -89,12 +87,12 @@
     }
     const fields: Partial<InterviewRoundFields> = {
       kind,
-      title: orNull(title),
+      title: blankToNull(title),
       scheduledAt,
       durationMinutes,
       format: format || null,
-      location: orNull(location),
-      interviewers: orNull(interviewers),
+      location: blankToNull(location),
+      interviewers: blankToNull(interviewers),
     };
     saving = true;
     try {
@@ -120,7 +118,7 @@
       Application
       <select bind:value={chosenApplication}>
         <option value={null}>Choose…</option>
-        {#each applications as app (app.id)}<option value={app.id}>{app.company} — {app.roleTitle}</option>{/each}
+        {#each applications as app (app.id)}<option value={app.id}>{applicationLabel(app)}</option>{/each}
       </select>
     </label>
   {/if}

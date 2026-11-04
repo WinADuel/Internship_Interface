@@ -40,9 +40,9 @@ from app.schemas.discovery import (
 from app.services.discovery import actions, watchlist
 from app.services.discovery.filters import (
     filters_from_settings,
+    inbox_counts,
     list_postings,
     match_count,
-    top_picks_count,
     top_picks_preview,
 )
 from app.services.discovery.http import DiscoveryFetchError, DiscoveryHttp
@@ -100,13 +100,15 @@ def get_postings(
     """`sort` and `min_score` (Top picks) apply to the Inbox only."""
     settings = get_settings(db)
     filters = filters_from_settings(settings)
+    # The Inbox's total and Top picks count come from one query.
+    total, top_picks = inbox_counts(db, filters, min_score) if view == "inbox" else (None, None)
     items, total = list_postings(
-        db, view, filters, limit=limit, offset=offset, sort=sort, min_score=min_score
+        db, view, filters, limit=limit, offset=offset, sort=sort, min_score=min_score, total=total
     )
     return PostingPage(
         items=[PostingOut.build(p, settings.ranking_updated_at) for p in items],
         total=total,
-        top_picks=top_picks_count(db, filters) if view == "inbox" else None,
+        top_picks=top_picks,
     )
 
 

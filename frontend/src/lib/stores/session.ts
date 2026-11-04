@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import { apiFetch, ApiError, setUnauthorizedHandler } from "../api/client";
+import { apiFetch, ApiError, jsonInit, setUnauthorizedHandler } from "../api/client";
 
 export const session = writable<{ loggedIn: boolean; checked: boolean }>({
   loggedIn: false,
@@ -9,11 +9,7 @@ export const session = writable<{ loggedIn: boolean; checked: boolean }>({
 setUnauthorizedHandler(() => session.set({ loggedIn: false, checked: true }));
 
 export async function login(username: string, password: string, totpCode: string): Promise<void> {
-  await apiFetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, totp_code: totpCode }),
-  });
+  await apiFetch("/api/auth/login", jsonInit("POST", { username, password, totp_code: totpCode }));
   session.set({ loggedIn: true, checked: true });
 }
 

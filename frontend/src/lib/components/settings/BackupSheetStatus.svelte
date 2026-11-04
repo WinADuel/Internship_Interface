@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { syncSheetNow } from "../../api/settings";
   import { formatDateTime } from "../../format";
   import { showToast } from "../../stores/toast";
@@ -45,7 +45,7 @@
       if (result.ok) announcement = "Backup sheet synced.";
       else announcement = result.lastSheetSyncError ? `Sync failed: ${result.lastSheetSyncError}` : "Sync didn't complete.";
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't sync the backup sheet.");
+      showToast(errorMessage(err, "Couldn't sync the backup sheet."));
     } finally {
       syncing = false;
     }

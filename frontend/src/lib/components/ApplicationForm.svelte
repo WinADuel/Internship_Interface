@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createApplication, updateApplication } from "../api/applications";
-  import { formatDateTime, localInputToIso } from "../format";
+  import { blankToNull, formatDateTime, localInputToIso } from "../format";
   import { upsertApplication } from "../stores/applications";
   import { showToast } from "../stores/toast";
   import { KANBAN_COLUMNS } from "../kanban/grouping";
@@ -47,7 +47,6 @@
   const PRIORITIES: Priority[] = ["low", "medium", "high"];
 
   /** Blank optional text becomes null so editing can clear a field. */
-  const orNull = (value: string): string | null => value.trim() || null;
 
   async function submit(event: Event) {
     event.preventDefault();
@@ -73,14 +72,14 @@
       priority,
       dateApplied: dateApplied || null,
       followUpDate: followUpDate || null,
-      jobLink: orNull(jobLink),
-      resumeVersion: orNull(resumeVersion),
-      contactPerson: orNull(contactPerson),
-      salaryRange: orNull(salaryRange),
-      location: orNull(location),
-      source: orNull(source),
-      googleDocLink: orNull(googleDocLink),
-      notes: orNull(notes),
+      jobLink: blankToNull(jobLink),
+      resumeVersion: blankToNull(resumeVersion),
+      contactPerson: blankToNull(contactPerson),
+      salaryRange: blankToNull(salaryRange),
+      location: blankToNull(location),
+      source: blankToNull(source),
+      googleDocLink: blankToNull(googleDocLink),
+      notes: blankToNull(notes),
     };
     submitting = true;
     try {

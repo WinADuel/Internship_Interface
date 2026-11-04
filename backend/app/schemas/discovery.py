@@ -5,11 +5,12 @@ sources, so every text field is capped (spec §9): company/title 300 chars,
 each location 200, at most 20 locations, URLs 2000.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
+from app.core.time import as_utc
 from app.models.posting import Posting, PostingSource, PostingState
 from app.models.watch_company import WatchAts, WatchCompany
 from app.schemas.settings import KeywordList, RankingList
@@ -96,13 +97,6 @@ def _locations(values: list[str]) -> list[str]:
     return out
 
 
-def _aware(value: datetime | None) -> datetime | None:
-    # A date without a zone is read as UTC, like every other stored date.
-    if value is not None and value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value
-
-
 # Raw length bounds keep validation cheap on hostile input; the validators
 # above apply the real caps after cleaning.
 _RawUrl = Annotated[str, Field(max_length=MAX_URL_LENGTH * 2)]
@@ -114,7 +108,8 @@ Locations = Annotated[
     Field(max_length=MAX_LOCATIONS * 4),
     AfterValidator(_locations),
 ]
-AwareDatetime = Annotated[datetime | None, AfterValidator(_aware)]
+# A date without a zone is read as UTC, like every other stored date.
+AwareDatetime = Annotated[datetime | None, AfterValidator(as_utc)]
 
 
 # --- postings ----------------------------------------------------------------

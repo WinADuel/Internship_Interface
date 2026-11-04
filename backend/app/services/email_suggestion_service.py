@@ -21,6 +21,7 @@ from urllib.parse import quote
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.time import utc_now as _now
 from app.models.application import Application, ApplicationStatus
 from app.models.contact import Contact
 from app.models.email_suggestion import EmailDirection, EmailSuggestion, SuggestionKind, SuggestionState
@@ -67,10 +68,6 @@ class AcceptResult:
     sheet_tabs: set[str] = field(default_factory=set)
 
 
-def _now() -> datetime:
-    return datetime.now(UTC)
-
-
 def gmail_url(thread_id: str, account_email: str | None = None) -> str:
     """The thread in Gmail, in the inbox it came from (`/mail/u/<address>/`),
     or the browser's first signed-in account when the address isn't known.
@@ -103,14 +100,22 @@ def _contact_allows(contact: Contact | None, action: ContactAction) -> bool:
     return contact is not None and action in ACTIONS_BY_STATUS[contact.status]
 
 
-def _tracked(db: Session, company: str | None) -> bool:
-    key = company_key(company)
+def tracked_company_keys(db: Session) -> set[str]:
+    """The company keys of every application not archived."""
     companies = db.scalars(select(Application.company).where(Application.archived.is_(False)))
-    return any(company_key(c) == key for c in companies)
+    return {company_key(c) for c in companies}
 
 
-def is_valid(db: Session, suggestion: EmailSuggestion) -> bool:
-    """Whether the suggestion's action still applies to the current data."""
+def _tracked(db: Session, company: str | None, tracked_keys: set[str] | None = None) -> bool:
+    if tracked_keys is None:
+        tracked_keys = tracked_company_keys(db)
+    return company_key(company) in tracked_keys
+
+
+def is_valid(db: Session, suggestion: EmailSuggestion, tracked_keys: set[str] | None = None) -> bool:
+    """Whether the suggestion's action still applies to the current data.
+    `tracked_keys` (from `tracked_company_keys`) saves re-reading the
+    applications when checking many suggestions."""
     kind = suggestion.kind
     if kind in APPLICATION_KINDS:
         application = _application(db, suggestion)
@@ -126,7 +131,9 @@ def is_valid(db: Session, suggestion: EmailSuggestion) -> bool:
     if kind == K.CONTACT_SENT:
         return _contact_allows(_contact(db, suggestion.contact_id), ContactAction.SENT)
     if kind == K.NEW_APPLICATION:
-        return bool(company_key(suggestion.proposed_company)) and not _tracked(db, suggestion.proposed_company)
+        return bool(company_key(suggestion.proposed_company)) and not _tracked(
+            db, suggestion.proposed_company, tracked_keys
+        )
     return False
 
 
@@ -139,8 +146,15 @@ def refresh_stale(db: Session, now: datetime | None = None) -> int:
     """Mark every pending suggestion that no longer applies as stale."""
     now = now or _now()
     stale = 0
-    for suggestion in db.scalars(select(EmailSuggestion).where(EmailSuggestion.state == SuggestionState.PENDING)):
-        if not is_valid(db, suggestion):
+    pending = list(db.scalars(select(EmailSuggestion).where(EmailSuggestion.state == SuggestionState.PENDING)))
+    # Loads the applications and contacts into the session in two queries, so
+    # is_valid's lookups below find them there.
+    related(db, pending)
+    tracked_keys = (
+        tracked_company_keys(db) if any(s.kind == K.NEW_APPLICATION for s in pending) else None
+    )
+    for suggestion in pending:
+        if not is_valid(db, suggestion, tracked_keys):
             _mark_stale(suggestion, now)
             stale += 1
     if stale:
@@ -231,10 +245,12 @@ def highlights(
     )
     rules = {"replies": EmailSuggestion.contact_id.is_not(None)}
     rules.update({tab: EmailSuggestion.kind == kind for tab, kind in HIGHLIGHT_KINDS.items()})
+    counts = db.execute(
+        select(*(func.count().filter(rules[tab]) for tab in HIGHLIGHT_TABS)).select_from(EmailSuggestion).where(*base)
+    ).one()
     tabs = {}
-    for tab in HIGHLIGHT_TABS:
+    for tab, count in zip(HIGHLIGHT_TABS, counts, strict=True):
         where = (*base, rules[tab])
-        count = db.scalar(select(func.count()).select_from(EmailSuggestion).where(*where))
         items = db.scalars(
             select(EmailSuggestion)
             .where(*where)
