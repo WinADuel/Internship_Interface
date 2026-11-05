@@ -141,3 +141,7 @@ class SuggestionNotPendingError(Exception):
 class SuggestionStaleError(Exception):
     """The email suggestion's action no longer applies (the status already
     moved, the contact already replied); it has been marked stale."""
+
+
+class ExtensionTokenNotFoundError(Exception):
+    """No extension token exists with the requested id."""

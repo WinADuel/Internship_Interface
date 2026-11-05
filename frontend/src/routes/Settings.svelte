@@ -3,6 +3,7 @@
   import { replace, router } from "svelte-spa-router";
   import { errorMessage } from "../lib/api/client";
   import { getSettings, updateSettings } from "../lib/api/settings";
+  import ApplyProfileSettings from "../lib/components/settings/ApplyProfileSettings.svelte";
   import BackupSettings from "../lib/components/settings/BackupSettings.svelte";
   import BackupSheetStatus from "../lib/components/settings/BackupSheetStatus.svelte";
   import ClaudeTokens from "../lib/components/settings/ClaudeTokens.svelte";
@@ -127,6 +128,9 @@
   <!-- Likewise for the Gmail fields. -->
   <GmailSettings {settings} onsaved={(saved) => (settings = saved)} />
 {/if}
+
+<!-- Auto-apply: loads and saves its own profile, resume and extension tokens. -->
+<ApplyProfileSettings />
 
 <ClaudeTokens />
 

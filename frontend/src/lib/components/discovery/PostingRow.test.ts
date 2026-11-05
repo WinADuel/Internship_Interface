@@ -189,4 +189,17 @@ describe("PostingRow ranking", () => {
     expect(badge(dismissed.container)).toBeNull();
     expect(screen.queryByText("Why?")).toBeNull();
   });
+
+  it("offers Prepare for a saved Greenhouse, Lever or Ashby posting only", () => {
+    const url = "https://job-boards.greenhouse.io/discord/jobs/8917177002";
+    const { unmount } = render(PostingRow, { posting: fakePosting({ id: 7, url }), view: "saved", onaction: vi.fn() });
+    const link = screen.getByRole("link", { name: /^Prepare application for/ });
+    expect(link.getAttribute("href")).toBe("#/apply/7");
+    unmount();
+    const other = render(PostingRow, { posting: fakePosting({ url }), view: "inbox", onaction: vi.fn() });
+    expect(screen.queryByRole("link", { name: /^Prepare application/ })).toBeNull();
+    other.unmount();
+    render(PostingRow, { posting: fakePosting({ url: "https://careers.google.com/jobs/1" }), view: "saved", onaction: vi.fn() });
+    expect(screen.queryByRole("link", { name: /^Prepare application/ })).toBeNull();
+  });
 });

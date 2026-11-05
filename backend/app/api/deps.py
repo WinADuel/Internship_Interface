@@ -10,8 +10,11 @@ from sqlalchemy.orm import Session
 from app.core.security import ACCESS_TOKEN_TYPE, decode_token
 from app.db.session import SessionLocal, get_db
 from app.models.auth_credential import AuthCredential
+from app.models.apply import ExtensionToken
 from app.models.claude_token import ClaudeToken
 from app.services import claude_token_service
+from app.services.apply import tokens as extension_token_service
+from app.services.apply.llm import LocalModel, OllamaModel
 from app.services.backup.dump import run_dump
 from app.services.discovery.http import DiscoveryHttp, HttpxDiscoveryHttp
 from app.services.gmail.client import GmailClient, GoogleGmailClient
@@ -50,6 +53,24 @@ def get_claude_token(request: Request, db: Session = Depends(get_db)) -> ClaudeT
     if token is None:
         raise unauthorized
     return token
+
+
+def get_extension_token(request: Request, db: Session = Depends(get_db)) -> ExtensionToken:
+    """Authenticate the Chrome extension by `Authorization: Bearer` only, like
+    the Claude job: cookies are never consulted, and its tokens are separate."""
+    unauthorized = HTTPException(status_code=401, detail="invalid extension token")
+    scheme, _, raw = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not raw.strip():
+        raise unauthorized
+    token = extension_token_service.authenticate(db, raw.strip())
+    if token is None:
+        raise unauthorized
+    return token
+
+
+def get_local_model_factory() -> Callable[[str, str], LocalModel]:
+    """Builds the local AI client from the owner's address and model; overridden in tests."""
+    return OllamaModel
 
 
 def get_sheet_sync_scheduler() -> SheetSyncScheduler:
