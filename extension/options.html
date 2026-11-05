@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>InternHelper autofill options</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; max-width: 36rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-weight: 600; }
+    input { width: 100%; box-sizing: border-box; padding: 0.4rem; font: inherit; }
+    button { margin-top: 1rem; padding: 0.4rem 1rem; font: inherit; }
+    .muted { color: #666; }
+    #status { margin-top: 1rem; }
+    .ok { color: #14532d; } .err { color: #a00; }
+  </style>
+</head>
+<body>
+  <h1>InternHelper autofill</h1>
+  <p class="muted">Fills Greenhouse, Lever and Ashby applications with the answers you approved in InternHelper.
+    It never clicks Submit: you check the page and submit yourself.</p>
+  <form id="form">
+    <label for="baseUrl">InternHelper address</label>
+    <input id="baseUrl" type="url" placeholder="https://localhost" required>
+    <label for="token">Extension token</label>
+    <input id="token" type="password" placeholder="ih_…" autocomplete="off" required>
+    <p class="muted">Make a token in InternHelper: Settings › Apply profile › Chrome extension tokens.</p>
+    <button type="submit">Save and test</button>
+  </form>
+  <p id="status" role="status"></p>
+  <script src="options.js"></script>
+</body>
+</html>

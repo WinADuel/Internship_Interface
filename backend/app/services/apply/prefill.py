@@ -111,7 +111,7 @@ _BY_LABEL: list[tuple[re.Pattern[str], Callable[[dict[str, str]], str]]] = [
     (re.compile(r"\b(major|discipline|field of study|area of study)\b"), _get("major")),
     (re.compile(r"\bdegree\b"), _get("degree")),
     (re.compile(r"^(school|university|college|school name|university name)$|\b(which|what) (university|school|college)\b|\bcurrently attend"), _get("school")),
-    (re.compile(r"\bhow did you (hear|learn|find)\b|\bwhere did you (hear|learn|find)\b|\bsource\b.*\bapplication\b"), _get("how_heard")),
+    (re.compile(r"\bhow (did )?you (hear|heard|learn|learned|find|found)\b|\bwhere did you (hear|learn|find)\b|\bheard about\b"), _get("how_heard")),
     (re.compile(r"^(current )?(company|employer)$|\bcurrent (company|employer)\b"), _get("current_company")),
     (re.compile(r"^(location|current location|location city|city|where are you located)$"), _location),
 ]

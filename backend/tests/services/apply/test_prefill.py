@@ -150,3 +150,13 @@ def test_multiselect_picks_each_listed_option():
     form = [field("m", "Race or Ethnicity (optional)", "multiselect", opts("East Asian", "South Asian", "White"), "demographic")]
     answers = prefill(form, {**PROFILE, "race": "East Asian; White"}, [], None)
     assert answers["m"]["value"] == ["East Asian", "White"]
+
+
+def test_how_you_heard_is_matched_in_its_common_wordings():
+    options = opts("Indeed", "LinkedIn", "Friend or Family")
+    form = [
+        field("a", "How did you hear about this job?"),
+        field("b", "Please tell us how you heard about this opportunity.", "select", options),
+    ]
+    values = {k: v["value"] for k, v in prefill(form, PROFILE, [], None).items()}
+    assert values == {"a": "LinkedIn", "b": "LinkedIn"}
