@@ -13,6 +13,7 @@
     sourceLabel,
     TOP_PICKS_SCORE,
   } from "../../discovery/format";
+  import { canAutoApply } from "../../apply/boards";
   import type { Posting, PostingView } from "../../types/discovery";
 
   let {
@@ -102,6 +103,9 @@
         {button.text}
       </button>
     {/each}
+    {#if view === "saved" && canAutoApply(posting.url)}
+      <a href={`#/apply/${posting.id}`} aria-label="Prepare application for {label}">Prepare</a>
+    {/if}
     {#if isWebUrl(posting.url)}
       <a href={posting.url} target="_blank" rel="noopener noreferrer" aria-label="Open {label} in a new tab">Open</a>
     {/if}

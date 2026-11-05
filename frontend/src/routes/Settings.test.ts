@@ -12,6 +12,13 @@ vi.mock("../lib/api/settings", () => ({
 vi.mock("../lib/api/discovery", () => ({ getMatchCount: vi.fn(), getTopPicksCount: vi.fn() }));
 vi.mock("../lib/api/backups", () => ({ getBackupStatus: vi.fn(), runBackupNow: vi.fn() }));
 vi.mock("../lib/stores/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../lib/api/apply", () => ({
+  // Tested in ApplyProfileSettings.test.ts; here it only needs to load.
+  getApplyProfile: vi.fn().mockResolvedValue({
+    fields: {}, savedAnswers: [], resumeFilename: null, resumeUploadedAt: null, llmUrl: "", llmModel: "",
+  }),
+  listExtensionTokens: vi.fn().mockResolvedValue([]),
+}));
 vi.mock("../lib/api/email", () => ({
   CONNECT_GMAIL_URL: "/api/docs/google/authorize?gmail=1",
   getEmailStatus: vi.fn().mockResolvedValue({ pendingCount: 0 }),
