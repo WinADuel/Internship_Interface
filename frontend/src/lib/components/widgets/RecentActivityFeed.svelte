@@ -68,9 +68,11 @@
 </div>
 
 <style>
-  .setting { font-size: 0.75rem; display: block; text-align: right; }
+  .setting { display: flex; align-items: center; justify-content: flex-end; gap: 0.4rem; font-size: 0.75rem; color: var(--muted-foreground); margin-bottom: 0.4rem; }
+  .setting select { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { padding: 0.25rem 0; font-size: 0.85rem; }
-  time { color: #666; font-size: 0.75rem; margin-left: 0.25rem; }
-  .empty { color: #666; font-size: 0.85rem; }
+  li { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; font-weight: 500; }
+  li:first-child { border-top: 0; padding-top: 0.1rem; }
+  time { flex: none; color: var(--muted-foreground); font-size: 0.75rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted-foreground); font-size: 0.85rem; margin: 0; }
 </style>

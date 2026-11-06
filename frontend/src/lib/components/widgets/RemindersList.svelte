@@ -66,12 +66,14 @@
 </div>
 
 <style>
-  .setting { font-size: 0.75rem; display: block; text-align: right; }
+  .setting { display: flex; align-items: center; justify-content: flex-end; gap: 0.4rem; font-size: 0.75rem; color: var(--muted-foreground); margin-bottom: 0.4rem; }
+  .setting select { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { padding: 0.25rem 0; font-size: 0.85rem; }
-  time { color: #666; font-size: 0.75rem; margin-left: 0.25rem; }
-  h3 { font-size: 0.8rem; margin: 0.5rem 0 0.2rem; text-transform: uppercase; letter-spacing: 0.03em; }
-  .overdue-heading { color: #b3261e; }
-  .overdue time { color: #b3261e; }
-  .empty { color: #666; font-size: 0.85rem; }
+  li { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; font-weight: 500; }
+  li:first-child { border-top: 0; padding-top: 0.1rem; }
+  time { flex: none; padding: 0.05rem 0.45rem; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--foreground); font-size: 0.72rem; font-weight: 500; white-space: nowrap; }
+  h3 { font-size: 0.72rem; font-weight: 600; margin: 0.5rem 0 0.25rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; }
+  .overdue-heading { color: var(--destructive); margin-top: 0; }
+  .overdue time { color: var(--destructive); border-color: color-mix(in oklch, var(--destructive) 35%, transparent); }
+  .empty { color: var(--muted-foreground); font-size: 0.85rem; margin: 0; }
 </style>

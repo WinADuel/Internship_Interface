@@ -7,7 +7,12 @@ export interface WidgetLayoutEntry {
   settings: Record<string, unknown>;
 }
 
-export const LAYOUT_STORAGE_KEY = "dashboard-layout-v1";
+/**
+ * v2: the redesigned Dashboard (upcoming interviews first; counts and the kanban snapshot moved
+ * to Statistics). A v1 layout keeps its widget settings but takes the new default positions.
+ */
+export const LAYOUT_STORAGE_KEY = "dashboard-layout-v2";
+export const LEGACY_LAYOUT_STORAGE_KEY = "dashboard-layout-v1";
 
 function isEntry(v: unknown): v is WidgetLayoutEntry {
   if (typeof v !== "object" || v === null) return false;
@@ -34,10 +39,30 @@ export function reconcileLayout(saved: WidgetLayoutEntry[], defaults: WidgetLayo
   return result;
 }
 
+/** Reads a stored layout array, or null when it is missing or malformed. */
+function readStored(key: string): WidgetLayoutEntry[] | null {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return null;
+  const parsed: unknown = JSON.parse(raw);
+  return Array.isArray(parsed) && parsed.every(isEntry) ? parsed : null;
+}
+
+/** The new default positions, with any widget settings saved under the v1 layout carried over. */
+function migrateLegacy(defaults: WidgetLayoutEntry[]): WidgetLayoutEntry[] {
+  try {
+    const legacy = readStored(LEGACY_LAYOUT_STORAGE_KEY);
+    if (!legacy) return defaults;
+    const settings = new Map(legacy.map((e) => [e.id, e.settings]));
+    return defaults.map((d) => ({ ...d, settings: { ...d.settings, ...(settings.get(d.id) ?? {}) } }));
+  } catch {
+    return defaults;
+  }
+}
+
 export function loadLayout(defaults: WidgetLayoutEntry[]): WidgetLayoutEntry[] {
   try {
     const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
-    if (raw === null) return defaults;
+    if (raw === null) return migrateLegacy(defaults);
     const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.every(isEntry)) return reconcileLayout(parsed, defaults);
   } catch {

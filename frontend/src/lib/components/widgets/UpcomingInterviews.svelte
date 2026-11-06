@@ -76,11 +76,14 @@
 
 <style>
   ul { list-style: none; padding: 0; margin: 0; }
-  li { padding: 0.25rem 0; font-size: 0.85rem; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 0 0.4rem; }
-  .round { color: #333; }
-  .when, .progress { color: #666; font-size: 0.75rem; }
-  h3 { font-size: 0.8rem; margin: 0.5rem 0 0.2rem; text-transform: uppercase; letter-spacing: 0.03em; }
-  .due-heading { color: #8a4b00; margin-top: 0; }
-  .empty { color: #666; font-size: 0.85rem; }
-  button { font-size: 0.8rem; padding: 0.2rem 0.5rem; }
+  li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.5rem; padding: 0.55rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; overflow-wrap: anywhere; }
+  li:first-child { border-top: 0; padding-top: 0.1rem; }
+  li a { color: var(--foreground); font-weight: 500; }
+  .round { color: var(--muted-foreground); }
+  .when { flex-basis: 100%; color: var(--muted-foreground); font-size: 0.78rem; }
+  .progress { padding: 0.05rem 0.45rem; border: 1px solid color-mix(in oklch, var(--info) 30%, transparent); border-radius: var(--radius-sm); color: var(--info); font-size: 0.72rem; font-weight: 500; }
+  h3 { font-size: 0.72rem; font-weight: 600; margin: 0.5rem 0 0.25rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; }
+  .due-heading { color: var(--warning); margin-top: 0; }
+  .empty { color: var(--muted-foreground); font-size: 0.85rem; margin: 0 0 0.5rem; }
+  button { font-size: 0.8rem; padding: 0.2rem 0.6rem; }
 </style>

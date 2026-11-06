@@ -56,10 +56,12 @@
 </div>
 
 <style>
-  .count { display: inline-block; font-weight: 600; margin-bottom: 0.4rem; }
+  .count { display: inline-flex; margin-bottom: 0.5rem; padding: 0.1rem 0.5rem; border-radius: var(--radius-sm); background: var(--primary); color: var(--primary-foreground); font-size: 0.75rem; font-weight: 600; }
+  .count:hover { text-decoration: none; opacity: 0.9; }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { padding: 0.25rem 0; font-size: 0.85rem; overflow-wrap: anywhere; }
-  .when { color: #666; font-size: 0.75rem; margin-left: 0.25rem; }
-  .empty { color: #666; font-size: 0.85rem; }
-  button { font-size: 0.8rem; padding: 0.2rem 0.5rem; }
+  li { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; overflow-wrap: anywhere; }
+  li:first-child { border-top: 0; padding-top: 0.1rem; }
+  li a { color: var(--foreground); font-weight: 500; }
+  .when { flex: none; color: var(--muted-foreground); font-size: 0.75rem; white-space: nowrap; }
+  .empty { color: var(--muted-foreground); font-size: 0.85rem; margin: 0 0 0.5rem; }
 </style>
