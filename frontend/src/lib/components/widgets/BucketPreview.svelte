@@ -46,9 +46,12 @@
 </div>
 
 <style>
-  .setting { font-size: 0.75rem; display: block; text-align: right; }
-  h3 { margin: 0.5rem 0 0.25rem; font-size: 0.9rem; }
+  .setting { display: flex; align-items: center; justify-content: flex-end; gap: 0.4rem; font-size: 0.75rem; color: var(--muted-foreground); margin-bottom: 0.25rem; }
+  .setting select { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
+  section + section { margin-top: 0.4rem; }
+  h3 { margin: 0.5rem 0 0.3rem; font-size: 0.72rem; font-weight: 600; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { padding: 0.15rem 0; font-size: 0.85rem; }
-  .empty, .more { color: #666; font-size: 0.8rem; margin: 0; }
+  li { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; }
+  li:first-child { border-top: 0; }
+  .empty, .more { color: var(--muted-foreground); font-size: 0.8rem; margin: 0; }
 </style>

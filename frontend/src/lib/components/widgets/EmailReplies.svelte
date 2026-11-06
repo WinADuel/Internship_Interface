@@ -135,21 +135,23 @@
 
 <style>
   .widget { min-width: 0; }
-  .tabs { display: flex; flex-wrap: wrap; gap: 0.15rem; border-bottom: 1px solid #ddd; margin-bottom: 0.35rem; }
-  .tabs button { border: 1px solid transparent; border-bottom: 0; background: none; padding: 0.25rem 0.5rem; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; font-size: 0.8rem; white-space: nowrap; }
-  .tabs button[aria-selected="true"] { border-color: #ddd; background: #fff; font-weight: 600; margin-bottom: -1px; }
-  .tabs button:focus-visible { outline: 2px solid #1a5fb4; }
+  .tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; margin-bottom: 0.5rem; border-radius: var(--radius-md); background: var(--muted); }
+  .tabs button { border: 0; box-shadow: none; background: transparent; padding: 0.2rem 0.6rem; border-radius: calc(var(--radius-md) - 2px); cursor: pointer; font: inherit; font-size: 0.78rem; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+  .tabs button:hover { background: transparent; color: var(--foreground); }
+  .tabs button[aria-selected="true"] { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.85rem; min-width: 0; }
+  li { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; min-width: 0; }
+  li:first-child { border-top: 0; padding-top: 0.1rem; }
   /* One line: whatever doesn't fit ends in an ellipsis; the title holds the full text. */
   .row { flex: 1 1 auto; min-width: 0; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: inherit; text-decoration: none; }
   a.row:hover .who, a.row:focus-visible .who { text-decoration: underline; }
-  time { color: #666; font-variant-numeric: tabular-nums; }
+  time { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
   .who { font-weight: 600; }
-  .preview { color: #666; }
-  .tag { flex: none; font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 999px; background: #fff3c4; color: #5c4700; text-decoration: none; white-space: nowrap; }
+  .preview { color: var(--muted-foreground); }
+  .tag { flex: none; font-size: 0.7rem; font-weight: 500; padding: 0.05rem 0.45rem; border-radius: var(--radius-sm); border: 1px solid color-mix(in oklch, var(--warning) 35%, transparent); color: var(--warning); text-decoration: none; white-space: nowrap; }
   .tag:hover, .tag:focus-visible { text-decoration: underline; }
-  .all { margin: 0.4rem 0 0; font-size: 0.8rem; }
-  .empty { color: #666; font-size: 0.85rem; }
-  button:not([role="tab"]) { font-size: 0.8rem; padding: 0.2rem 0.5rem; }
+  .all { margin: 0.5rem 0 0; font-size: 0.8rem; }
+  .all a { color: var(--muted-foreground); }
+  .empty { color: var(--muted-foreground); font-size: 0.85rem; margin: 0 0 0.5rem; }
+  button:not([role="tab"]) { font-size: 0.8rem; padding: 0.2rem 0.6rem; }
 </style>

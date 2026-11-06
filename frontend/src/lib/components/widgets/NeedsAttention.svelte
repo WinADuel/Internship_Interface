@@ -198,16 +198,18 @@
 {/if}
 
 <style>
-  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-  li { display: flex; flex-direction: column; gap: 0.25rem; padding-bottom: 0.4rem; border-bottom: 1px solid #eee; font-size: 0.85rem; }
-  .settled { color: #555; }
-  .org { color: #555; }
-  .nudge { display: inline-block; margin-left: 0.25rem; padding: 0.05rem 0.4rem; border-radius: 999px; background: #ffe0b2; color: #6d3d00; font-size: 0.75rem; }
-  .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: flex-start; border: 0; margin: 0; padding: 0; min-width: 0; }
-  .actions button { font-size: 0.8rem; padding: 0.2rem 0.5rem; }
-  .undo { background: #fff3c4; }
-  .empty { color: #666; font-size: 0.85rem; }
-  .email { display: block; margin-bottom: 0.5rem; padding: 0.3rem 0.5rem; border-radius: 6px; background: #e8f0fd; font-size: 0.85rem; font-weight: 600; }
-  .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(30rem, 100%); box-sizing: border-box; overflow-y: auto; padding: 1rem; background: #fff; border-left: 1px solid #ddd; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1); z-index: 10; }
+  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; }
+  li { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; }
+  li:first-child { border-top: 0; padding-top: 0.1rem; }
+  .settled { color: var(--muted-foreground); }
+  .org { color: var(--muted-foreground); }
+  .nudge { display: inline-block; margin-left: 0.3rem; padding: 0.05rem 0.45rem; border-radius: var(--radius-sm); border: 1px solid color-mix(in oklch, var(--warning) 35%, transparent); color: var(--warning); font-size: 0.72rem; font-weight: 500; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: flex-start; border: 0; margin: 0; padding: 0; min-width: 0; }
+  .actions button { font-size: 0.78rem; padding: 0.2rem 0.6rem; }
+  .undo { border-color: color-mix(in oklch, var(--warning) 40%, transparent); }
+  .empty { color: var(--muted-foreground); font-size: 0.85rem; margin: 0; }
+  .email { display: flex; align-items: center; margin-bottom: 0.6rem; padding: 0.45rem 0.65rem; border-radius: var(--radius-md); border: 1px solid color-mix(in oklch, var(--info) 25%, transparent); background: color-mix(in srgb, var(--info) 6%, var(--background)); color: var(--info); font-size: 0.82rem; font-weight: 600; }
+  .email:hover { text-decoration: none; background: color-mix(in srgb, var(--info) 10%, var(--background)); }
+  .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(30rem, 100%); box-sizing: border-box; overflow-y: auto; padding: 1rem; background: var(--background); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgb(0 0 0 / 0.08); z-index: 30; }
   .close { float: right; }
 </style>

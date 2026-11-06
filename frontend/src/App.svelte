@@ -15,9 +15,11 @@
   import Interviews from "./routes/Interviews.svelte";
   import InterviewRound from "./routes/InterviewRound.svelte";
   import Email from "./routes/Email.svelte";
+  import Statistics from "./routes/Statistics.svelte";
 
   const routes = {
     "/": Dashboard,
+    "/statistics": Statistics,
     "/login": Login,
     "/applications": Applications,
     "/discover": Discover,
@@ -52,13 +54,13 @@
 <Toast />
 
 <style>
-  :global(body) { margin: 0; }
-  .layout { display: flex; min-height: 100vh; }
-  main { flex: 1; min-width: 0; padding: 1rem; }
+  .loading { padding: 2rem; color: var(--muted-foreground); }
+  .layout { display: flex; min-height: 100vh; align-items: flex-start; }
+  main { flex: 1; min-width: 0; padding: 1.5rem 2rem 2.5rem; }
 
   /* Phones: the navigation becomes a top bar above the content, which then uses the full width. */
   @media (max-width: 700px) {
-    .layout { flex-direction: column; }
-    main { flex: 1 1 auto; width: 100%; box-sizing: border-box; padding: 0.75rem; }
+    .layout { flex-direction: column; align-items: stretch; }
+    main { flex: 1 1 auto; width: 100%; padding: 0.9rem 0.75rem 1.5rem; }
   }
 </style>
