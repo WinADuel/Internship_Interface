@@ -29,6 +29,13 @@ describe("Applications route", () => {
     store.current.set([fakeApplication({ id: 3, company: "Initech", roleTitle: "Intern" })]);
   });
 
+  it("shows Statistics above the board", () => {
+    render(Applications);
+    const headings = screen.getAllByRole("heading").map((h) => h.textContent?.trim());
+    expect(headings.indexOf("Statistics")).toBeGreaterThan(-1);
+    expect(headings.indexOf("Statistics")).toBeLessThan(headings.indexOf("Your applications"));
+  });
+
   it("loads applications on mount", () => {
     render(Applications);
     expect(load).toHaveBeenCalledTimes(1);

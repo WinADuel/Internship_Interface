@@ -11,7 +11,7 @@
   import { loadApplications } from "../lib/stores/applications";
   import { showToast } from "../lib/stores/toast";
 
-  // Order: what needs you soonest first. Counts and the kanban snapshot live on Statistics.
+  // Order: what needs you soonest first. Counts and the kanban snapshot live at the top of Applications.
   const defaultLayout: WidgetLayoutEntry[] = [
     { id: "interviews", x: 0, y: 0, w: 6, h: 4, settings: {} },
     { id: "needs-attention", x: 6, y: 0, w: 6, h: 4, settings: {} },
@@ -61,7 +61,7 @@
     <h1>Dashboard</h1>
     <p class="sub">{today} · what needs you today</p>
   </div>
-  <a class="stats-link" href="#/statistics">View statistics</a>
+  <a class="stats-link" href="#/applications">View statistics</a>
 </header>
 <DashboardGrid bind:this={grid} {defaultLayout} {widget} />
 

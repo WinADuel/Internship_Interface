@@ -15,12 +15,11 @@
   import Interviews from "./routes/Interviews.svelte";
   import InterviewRound from "./routes/InterviewRound.svelte";
   import Email from "./routes/Email.svelte";
-  import Statistics from "./routes/Statistics.svelte";
   import ApplyReview from "./routes/ApplyReview.svelte";
 
   const routes = {
     "/": Dashboard,
-    "/statistics": Statistics,
+    "/statistics": Applications, // Statistics now sits at the top of Applications
     "/login": Login,
     "/applications": Applications,
     "/discover": Discover,

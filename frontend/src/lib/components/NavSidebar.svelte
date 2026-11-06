@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, type Component } from "svelte";
   import { push } from "svelte-spa-router";
-  import BarChart3 from "@lucide/svelte/icons/chart-column";
   import Briefcase from "@lucide/svelte/icons/briefcase";
   import FileText from "@lucide/svelte/icons/file-text";
   import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
@@ -52,7 +51,6 @@
 
   const items: NavItem[] = [
     { href: "#/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "#/statistics", label: "Statistics", icon: BarChart3 },
     { href: "#/applications", label: "Applications", icon: Briefcase },
     { href: "#/discover", label: "Discover", icon: Search, count: () => inboxCount, countLabel: (n) => `Discover (${n} new)` },
     { href: "#/contacts", label: "Contacts", icon: Users },

@@ -50,7 +50,7 @@ describe("Dashboard route", () => {
     // Counts and the kanban snapshot moved to Statistics.
     expect(container.querySelector('[data-widget="snapshot"]')).toBeNull();
     expect(container.querySelector('[data-widget="buckets"]')).toBeNull();
-    expect(screen.getByRole("link", { name: "View statistics" }).getAttribute("href")).toBe("#/statistics");
+    expect(screen.getByRole("link", { name: "View statistics" }).getAttribute("href")).toBe("#/applications");
   });
 
   it("moves a v1 layout to the new order but keeps its widget settings", () => {
