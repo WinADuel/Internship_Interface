@@ -9,6 +9,7 @@
     restorePosting,
     savePosting,
   } from "../../api/discovery";
+  import { canAutoApply } from "../../apply/boards";
   import { bestScore, postingLabel, TOP_PICKS_SCORE } from "../../discovery/format";
   import { upsertApplication } from "../../stores/applications";
   import { refreshDiscoveryStatus } from "../../stores/discovery";
@@ -55,6 +56,22 @@
     if (view !== "inbox") return { offset };
     return topPicksOnly ? { offset, sort, minScore: TOP_PICKS_SCORE } : { offset, sort };
   }
+
+  // Postings the Chrome extension can fill (Greenhouse, Lever, Ashby) are listed first, in their own group.
+  const groups = $derived([
+    {
+      id: "auto",
+      title: "Auto-apply with the extension",
+      hint: "Greenhouse, Lever and Ashby: InternHelper can fill these for you.",
+      items: items.filter((p) => canAutoApply(p.url)),
+    },
+    {
+      id: "manual",
+      title: "Apply on the company's site",
+      hint: "Other sites (Workday, iCIMS, Oracle and more): you fill these yourself.",
+      items: items.filter((p) => !canAutoApply(p.url)),
+    },
+  ]);
 
   const isTopPick = (posting: Posting) => (bestScore(posting) ?? 0) >= TOP_PICKS_SCORE;
 
@@ -270,11 +287,19 @@
       <button type="button" onclick={dismissAllShown}>Dismiss all shown</button>
     {/if}
   </div>
-  <ul>
-    {#each items as posting (posting.id)}
-      <li><PostingRow {posting} {view} {now} onaction={(action) => act(posting, action)} /></li>
-    {/each}
-  </ul>
+  {#each groups as group (group.id)}
+    {#if group.items.length}
+      <section class="group" aria-labelledby="postings-{group.id}">
+        <h2 id="postings-{group.id}">{group.title} <span class="n">{group.items.length}</span></h2>
+        <p class="hint">{group.hint}</p>
+        <ul>
+          {#each group.items as posting (posting.id)}
+            <li><PostingRow {posting} {view} {now} onaction={(action) => act(posting, action)} /></li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+  {/each}
   {#if items.length < total}
     <button type="button" class="more" disabled={loadingMore} onclick={loadMore}>Load more</button>
   {/if}
@@ -296,4 +321,8 @@
   ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
   .error { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; color: #b3261e; }
   .more { margin-top: 0.75rem; }
+  .group + .group { margin-top: 1.25rem; }
+  .group h2 { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.15rem; font-size: 1rem; }
+  .group h2 .n { min-width: 1.4rem; padding: 0 0.4rem; border-radius: 999px; background: var(--muted, #eee); color: var(--muted-foreground, #555); font-size: 0.75rem; font-weight: 600; text-align: center; }
+  .hint { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--muted-foreground, #555); }
 </style>

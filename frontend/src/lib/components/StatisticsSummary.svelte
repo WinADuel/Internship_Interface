@@ -1,16 +1,16 @@
 <script lang="ts">
+  // Sits at the top of the Applications page, which loads the applications it counts.
   import { onMount } from "svelte";
   import * as Card from "$lib/components/ui/card";
-  import { listRounds } from "../lib/api/interviews";
-  import BucketPreview from "../lib/components/widgets/BucketPreview.svelte";
-  import KanbanSnapshot from "../lib/components/widgets/KanbanSnapshot.svelte";
-  import { applicationStats, scheduledInterviews } from "../lib/dashboard/statistics";
-  import { formatRoundTime } from "../lib/interviews/format";
-  import { applications, loadApplications } from "../lib/stores/applications";
-  import { clock } from "../lib/stores/clock";
-  import { emailStatus, refreshEmailStatus } from "../lib/stores/email";
-  import { showToast } from "../lib/stores/toast";
-  import type { InterviewRoundListItem } from "../lib/types/interview";
+  import { listRounds } from "$lib/api/interviews";
+  import BucketPreview from "$lib/components/widgets/BucketPreview.svelte";
+  import KanbanSnapshot from "$lib/components/widgets/KanbanSnapshot.svelte";
+  import { applicationStats, scheduledInterviews } from "$lib/dashboard/statistics";
+  import { formatRoundTime } from "$lib/interviews/format";
+  import { applications } from "$lib/stores/applications";
+  import { clock } from "$lib/stores/clock";
+  import { emailStatus, refreshEmailStatus } from "$lib/stores/email";
+  import type { InterviewRoundListItem } from "$lib/types/interview";
 
   const SETTINGS_KEY = "statistics-settings-v1";
   type Settings = { snapshot: { hideEmpty?: boolean }; buckets: { limit?: number } };
@@ -38,7 +38,6 @@
   let roundsFailed = $state(false);
 
   onMount(() => {
-    loadApplications().catch(() => showToast("Couldn't load applications."));
     void refreshEmailStatus();
     listRounds({ scope: "all" })
       .then((r) => (rounds = r))
@@ -51,8 +50,9 @@
   const inboxes = $derived($emailStatus?.accounts.length ?? 0);
 </script>
 
+<section class="stats" aria-labelledby="statistics-heading">
 <header class="page-head">
-  <h1>Statistics</h1>
+  <h2 id="statistics-heading">Statistics</h2>
   <p class="sub">How your search is going overall.</p>
 </header>
 
@@ -95,7 +95,6 @@
   <Card.Root class="panel" data-widget="snapshot">
     <Card.Header>
       <Card.Title>Kanban snapshot</Card.Title>
-      <a class="more" href="#/applications">Open board</a>
     </Card.Header>
     <Card.Content>
       <KanbanSnapshot hideEmpty={settings.snapshot.hideEmpty} onsettingschange={(s) => change("snapshot", s)} />
@@ -110,10 +109,12 @@
     </Card.Content>
   </Card.Root>
 </div>
+</section>
 
 <style>
-  .page-head { margin-bottom: 1rem; }
-  h1 { margin: 0; }
+  .stats { margin-bottom: 1.75rem; }
+  .page-head { margin-bottom: 0.75rem; }
+  h2 { margin: 0; }
   .sub { margin: 0.2rem 0 0; color: var(--muted-foreground); font-size: 0.875rem; }
   .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; margin-bottom: 0.9rem; }
   .tiles :global(.tile) { padding-block: 1rem; }
@@ -123,8 +124,6 @@
   .hint { font-size: 0.78rem; color: var(--muted-foreground); overflow-wrap: anywhere; }
   .hint b { color: var(--success); font-weight: 600; }
   .panels { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0.9rem; align-items: start; }
-  .more { font-size: 0.8rem; color: var(--muted-foreground); }
-  .more:hover { color: var(--foreground); }
 
   @media (max-width: 1000px) {
     .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
