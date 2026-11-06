@@ -3,15 +3,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # PostgreSQL 16 client (pg_dump/pg_restore) for backups. Debian bookworm ships 15, which can't
-# dump a 16 server, so it comes from the PGDG apt repo. The slim image has no curl, so Python
-# fetches the repo's signing key; apt reads the ASCII-armoured .asc via signed-by.
+# dump a 16 server, so it comes from the PGDG apt repo. The repo's public signing key is kept in
+# the repo (docker/pgdg.asc, fingerprint B97B 0AFC AA1A 47F0 44F2 44A0 7FCC 7D46 ACCC 4CF8) rather
+# than downloaded from www.postgresql.org, whose outages broke builds; apt retries flaky fetches.
+COPY docker/pgdg.asc /etc/apt/keyrings/pgdg.asc
 RUN set -eux; \
-    install -d -m 0755 /etc/apt/keyrings; \
-    python -c "import urllib.request; urllib.request.urlretrieve('https://www.postgresql.org/media/keys/ACCC4CF8.asc', '/etc/apt/keyrings/pgdg.asc')"; \
     echo "deb [signed-by=/etc/apt/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-client-16; \
+    apt-get -o Acquire::Retries=5 update; \
+    apt-get -o Acquire::Retries=5 install -y --no-install-recommends postgresql-client-16; \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
