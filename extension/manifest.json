@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "InternHelper autofill",
+  "version": "1.0.0",
+  "description": "Fills Greenhouse, Lever and Ashby applications with the answers you approved in InternHelper. You click Submit.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://job-boards.greenhouse.io/*",
+    "https://boards.greenhouse.io/*",
+    "https://jobs.lever.co/*",
+    "https://jobs.ashbyhq.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "action": { "default_title": "InternHelper autofill" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://job-boards.greenhouse.io/*",
+        "https://boards.greenhouse.io/*",
+        "https://jobs.lever.co/*",
+        "https://jobs.ashbyhq.com/*"
+      ],
+      "js": ["fill.js", "content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

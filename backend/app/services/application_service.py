@@ -1,20 +1,16 @@
-from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+# Explicit timestamp: the column's now() default is constant within a
+# transaction, which would make same-transaction changes unorderable.
+from app.core.time import utc_now as _now
 from app.models.application import Application, ApplicationStatus
 from app.models.status_history import StatusHistory
 from app.schemas.application import ApplicationCreate, ApplicationUpdate
 from app.services.errors import AlreadyQueuedError, ApplicationNotFoundError
 from app.services.interview_service import add_round_for_datetime
 from app.services.research_queue_service import add_company_contacts_item
-
-
-def _now() -> datetime:
-    # Explicit timestamp: the column's now() default is constant within a
-    # transaction, which would make same-transaction changes unorderable.
-    return datetime.now(timezone.utc)
 
 
 def _enqueue_contacts_if_applied(db: Session, application: Application) -> None:

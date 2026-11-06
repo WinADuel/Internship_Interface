@@ -54,6 +54,19 @@
   // Bumped on every filter change; a response is applied only if it is still the latest.
   let latest = 0;
 
+  /** The fields the match count and the save share; reads only those (not the list URLs or scan hours). */
+  function filters(): DiscoveryFilters {
+    return {
+      discoveryTerms: [...terms],
+      discoveryCategories: [...categories],
+      discoveryIncludeKeywords: [...includeKeywords],
+      discoveryWatchlistKeywords: [...watchlistKeywords],
+      discoveryExcludeKeywords: [...excludeKeywords],
+      discoveryLocations: [...locations],
+      discoveryHideNoSponsorship: hideNoSponsorship,
+    };
+  }
+
   async function countMatches(filters: DiscoveryFilters, request: number) {
     try {
       const n = await getMatchCount(filters);
@@ -67,17 +80,9 @@
   }
 
   $effect(() => {
-    const filters: DiscoveryFilters = {
-      discoveryTerms: [...terms],
-      discoveryCategories: [...categories],
-      discoveryIncludeKeywords: [...includeKeywords],
-      discoveryWatchlistKeywords: [...watchlistKeywords],
-      discoveryExcludeKeywords: [...excludeKeywords],
-      discoveryLocations: [...locations],
-      discoveryHideNoSponsorship: hideNoSponsorship,
-    };
+    const current = filters();
     const request = ++latest;
-    const timer = setTimeout(() => void countMatches(filters, request), COUNT_DEBOUNCE_MS);
+    const timer = setTimeout(() => void countMatches(current, request), COUNT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   });
 
@@ -114,13 +119,7 @@
   function payload(): Pick<AppSettings, Field> {
     return {
       discoveryListUrls: [...listUrls],
-      discoveryTerms: [...terms],
-      discoveryCategories: [...categories],
-      discoveryIncludeKeywords: [...includeKeywords],
-      discoveryWatchlistKeywords: [...watchlistKeywords],
-      discoveryExcludeKeywords: [...excludeKeywords],
-      discoveryLocations: [...locations],
-      discoveryHideNoSponsorship: hideNoSponsorship,
+      ...filters(),
       discoveryScanHours: scanHours as number,
     };
   }

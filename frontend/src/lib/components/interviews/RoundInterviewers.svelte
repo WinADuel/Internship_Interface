@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createContact } from "../../api/contacts";
+  import { blankToNull } from "../../format";
   import { showToast } from "../../stores/toast";
   import type { Contact } from "../../types/contact";
   import type { RoundContact } from "../../types/interview";
@@ -73,8 +74,8 @@
           kind: "company",
           name: name.trim(),
           organization: company,
-          title: title.trim() || null,
-          email: email.trim() || null,
+          title: blankToNull(title),
+          email: blankToNull(email),
           applicationId,
         });
       } catch (err) {

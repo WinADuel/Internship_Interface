@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getBackupStatus, runBackupNow } from "../../api/backups";
-  import { ApiError } from "../../api/client";
+  import { ApiError, errorMessage } from "../../api/client";
   import { timeAgo } from "../../discovery/format";
   import { formatDateTime } from "../../format";
+  import { clock } from "../../stores/clock";
   import { showToast } from "../../stores/toast";
   import type { BackupStatus } from "../../types/backup";
 
@@ -11,7 +12,7 @@
   let loadFailed = $state(false);
   let running = $state(false);
   // Re-render "2 hours ago" while the page stays open.
-  let now = $state(new Date());
+  const now = $derived($clock);
   // A Back up now result is fresher than a status load still in flight.
   let ranBackup = false;
   // Announce only what Back up now just reported, not the status loaded with the page.
@@ -21,8 +22,6 @@
   const PRUNE_WARNING_PREFIX = "copy uploaded, but"; // backend/app/services/backup/offsite.py _upload
 
   const offsiteWarning = $derived(status?.lastOffsiteError?.startsWith(PRUNE_WARNING_PREFIX) ?? false);
-
-  const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
 
   // `refresh` re-reads the status after Back up now couldn't report one (409 or network error).
   async function load(refresh = false) {
@@ -36,14 +35,12 @@
       // Back up now already filled the card, or already toasted why it couldn't.
       if (refresh || ranBackup) return;
       loadFailed = true;
-      showToast(message(err, "Couldn't load the backup status."));
+      showToast(errorMessage(err, "Couldn't load the backup status."));
     }
   }
 
   onMount(() => {
     void load();
-    const timer = setInterval(() => (now = new Date()), 60_000);
-    return () => clearInterval(timer);
   });
 
   async function backUpNow() {
@@ -57,7 +54,7 @@
       announcement = result.lastBackupError ? `Backup failed: ${result.lastBackupError}` : "Backup complete.";
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) showToast("A backup is already running");
-      else showToast(message(err, "Couldn't run the backup."));
+      else showToast(errorMessage(err, "Couldn't run the backup."));
       // The other backup, or this one, may have finished: show what the server has now.
       void load(true);
     } finally {

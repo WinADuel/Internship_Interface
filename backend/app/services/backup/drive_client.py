@@ -22,6 +22,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
+from app.services.google_http import google_403_reason, json_object
 from app.services.sheets_client import RECONNECT_HINT
 
 DRIVE_API = "https://www.googleapis.com/drive/v3/files"
@@ -77,18 +78,6 @@ def _query_literal(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def _403_reason(response: httpx.Response) -> str | None:
-    try:
-        errors = response.json()["error"]["errors"]
-        reasons = {e.get("reason") for e in errors if isinstance(e, dict)}
-    except (ValueError, KeyError, TypeError, AttributeError):
-        return None
-    for reason, message in _403_REASONS.items():
-        if reason in reasons:
-            return message
-    return None
-
-
 class GoogleDriveClient:
     def __init__(self, access_token: str, transport: httpx.BaseTransport | None = None):
         self._headers = {"Authorization": f"Bearer {access_token}"}
@@ -104,7 +93,7 @@ class GoogleDriveClient:
         if response.is_success or (allow_404 and response.status_code == 404):
             return response
         message = f"drive {op} rejected (status {response.status_code})"
-        if response.status_code == 403 and (reason := _403_reason(response)):
+        if response.status_code == 403 and (reason := google_403_reason(response, _403_REASONS)):
             message += f": {reason}"
         elif response.status_code in (401, 403):
             # Typically a Google connection made before drive.file was requested,
@@ -113,11 +102,8 @@ class GoogleDriveClient:
         raise DriveError(message)
 
     def _json(self, response: httpx.Response, op: str) -> dict:
-        try:
-            data = response.json()
-        except ValueError:
-            raise DriveError(f"drive {op} returned no json") from None
-        if not isinstance(data, dict):
+        data = json_object(response)
+        if data is None:
             raise DriveError(f"drive {op} returned no json")
         return data
 

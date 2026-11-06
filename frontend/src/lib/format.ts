@@ -28,3 +28,13 @@ export function formatDate(value: string): string {
   const d = parseLocalDate(value);
   return d ? d.toLocaleDateString() : value;
 }
+
+/** A text input's value trimmed, or null when it is blank. */
+export function blankToNull(value: string): string | null {
+  return value.trim() || null;
+}
+
+/** "Company — Role", the one-line name of an application (or of a round's application). */
+export function applicationLabel(app: { company: string; roleTitle: string }): string {
+  return `${app.company} — ${app.roleTitle}`;
+}

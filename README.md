@@ -70,6 +70,15 @@ Google, Microsoft, Apple, Meta and Amazon use their own careers sites, so they c
 - **Scanning:** `docker compose up -d --build` also starts the `job-scan` service, which runs its first scan about a minute after it starts, then every 6 hours by default. **Scan now** on the Discover page runs one immediately.
 - Saved postings are also mirrored to a "Saved postings" tab in the backup sheet. Discovery needs no Google permissions or secrets of its own.
 
+### Auto-apply
+
+InternHelper prepares applications; you submit them. For a saved posting on Greenhouse, Lever or Ashby, **Prepare** reads the job's real application form from the job board and fills it in from **Settings › Apply profile** (your contact details, links, school, work authorization, optional self-identification answers, resume, and saved answers to recurring questions). Review and edit everything on that page; anything blank stays blank.
+
+- **Open application** opens the company's real form. The InternHelper Chrome extension (in [`extension/`](extension/README.md), with its setup steps) fills it with your approved answers. You check it and click Submit yourself; nothing is ever submitted for you. After the thank-you page, the job moves to Applied.
+- **Reuse this answer** under a long answer saves it, so the same question on later applications fills itself.
+- **Local AI (optional):** with an [Ollama](https://ollama.com) model on your own computer (Settings › Apply profile › Local AI), **Draft empty answers with local AI** drafts the open questions from your outreach profile. Drafts are marked "AI draft: check it". To run it on another computer on your network, set `OLLAMA_HOST=0.0.0.0` there and allow port 11434 for private networks only; never open it to the internet.
+- Greenhouse publishes each job's questions through its public Job Board API. Lever's are read from the job's apply page, and Ashby's from the job page's own form data. If a board changes its format, only Prepare for that board fails; the rest of InternHelper keeps working.
+
 ### Inbox ranking
 
 The Inbox opens on **Best match**: every posting gets a 0–100 match score from your ranking preferences, so the likeliest fits come first instead of being buried among thousands of new postings.

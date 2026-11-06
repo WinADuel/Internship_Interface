@@ -18,3 +18,4 @@ from app.models.interview import InterviewRound  # noqa: F401
 from app.models.prep_brief import PrepBrief  # noqa: F401
 from app.models.gmail_account import GmailAccount  # noqa: F401
 from app.models.email_suggestion import EmailSuggestion  # noqa: F401
+from app.models.apply import ApplyDraft, ApplyProfile, ExtensionToken  # noqa: F401

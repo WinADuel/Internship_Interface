@@ -6,6 +6,19 @@ MIN_JWT_SECRET_BYTES = 32
 _JWT_PLACEHOLDERS = frozenset({"change-me", "changeme", "secret"})
 
 
+def _require_fernet(name: str, value: str) -> str:
+    """`value`, or a ValueError naming the `name` setting when it is not a Fernet key."""
+    try:
+        Fernet(value)
+    except (ValueError, TypeError):
+        raise ValueError(
+            f"{name} is not a valid Fernet key (32 url-safe base64-encoded "
+            "bytes); generate one with: python -c "
+            '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+        ) from None
+    return value
+
+
 class Settings(BaseSettings):
     """Application configuration, read from environment variables / .env file."""
 
@@ -37,15 +50,7 @@ class Settings(BaseSettings):
     @field_validator("token_encryption_key")
     @classmethod
     def _token_encryption_key_is_fernet(cls, value: str) -> str:
-        try:
-            Fernet(value)
-        except (ValueError, TypeError):
-            raise ValueError(
-                "TOKEN_ENCRYPTION_KEY is not a valid Fernet key (32 url-safe base64-encoded "
-                "bytes); generate one with: python -c "
-                '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
-            ) from None
-        return value
+        return _require_fernet("TOKEN_ENCRYPTION_KEY", value)
 
     @field_validator("backup_encryption_key")
     @classmethod
@@ -53,15 +58,6 @@ class Settings(BaseSettings):
         # Unset or blank (`BACKUP_ENCRYPTION_KEY=` in .env) means "no off-site copy".
         if value is None or not value.strip():
             return None
-        try:
-            Fernet(value)
-        except (ValueError, TypeError):
-            raise ValueError(
-                "BACKUP_ENCRYPTION_KEY is not a valid Fernet key (32 url-safe base64-encoded "
-                "bytes); generate one with: python -c "
-                '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
-            ) from None
-        return value
-
+        return _require_fernet("BACKUP_ENCRYPTION_KEY", value)
 
 settings = Settings()

@@ -44,12 +44,13 @@ from typing import Literal
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
+from app.core.time import utc_now as _now
+from app.db.locks import advisory_lock
 from app.models.application import Application
 from app.models.contact import Contact
 from app.models.email_suggestion import EmailDirection, EmailSuggestion, SuggestionKind, SuggestionState
 from app.models.gmail_account import GmailAccount
 from app.services import email_suggestion_service
-from app.services.backup.lock import advisory_lock
 from app.services.errors import GoogleAuthError
 from app.services.gmail import accounts
 from app.services.gmail.client import (
@@ -128,10 +129,6 @@ class SyncReport:
 
 def google_gmail_client(db: Session, account: GmailAccount) -> GmailClient:
     return GoogleGmailClient(accounts.access_token(account))
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
 
 
 def clean_text(value: str | None, limit: int) -> str:

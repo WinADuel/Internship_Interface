@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, jsonInit } from "./client";
 import type {
   ActivityEntry,
   Application,
@@ -26,8 +26,6 @@ const FIELD_MAP: ReadonlyArray<[keyof ApplicationInput, string]> = [
   ["interviewDatetime", "interview_datetime"],
   ["googleDocLink", "google_doc_link"],
 ];
-
-const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export function mapApplicationFromApi(raw: Raw): Application {
   return {
@@ -72,11 +70,7 @@ export async function getApplication(id: number): Promise<Application> {
 }
 
 export async function createApplication(data: ApplicationInput): Promise<Application> {
-  const raw = await apiFetch<Raw>("/api/applications", {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify(mapApplicationInputToApi(data)),
-  });
+  const raw = await apiFetch<Raw>("/api/applications", jsonInit("POST", mapApplicationInputToApi(data)));
   return mapApplicationFromApi(raw);
 }
 
@@ -87,20 +81,12 @@ export async function updateApplication(
 ): Promise<Application> {
   const body = mapApplicationInputToApi(data);
   delete body.interview_datetime;
-  const raw = await apiFetch<Raw>(`/api/applications/${id}`, {
-    method: "PATCH",
-    headers: JSON_HEADERS,
-    body: JSON.stringify(body),
-  });
+  const raw = await apiFetch<Raw>(`/api/applications/${id}`, jsonInit("PATCH", body));
   return mapApplicationFromApi(raw);
 }
 
 export async function changeStatus(id: number, newStatus: ApplicationStatus): Promise<Application> {
-  const raw = await apiFetch<Raw>(`/api/applications/${id}/status`, {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ new_status: newStatus }),
-  });
+  const raw = await apiFetch<Raw>(`/api/applications/${id}/status`, jsonInit("POST", { new_status: newStatus }));
   return mapApplicationFromApi(raw);
 }
 

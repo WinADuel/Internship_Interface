@@ -15,6 +15,7 @@
   import { calendarUrl, deleteRound, getRound, setRoundContacts, setRoundStories, updateRound } from "../../api/interviews";
   import { getSettings } from "../../api/settings";
   import { isSafeHttpUrl } from "../../contacts/links";
+  import { applicationLabel } from "../../format";
   import { FORMAT_LABELS, STATE_LABELS, countdown, formatRoundTime, roundName } from "../../interviews/format";
   import type { PromptContext } from "../../prep/prompts";
   import { clock } from "../../stores/clock";
@@ -180,7 +181,7 @@
 {:else if round}
   <article class="prep">
     <header>
-      <h1>{round.company} — {round.roleTitle}</h1>
+      <h1>{applicationLabel(round)}</h1>
       <p class="round-name">{roundName(round)} <span class="state">{STATE_LABELS[round.state]}</span></p>
       {#if editing}
         <RoundForm

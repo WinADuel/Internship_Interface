@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createStory, updateStory } from "../../api/stories";
+  import { blankToNull } from "../../format";
   import { showToast } from "../../stores/toast";
   import type { Story, StoryInput } from "../../types/interview";
   import ChipInput from "../ChipInput.svelte";
@@ -27,8 +28,6 @@
   let saving = $state(false);
   let chips: { commitDraft: () => boolean } | undefined = $state();
 
-  const orNull = (value: string): string | null => value.trim() || null;
-
   async function submit(event: Event) {
     event.preventDefault();
     if (saving) return;
@@ -40,10 +39,10 @@
     if (chips && !chips.commitDraft()) return;
     const input: StoryInput = {
       title: title.trim(),
-      situation: orNull(situation),
-      task: orNull(task),
-      action: orNull(action),
-      result: orNull(result),
+      situation: blankToNull(situation),
+      task: blankToNull(task),
+      action: blankToNull(action),
+      result: blankToNull(result),
       tags: $state.snapshot(tags),
     };
     saving = true;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { confirmPaste, previewPaste } from "../../api/discovery";
   import { postingLabel, sourceLabel } from "../../discovery/format";
   import { refreshDiscoveryStatus } from "../../stores/discovery";
@@ -23,10 +23,6 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
 
-  function errorText(err: unknown, fallback: string): string {
-    return err instanceof ApiError ? err.message : fallback;
-  }
-
   async function read(event: SubmitEvent) {
     event.preventDefault();
     busy = true;
@@ -39,7 +35,7 @@
       locations = [...result.locations];
     } catch (err) {
       preview = null;
-      error = errorText(err, "Couldn't read that link.");
+      error = errorMessage(err, "Couldn't read that link.");
     } finally {
       busy = false;
     }
@@ -72,7 +68,7 @@
       void refreshDiscoveryStatus();
       onsaved?.(saved);
     } catch (err) {
-      error = errorText(err, "Couldn't save the posting.");
+      error = errorMessage(err, "Couldn't save the posting.");
     } finally {
       busy = false;
     }
