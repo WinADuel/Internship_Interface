@@ -175,6 +175,9 @@ def test_resume_upload_replace_and_delete(logged_in_client):
         (b"", "application/pdf", 422),
         (b"%PDF" + b"x" * (5 * 1024 * 1024), "application/pdf", 413),
     ],
+    # Named ids: the 5 MB body would otherwise become the test's name, and that one 5 MB
+    # line in `pytest -v` output stalls the GitHub Actions log until the job times out.
+    ids=["plain-text", "not-a-pdf", "empty", "too-large"],
 )
 def test_resume_upload_rejects_bad_files(logged_in_client, content, content_type, status):
     r = logged_in_client.put(
