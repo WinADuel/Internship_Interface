@@ -21,3 +21,13 @@ export function keysToSnake(data: object): Raw {
   for (const [k, v] of Object.entries(data)) out[camelToSnake(k)] = v;
   return out;
 }
+
+/** A string value as is; anything else is null. */
+export function strOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/** An array as strings; anything else is an empty list. */
+export function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
+}

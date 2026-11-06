@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { applicationLabel } from "../../format";
   import { applications } from "../../stores/applications";
   import { overdueFollowUps, parseLocalDate, reminderTime, upcomingReminders } from "../../dashboard/widgets";
 
@@ -49,7 +50,7 @@
     <h3 class="overdue-heading">Overdue</h3>
     <ul class="overdue">
       {#each overdue as { app, when } (app.id)}
-        <li>Follow up: {app.company} — {app.roleTitle} <time>{format(when)}</time></li>
+        <li>Follow up: {applicationLabel(app)} <time>{format(when)}</time></li>
       {/each}
     </ul>
     <h3>Upcoming</h3>
@@ -59,7 +60,7 @@
   {:else}
     <ul>
       {#each items as { app, when } (app.id)}
-        <li>{kind(app, when)}: {app.company} — {app.roleTitle} <time>{format(when)}</time></li>
+        <li>{kind(app, when)}: {applicationLabel(app)} <time>{format(when)}</time></li>
       {/each}
     </ul>
   {/if}

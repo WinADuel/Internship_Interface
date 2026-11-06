@@ -14,6 +14,8 @@ from urllib.parse import quote
 
 import httpx
 
+from app.services.google_http import google_403_reason, json_object
+
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 GMAIL_PROFILE_API = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 METADATA_HEADERS = ("From", "To", "Cc", "Subject", "Date")
@@ -85,18 +87,6 @@ def normalize_address(value) -> str | None:
     return address
 
 
-def _403_reason(response: httpx.Response) -> str | None:
-    try:
-        errors = response.json()["error"]["errors"]
-        reasons = {e.get("reason") for e in errors if isinstance(e, dict)}
-    except (ValueError, KeyError, TypeError, AttributeError):
-        return None
-    for reason, message in _403_REASONS.items():
-        if reason in reasons:
-            return message
-    return None
-
-
 class GoogleGmailClient:
     """One HTTP connection pool for the client's life; call `close()`."""
 
@@ -122,7 +112,7 @@ class GoogleGmailClient:
             return None
         message = f"gmail {op} rejected (status {status})"
         reconnect = False
-        if status == 403 and (reason := _403_reason(response)):
+        if status == 403 and (reason := google_403_reason(response, _403_REASONS)):
             message += f": {reason}"
         elif status in (401, 403):
             # A connection made without the Gmail permission, access revoked
@@ -134,11 +124,8 @@ class GoogleGmailClient:
         raise GmailError(message, status=status, reconnect=reconnect)
 
     def _json(self, response: httpx.Response, op: str) -> dict:
-        try:
-            data = response.json()
-        except ValueError:
-            raise GmailError(f"gmail {op} returned no json") from None
-        if not isinstance(data, dict):
+        data = json_object(response)
+        if data is None:
             raise GmailError(f"gmail {op} returned no json")
         return data
 

@@ -76,3 +76,15 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
+
+export const JSON_HEADERS = { "Content-Type": "application/json" };
+
+/** A JSON request: `body` is stringified with the JSON content type; with no body just the method. */
+export function jsonInit(method: string, body?: unknown): RequestInit {
+  return body === undefined ? { method } : { method, headers: JSON_HEADERS, body: JSON.stringify(body) };
+}
+
+/** The API's readable message for an ApiError; `fallback` for anything else. */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
