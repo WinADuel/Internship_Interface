@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base

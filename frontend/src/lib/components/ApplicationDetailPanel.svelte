@@ -2,7 +2,7 @@
   import type { Application, ApplicationStatus, StatusHistoryEntry } from "../types/application";
   import { getStatusHistory } from "../api/applications";
   import { statusLabel } from "../dashboard/widgets";
-  import { formatDate, formatDateTime } from "../format";
+  import { applicationLabel, formatDate, formatDateTime } from "../format";
   import { KANBAN_COLUMNS } from "../kanban/grouping";
   import { archiveAndRemoveApplication, moveApplicationStatus } from "../stores/applications";
   import { showToast } from "../stores/toast";
@@ -30,7 +30,7 @@
   }
 
   async function archive() {
-    if (archiving || !window.confirm(`Archive ${application.company} — ${application.roleTitle}?`)) return;
+    if (archiving || !window.confirm(`Archive ${applicationLabel(application)}?`)) return;
     archiving = true;
     try {
       await archiveAndRemoveApplication(application.id);

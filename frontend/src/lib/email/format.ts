@@ -1,3 +1,4 @@
+import { applicationLabel } from "../format";
 import type { EmailSuggestion, GmailAccount, HighlightTab, SuggestionKind, SuggestionState } from "../types/email";
 
 /** What the email is, as a short tag on its card. */
@@ -75,7 +76,7 @@ export function matchLabel(s: EmailSuggestion, { withApplication = true } = {}):
     const company = s.proposedCompany ?? "Unknown company";
     return s.proposedRole ? `${company} — ${s.proposedRole}` : company;
   }
-  const application = withApplication && s.application ? `${s.application.company} — ${s.application.roleTitle}` : null;
+  const application = withApplication && s.application ? applicationLabel(s.application) : null;
   if (APPLICATION_KINDS.has(s.kind) && application) {
     return s.contact ? `${application} via ${s.contact.name}` : application;
   }
@@ -100,7 +101,7 @@ export function shortDate(iso: string): string {
  */
 export function highlightMatch(s: EmailSuggestion, tab: HighlightTab): string | null {
   if (tab === "replies" && s.contact) return contactLabel(s.contact);
-  if (s.application) return `${s.application.company} — ${s.application.roleTitle}`;
+  if (s.application) return applicationLabel(s.application);
   return matchLabel(s);
 }
 

@@ -5,9 +5,3 @@ export function dateInputToIso(value: string): string | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
-/** A datetime-local value -> ISO instant (with zone, as the API requires). */
-export function datetimeInputToIso(value: string): string | undefined {
-  if (!value) return undefined;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-}

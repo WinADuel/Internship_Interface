@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { archiveContact, getContactHistory, updateContact } from "../../api/contacts";
   import { statusLabel } from "../../contacts/actions";
   import { isSafeHttpUrl } from "../../contacts/links";
@@ -60,7 +60,7 @@
       replaceContact(await updateContact(contact.id, { notes: notes || null, priority }));
       showToast("Saved.", "info");
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't save.");
+      showToast(errorMessage(err, "Couldn't save."));
     } finally {
       saving = false;
     }
@@ -75,7 +75,7 @@
       replaceContact(updated);
       onarchived?.(updated);
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't archive the contact.");
+      showToast(errorMessage(err, "Couldn't archive the contact."));
     } finally {
       archiving = false;
     }

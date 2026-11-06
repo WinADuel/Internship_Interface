@@ -23,7 +23,7 @@ from app.services.contact_service import last_status_changes
 from app.services.errors import GoogleAuthError
 from app.services.google_docs_service import get_valid_access_token
 from app.services.interview_service import round_label
-from app.services.nudges import NudgeKind, compute_nudge, utc_today
+from app.services.nudges import NudgeKind, NudgeSettings, compute_nudge, utc_today
 from app.services.settings_service import get_settings, nudge_settings
 from app.services.sheets_client import GoogleSheetsClient, SheetsClient
 
@@ -149,21 +149,30 @@ def _saved_postings(db: Session) -> list[Posting]:
     )
 
 
-def _contacts_with_nudges(db: Session, kind: ContactKind) -> list[tuple[Contact, NudgeKind | None]]:
-    settings = nudge_settings(get_settings(db))
-    last_changes = last_status_changes(db)
-    today = utc_today()
+# What the contact tabs' Needs Attention column is computed from, read once
+# per sync: the nudge settings, each contact's last status change, and today.
+_NudgeInputs = tuple[NudgeSettings, dict[int, datetime], date]
+
+
+def _nudge_inputs(db: Session) -> _NudgeInputs:
+    return nudge_settings(get_settings(db)), last_status_changes(db), utc_today()
+
+
+def _contacts_with_nudges(
+    db: Session, kind: ContactKind, nudge_inputs: _NudgeInputs
+) -> list[tuple[Contact, NudgeKind | None]]:
+    settings, last_changes, today = nudge_inputs
     contacts = db.scalars(select(Contact).where(Contact.kind == kind).order_by(Contact.id))
     return [(c, compute_nudge(c, last_changes.get(c.id), settings, today)) for c in contacts]
 
 
-def _tab_rows(db: Session, tab: str) -> list[list[str]]:
+def _tab_rows(db: Session, tab: str, nudge_inputs: _NudgeInputs | None = None) -> list[list[str]]:
     if tab == TAB_APPLICATIONS:
         return application_rows(db.scalars(select(Application).order_by(Application.id)))
     if tab == TAB_PROFESSORS:
-        return contact_rows(_contacts_with_nudges(db, ContactKind.PROFESSOR))
+        return contact_rows(_contacts_with_nudges(db, ContactKind.PROFESSOR, nudge_inputs or _nudge_inputs(db)))
     if tab == TAB_COMPANY:
-        return contact_rows(_contacts_with_nudges(db, ContactKind.COMPANY))
+        return contact_rows(_contacts_with_nudges(db, ContactKind.COMPANY, nudge_inputs or _nudge_inputs(db)))
     if tab == TAB_SAVED_POSTINGS:
         return saved_posting_rows(_saved_postings(db))
     if tab == TAB_INTERVIEWS:
@@ -171,7 +180,7 @@ def _tab_rows(db: Session, tab: str) -> list[list[str]]:
     raise ValueError(f"unknown tab {tab!r}")
 
 
-def sync_tabs(db: Session, client: SheetsClient, tabs: Iterable[str], now: datetime | None = None) -> None:
+def sync_tabs(db: Session, client: SheetsClient, tabs: Iterable[str]) -> None:
     tabs = list(dict.fromkeys(tabs))
     unknown = [t for t in tabs if t not in ALL_TABS]
     if unknown:
@@ -186,8 +195,9 @@ def sync_tabs(db: Session, client: SheetsClient, tabs: Iterable[str], now: datet
         # A sheet made before a tab existed (e.g. Saved postings, Interviews) gains it here;
         # writing a missing tab would fail.
         client.ensure_tabs(settings.backup_sheet_id, tabs)
+    nudge_inputs = _nudge_inputs(db) if any(t in CONTACT_TABS for t in tabs) else None
     for tab in tabs:
-        client.replace_tab(settings.backup_sheet_id, tab, _tab_rows(db, tab))
+        client.replace_tab(settings.backup_sheet_id, tab, _tab_rows(db, tab, nudge_inputs))
 
 
 def safe_sync(
@@ -198,7 +208,7 @@ def safe_sync(
 ) -> bool:
     """Run a sync and record the outcome on the settings row. Never raises."""
     try:
-        sync_tabs(db, client_factory(db), tabs, now=now)
+        sync_tabs(db, client_factory(db), tabs)
         error = None
     except GoogleAuthError:
         error = NOT_CONNECTED

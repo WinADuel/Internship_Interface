@@ -3,7 +3,7 @@ the Claude token is rejected like on every other non-/api/claude route."""
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_sheet_sync_scheduler

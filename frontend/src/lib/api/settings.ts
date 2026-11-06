@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, jsonInit } from "./client";
 import { keysToCamel, keysToSnake } from "./case";
 import type {
   AppSettings,
@@ -15,11 +15,7 @@ export async function getSettings(): Promise<AppSettings> {
 }
 
 export async function updateSettings(data: AppSettingsUpdate): Promise<AppSettings> {
-  const raw = await apiFetch<Raw>("/api/settings", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(keysToSnake(data)),
-  });
+  const raw = await apiFetch<Raw>("/api/settings", jsonInit("PATCH", keysToSnake(data)));
   return keysToCamel<AppSettings>(raw);
 }
 

@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { getEmailHighlights } from "../../api/email";
   import { highlightMatch, safeGmailUrl, senderLabel, senderName, shortDate } from "../../email/format";
+  import { tabKeyTarget } from "../../tabs";
   import type { EmailHighlights, EmailSuggestion, HighlightTab } from "../../types/email";
 
   const LIMIT = 8;
@@ -41,13 +42,7 @@
   });
 
   async function onTabKeydown(event: KeyboardEvent, index: number) {
-    const last = TABS.length - 1;
-    const target =
-      event.key === "ArrowRight" ? (index === last ? 0 : index + 1)
-      : event.key === "ArrowLeft" ? (index === 0 ? last : index - 1)
-      : event.key === "Home" ? 0
-      : event.key === "End" ? last
-      : null;
+    const target = tabKeyTarget(event.key, index, TABS.length);
     if (target === null) return;
     event.preventDefault();
     tab = TABS[target].id;

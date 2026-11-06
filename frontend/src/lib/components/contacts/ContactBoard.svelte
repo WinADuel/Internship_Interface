@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { moveContactStatus } from "../../api/contacts";
   import { STATUS_ORDER, statusLabel } from "../../contacts/actions";
   import { clearUndoable, contacts, loadContacts, replaceContact } from "../../stores/contacts";
@@ -23,7 +23,7 @@
     try {
       await loadContacts(kind);
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't load contacts.");
+      showToast(errorMessage(err, "Couldn't load contacts."));
     }
   }
 
@@ -55,7 +55,7 @@
       // The server's undo reverts the newest change, which is now this drag.
       clearUndoable(id);
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't move the contact.");
+      showToast(errorMessage(err, "Couldn't move the contact."));
     }
   }
 </script>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listRounds } from "../../api/interviews";
+  import { applicationLabel } from "../../format";
   import { countdown, formatRoundTime, roundName, sortByDate } from "../../interviews/format";
   import { clock } from "../../stores/clock";
   import type { InterviewRoundListItem } from "../../types/interview";
@@ -62,7 +63,7 @@
     <ul>
       {#each upcoming as r (r.id)}
         <li>
-          <a href="#/interviews/{r.id}">{r.company} — {r.roleTitle}</a>
+          <a href="#/interviews/{r.id}">{applicationLabel(r)}</a>
           <span class="round">{roundName(r)}</span>
           <span class="when">{formatRoundTime(r.scheduledAt as string)} · {countdown(r.scheduledAt as string, now)}</span>
           {#if r.checklistTotal > 0}

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { undoContactAction } from "../../api/contacts";
   import { ACTION_LABELS, ACTIONS_BY_STATUS } from "../../contacts/actions";
-  import { dateInputToIso, datetimeInputToIso } from "../../contacts/dates";
+  import { dateInputToIso } from "../../contacts/dates";
+  import { localInputToIso } from "../../format";
   import {
     clearUndoable,
     markUndoable,
@@ -47,7 +48,7 @@
       askingMeeting = true;
       return;
     }
-    const meetingIso = action === "meeting_set" ? datetimeInputToIso(meetingAt) : undefined;
+    const meetingIso = action === "meeting_set" ? (localInputToIso(meetingAt) ?? undefined) : undefined;
     if (action === "meeting_set" && !meetingIso) {
       showToast("Pick the meeting date and time first.");
       return;
@@ -80,7 +81,7 @@
       onchange?.(updated);
     } catch (err) {
       clearUndoable(contact.id);
-      showToast(err instanceof ApiError ? err.message : "Couldn't undo.");
+      showToast(errorMessage(err, "Couldn't undo."));
     } finally {
       busy = false;
     }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { updateContact } from "../../api/contacts";
   import { ACTIONS_BY_STATUS } from "../../contacts/actions";
   import { GUESS_WARNING, fitsInGmailUrl, gmailComposeUrl } from "../../contacts/gmail";
@@ -59,7 +59,7 @@
       replaceContact(updated);
       showToast("Saved.", "info");
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't save the draft.");
+      showToast(errorMessage(err, "Couldn't save the draft."));
     } finally {
       saving = false;
     }

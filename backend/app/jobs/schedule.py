@@ -22,11 +22,10 @@ from datetime import UTC, datetime, timedelta, tzinfo
 from datetime import time as clock_time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+# Also imported from here by the nightly jobs, as their default clock.
+from app.core.time import utc_now
+
 logger = logging.getLogger(__name__)
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def local_zone() -> tzinfo:

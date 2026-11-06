@@ -7,6 +7,7 @@ application at the sender's company (§4.2) with the classifier's kind (§4.3);
 then a new-application suggestion for applicant-tracking-system mail from a
 company that isn't tracked yet (§4.4)."""
 
+import functools
 import re
 import unicodedata
 from collections.abc import Iterable, Sequence
@@ -208,6 +209,8 @@ def _tokens(text: str | None) -> tuple[str, ...]:
     return tuple(re.findall(r"[a-z0-9]+", folded.replace("&", " ")))
 
 
+# Pure and called for every application on every message: cached.
+@functools.lru_cache(maxsize=4096)
 def company_tokens(name: str | None) -> tuple[str, ...]:
     """A company name's words without punctuation and suffixes like "Inc",
     "LLC" or "Technologies" ("Palantir Technologies Inc." -> palantir)."""
@@ -216,6 +219,7 @@ def company_tokens(name: str | None) -> tuple[str, ...]:
     return kept or words
 
 
+@functools.lru_cache(maxsize=4096)
 def company_key(name: str | None) -> str:
     """The joined company tokens ("Jane Street" -> janestreet), the form a
     company takes in its email domain. Empty when it has under 3 letters, so
