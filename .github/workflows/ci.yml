@@ -59,7 +59,9 @@ jobs:
       - name: Apply migrations
         run: alembic upgrade head
       - name: Run pytest
-        run: pytest -v
+        # Stop the run ourselves before the job limit, with SIGINT so pytest prints where it
+        # was. A job GitHub cancels at its limit keeps no log.
+        run: timeout --signal=INT 600 pytest -v --durations=25 -o faulthandler_timeout=240
 
   frontend-tests:
     runs-on: ubuntu-latest
