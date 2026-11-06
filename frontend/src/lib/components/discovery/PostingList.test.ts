@@ -452,3 +452,28 @@ describe("PostingList — Dismissed", () => {
     expect(rowNames()).toEqual([]);
   });
 });
+
+describe("auto-apply groups", () => {
+  it("lists Greenhouse, Lever and Ashby postings apart from the rest, auto-apply first", async () => {
+    const greenhouse = fakePosting({ id: 3, company: "Robinhood", url: "https://job-boards.greenhouse.io/robinhood/jobs/8198241" });
+    const lever = fakePosting({ id: 4, company: "Palantir", url: "https://jobs.lever.co/palantir/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b" });
+    const workday = fakePosting({ id: 5, company: "ITT", url: "https://itt.wd5.myworkdayjobs.com/en-US/careers/job/123" });
+    vi.mocked(listPostings).mockResolvedValue(page([workday, greenhouse, lever]));
+    render(PostingList, { view: "inbox" });
+
+    const auto = await screen.findByRole("region", { name: /Auto-apply with the extension/ });
+    const manual = screen.getByRole("region", { name: /Apply on the company's site/ });
+    const names = (el: HTMLElement) =>
+      within(el).getAllByRole("listitem").map((li) => li.querySelector(".company")?.textContent);
+    expect(names(auto)).toEqual(["Robinhood", "Palantir"]);
+    expect(names(manual)).toEqual(["ITT"]);
+    expect(rowNames()).toEqual(["Robinhood", "Palantir", "ITT"]);
+  });
+
+  it("leaves out a group with nothing in it", async () => {
+    vi.mocked(listPostings).mockResolvedValue(page([figma]));
+    render(PostingList, { view: "saved" });
+    await screen.findByRole("region", { name: /Apply on the company's site/ });
+    expect(screen.queryByRole("region", { name: /Auto-apply/ })).toBeNull();
+  });
+});

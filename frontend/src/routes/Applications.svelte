@@ -5,6 +5,7 @@
   import KanbanBoard from "../lib/components/KanbanBoard.svelte";
   import ApplicationDetailPanel from "../lib/components/ApplicationDetailPanel.svelte";
   import ApplicationForm from "../lib/components/ApplicationForm.svelte";
+  import StatisticsSummary from "../lib/components/StatisticsSummary.svelte";
 
   let selectedId = $state<number | null>(null);
   let creating = $state(false);
@@ -36,8 +37,12 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+<h1>Applications</h1>
+<!-- Statistics first (totals, kanban snapshot, buckets), then the full board. -->
+<StatisticsSummary />
+
 <div class="header">
-  <h1>Applications</h1>
+  <h2>Your applications</h2>
   <button type="button" onclick={startCreate}>New application</button>
 </div>
 <KanbanBoard onopen={(app) => open(app.id)} />
@@ -63,7 +68,9 @@
 {/if}
 
 <style>
+  h1 { margin: 0 0 1rem; }
   .header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .header h2 { margin: 0; }
   .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(28rem, 100%); box-sizing: border-box; overflow-y: auto; padding: 1rem; background: #fff; border-left: 1px solid #ddd; box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1); z-index: 10; }
   .close { float: right; }
 

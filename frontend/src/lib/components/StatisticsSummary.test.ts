@@ -2,9 +2,9 @@ import { render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { load } = vi.hoisted(() => ({ load: vi.fn() }));
-vi.mock("../lib/stores/applications", async () => {
+vi.mock("$lib/stores/applications", async () => {
   const { writable } = await import("svelte/store");
-  const { fakeApplication } = await import("../lib/testing/fixtures");
+  const { fakeApplication } = await import("$lib/testing/fixtures");
   return {
     applications: writable([
       fakeApplication({ id: 1, status: "applied" }),
@@ -14,13 +14,13 @@ vi.mock("../lib/stores/applications", async () => {
     loadApplications: load,
   };
 });
-vi.mock("../lib/api/interviews", () => ({ listRounds: vi.fn().mockResolvedValue([]) }));
-vi.mock("../lib/api/email", () => ({ getEmailStatus: vi.fn() }));
+vi.mock("$lib/api/interviews", () => ({ listRounds: vi.fn().mockResolvedValue([]) }));
+vi.mock("$lib/api/email", () => ({ getEmailStatus: vi.fn() }));
 
-import { getEmailStatus } from "../lib/api/email";
-import { emailStatus } from "../lib/stores/email";
-import { fakeEmailStatus, fakeGmailAccount } from "../lib/testing/fixtures";
-import Statistics from "./Statistics.svelte";
+import { getEmailStatus } from "$lib/api/email";
+import { emailStatus } from "$lib/stores/email";
+import { fakeEmailStatus, fakeGmailAccount } from "$lib/testing/fixtures";
+import Statistics from "./StatisticsSummary.svelte";
 
 beforeEach(() => {
   localStorage.clear();
@@ -29,10 +29,9 @@ beforeEach(() => {
   vi.mocked(getEmailStatus).mockResolvedValue(fakeEmailStatus({ pendingCount: 3, accounts: [fakeGmailAccount(), fakeGmailAccount({ id: 2 })] }));
 });
 
-describe("Statistics route", () => {
+describe("Statistics summary", () => {
   it("shows the four totals and the kanban snapshot", async () => {
     const { container } = render(Statistics);
-    expect(load).toHaveBeenCalledTimes(1);
     const tile = (id: string) => container.querySelector(`[data-stat="${id}"] .value`)?.textContent;
     expect(tile("sent")).toBe("2");
     expect(tile("response-rate")).toBe("50%");
