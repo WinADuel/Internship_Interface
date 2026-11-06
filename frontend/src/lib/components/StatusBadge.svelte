@@ -8,9 +8,9 @@
 <span class="badge {status}">{label}</span>
 
 <style>
-  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; text-transform: capitalize; background: #e0e0e0; color: #222; }
-  .offer { background: #c8e6c9; }
-  .rejected { background: #f4c7c3; }
-  .interview, .phone_screen { background: #bbdefb; }
-  .applied { background: #fff3c4; }
+  .badge { display: inline-block; flex: none; width: fit-content; padding: 0.05rem 0.45rem; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.72rem; font-weight: 500; text-transform: capitalize; white-space: nowrap; color: var(--foreground); background: var(--background); }
+  .offer { color: var(--success); border-color: color-mix(in oklch, var(--success) 35%, transparent); }
+  .rejected { color: var(--destructive); border-color: color-mix(in oklch, var(--destructive) 35%, transparent); }
+  .interview, .phone_screen { color: var(--info); border-color: color-mix(in oklch, var(--info) 35%, transparent); }
+  .applied { color: var(--warning); border-color: color-mix(in oklch, var(--warning) 35%, transparent); }
 </style>

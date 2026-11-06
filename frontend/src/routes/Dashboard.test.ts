@@ -32,7 +32,7 @@ vi.mock("../lib/api/applications", async (orig) => ({
 
 import { get } from "svelte/store";
 import Dashboard from "./Dashboard.svelte";
-import { LAYOUT_STORAGE_KEY } from "../lib/dashboard/layout";
+import { LAYOUT_STORAGE_KEY, LEGACY_LAYOUT_STORAGE_KEY } from "../lib/dashboard/layout";
 import { toasts } from "../lib/stores/toast";
 
 beforeEach(() => {
@@ -42,13 +42,30 @@ beforeEach(() => {
 });
 
 describe("Dashboard route", () => {
-  it("loads applications on mount and renders all eight widgets", () => {
+  it("loads applications on mount and renders the six update widgets, most urgent first", () => {
     const { container } = render(Dashboard);
     expect(load).toHaveBeenCalledTimes(1);
-    const ids = ["activity", "reminders", "buckets", "snapshot", "needs-attention", "new-postings", "interviews", "email-replies"];
-    for (const id of ids) {
-      expect(container.querySelector(`[data-widget="${id}"]`)).not.toBeNull();
-    }
+    const ids = [...container.querySelectorAll("[data-widget]")].map((el) => el.getAttribute("data-widget"));
+    expect(ids).toEqual(["interviews", "needs-attention", "new-postings", "email-replies", "reminders", "activity"]);
+    // Counts and the kanban snapshot moved to Statistics.
+    expect(container.querySelector('[data-widget="snapshot"]')).toBeNull();
+    expect(container.querySelector('[data-widget="buckets"]')).toBeNull();
+    expect(screen.getByRole("link", { name: "View statistics" }).getAttribute("href")).toBe("#/statistics");
+  });
+
+  it("moves a v1 layout to the new order but keeps its widget settings", () => {
+    localStorage.setItem(
+      LEGACY_LAYOUT_STORAGE_KEY,
+      JSON.stringify([
+        { id: "activity", x: 0, y: 0, w: 6, h: 4, settings: { limit: 10 } },
+        { id: "reminders", x: 6, y: 0, w: 6, h: 4, settings: { withinDays: 30 } },
+        { id: "snapshot", x: 0, y: 4, w: 6, h: 4, settings: {} },
+      ]),
+    );
+    const { container } = render(Dashboard);
+    expect(container.querySelector("[data-widget]")?.getAttribute("data-widget")).toBe("interviews");
+    expect((screen.getByLabelText("Days ahead") as HTMLSelectElement).value).toBe("30");
+    expect((screen.getByLabelText("Items to show") as HTMLSelectElement).value).toBe("10");
   });
 
   it("persists a settings change under the layout key and restores it on remount", async () => {
@@ -67,7 +84,7 @@ describe("Dashboard route", () => {
       JSON.stringify([{ id: "activity", x: 0, y: 0, w: 6, h: 4, settings: {} }]),
     );
     const { container } = render(Dashboard);
-    expect(container.querySelectorAll("[data-widget]")).toHaveLength(8);
+    expect(container.querySelectorAll("[data-widget]")).toHaveLength(6);
     expect(container.querySelector('[data-widget="needs-attention"]')).not.toBeNull();
     expect(container.querySelector('[data-widget="new-postings"]')).not.toBeNull();
   });
