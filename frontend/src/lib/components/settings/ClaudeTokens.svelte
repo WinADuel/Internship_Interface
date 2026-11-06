@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { createClaudeToken, listClaudeTokens, revokeClaudeToken } from "../../api/settings";
   import { formatDateTime } from "../../format";
   import { showToast } from "../../stores/toast";
@@ -14,8 +14,6 @@
   let tokenInput = $state<HTMLInputElement | null>(null);
   let createButton = $state<HTMLButtonElement | null>(null);
 
-  const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
-
   // Keep only the listed fields, so a token value can never end up in the list even if the API sent one.
   function strip(t: ClaudeTokenInfo): ClaudeTokenInfo {
     return { id: t.id, tokenPrefix: t.tokenPrefix, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt, revokedAt: t.revokedAt };
@@ -25,7 +23,7 @@
     try {
       tokens = (await listClaudeTokens()).map(strip);
     } catch (err) {
-      showToast(message(err, "Couldn't load Claude tokens."));
+      showToast(errorMessage(err, "Couldn't load Claude tokens."));
     }
   }
 
@@ -58,7 +56,7 @@
       tokenInput?.focus();
       tokenInput?.select();
     } catch (err) {
-      showToast(message(err, "Couldn't create a token."));
+      showToast(errorMessage(err, "Couldn't create a token."));
     } finally {
       creating = false;
     }
@@ -85,7 +83,7 @@
       const updated = strip(await revokeClaudeToken(token.id));
       tokens = tokens.map((t) => (t.id === updated.id ? updated : t));
     } catch (err) {
-      showToast(message(err, "Couldn't revoke the token."));
+      showToast(errorMessage(err, "Couldn't revoke the token."));
     }
   }
 </script>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError } from "../../api/client";
+  import { ApiError, errorMessage } from "../../api/client";
   import { listContacts } from "../../api/contacts";
   import { findContacts } from "../../api/researchQueue";
   import { showToast } from "../../stores/toast";
@@ -44,7 +44,7 @@
       showToast("Queued — contacts will appear after the daily Claude run.", "info");
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) showToast("Contacts already queued for this application.");
-      else showToast(err instanceof ApiError ? err.message : "Couldn't queue the search.");
+      else showToast(errorMessage(err, "Couldn't queue the search."));
     } finally {
       finding = false;
     }

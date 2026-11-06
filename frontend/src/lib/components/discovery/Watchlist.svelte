@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ApiError } from "../../api/client";
+  import { ApiError, errorMessage } from "../../api/client";
   import { addWatchCompany, listWatchlist, removeWatchCompany } from "../../api/discovery";
   import { sourceLabel, timeAgo } from "../../discovery/format";
+  import { blankToNull } from "../../format";
   import { showToast } from "../../stores/toast";
   import type { WatchCompany } from "../../types/discovery";
 
@@ -16,8 +17,6 @@
   let addError = $state<string | null>(null);
   let removing = $state<number | null>(null);
 
-  const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
-
   // Same order as the backend list: by name, ignoring case.
   const byName = (a: WatchCompany, b: WatchCompany) =>
     a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id - b.id;
@@ -28,7 +27,7 @@
     try {
       companies = await listWatchlist();
     } catch (err) {
-      loadError = message(err, "something went wrong");
+      loadError = errorMessage(err, "something went wrong");
     } finally {
       loading = false;
     }
@@ -43,14 +42,14 @@
     adding = true;
     addError = null;
     try {
-      const company = await addWatchCompany({ careersUrl: careersUrl.trim(), name: name.trim() || null });
+      const company = await addWatchCompany({ careersUrl: careersUrl.trim(), name: blankToNull(name) });
       companies = [...companies.filter((c) => c.id !== company.id), company].sort(byName);
       careersUrl = "";
       name = "";
       showToast(`Watching ${company.name}. Its internships arrive with the next scan.`, "info");
     } catch (err) {
       // 422 carries the service's readable reason (e.g. a custom careers site).
-      addError = message(err, "Couldn't add that company.");
+      addError = errorMessage(err, "Couldn't add that company.");
     } finally {
       adding = false;
     }

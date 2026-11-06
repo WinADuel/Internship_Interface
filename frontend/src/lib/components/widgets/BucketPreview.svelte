@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { applicationLabel } from "../../format";
   import { applications } from "../../stores/applications";
   import { bucketApplications, type Bucket } from "../../dashboard/widgets";
   import StatusBadge from "../StatusBadge.svelte";
@@ -34,7 +35,7 @@
       {:else}
         <ul>
           {#each buckets[bucket].slice(0, limit) as app (app.id)}
-            <li>{app.company} — {app.roleTitle} <StatusBadge status={app.status} /></li>
+            <li>{applicationLabel(app)} <StatusBadge status={app.status} /></li>
           {/each}
         </ul>
         {#if buckets[bucket].length > limit}

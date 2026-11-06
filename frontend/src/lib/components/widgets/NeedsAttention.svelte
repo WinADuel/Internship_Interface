@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
   import { portal } from "../../actions/portal";
-  import { ApiError } from "../../api/client";
+  import { errorMessage } from "../../api/client";
   import { archiveContact, getNeedsAttention, snoozeContact, undoContactAction } from "../../api/contacts";
   import { NUDGE_LABELS, statusLabel } from "../../contacts/actions";
   import {
@@ -60,7 +60,7 @@
       loadFailed = false;
     } catch (err) {
       loadFailed = true;
-      showToast(err instanceof ApiError ? err.message : "Couldn't load contacts needing attention.");
+      showToast(errorMessage(err, "Couldn't load contacts needing attention."));
     } finally {
       loaded = true;
     }
@@ -78,7 +78,7 @@
     try {
       await work();
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Something went wrong.");
+      showToast(errorMessage(err, "Something went wrong."));
     } finally {
       busy = false;
       await refresh();

@@ -37,13 +37,15 @@
 
   async function onAdded() {
     adding = false;
-    await load();
-    // The application's next interview is derived from its rounds on the server.
-    try {
-      upsertApplication(await getApplication(application.id));
-    } catch {
-      // the list above is already right; the panel's date catches up on the next load
-    }
+    await Promise.all([
+      load(),
+      // The application's next interview is derived from its rounds on the server.
+      getApplication(application.id)
+        .then(upsertApplication)
+        .catch(() => {
+          // the list is already right; the panel's date catches up on the next load
+        }),
+    ]);
   }
 
   async function moveToInterview() {

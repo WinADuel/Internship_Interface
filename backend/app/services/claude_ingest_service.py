@@ -7,12 +7,13 @@ origin and kind are user/app-owned.
 Each ingest call commits once at the end, so a failure writes nothing."""
 
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.time import utc_now as _now
 from app.models.application import Application
 from app.models.contact import Contact, ContactKind, ContactOrigin, ContactStatus, EmailConfidence
 from app.models.research_queue import QueueKind, QueueState, ResearchQueueItem
@@ -55,10 +56,6 @@ WORK_KINDS = (
 )
 CONTACT_KINDS = (QueueKind.PROFESSOR_PERSON, QueueKind.PROFESSOR_SEARCH, QueueKind.COMPANY_CONTACTS)
 BRIEF_DONE_NOTE = "brief saved"
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def is_safe_url(url: str | None) -> bool:

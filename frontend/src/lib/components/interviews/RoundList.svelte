@@ -9,6 +9,7 @@
     roundName,
     sortByDate,
   } from "../../interviews/format";
+  import { applicationLabel } from "../../format";
   import { clock } from "../../stores/clock";
   import type { InterviewRoundListItem } from "../../types/interview";
 
@@ -42,7 +43,7 @@
 {#snippet row(r: InterviewRoundListItem)}
   <li>
     <a href="#/interviews/{r.id}">
-      <span class="company">{r.company} — {r.roleTitle}</span>
+      <span class="company">{applicationLabel(r)}</span>
       <span class="round">{roundName(r)}</span>
     </a>
     <div class="meta">

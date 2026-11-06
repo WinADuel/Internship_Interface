@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, jsonInit } from "./client";
 import { keysToCamel } from "./case";
 import type { QueueItem, QueueItemInput, QueueState } from "../types/contact";
 
@@ -10,11 +10,14 @@ export async function listQueue(state?: QueueState): Promise<QueueItem[]> {
 }
 
 export async function addQueueItem(data: QueueItemInput): Promise<QueueItem> {
-  const raw = await apiFetch<Raw>("/api/research-queue", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: data.kind, request_text: data.requestText, target_count: data.targetCount }),
-  });
+  const raw = await apiFetch<Raw>(
+    "/api/research-queue",
+    jsonInit("POST", {
+      kind: data.kind,
+      request_text: data.requestText,
+      target_count: data.targetCount,
+    }),
+  );
   return keysToCamel<QueueItem>(raw);
 }
 

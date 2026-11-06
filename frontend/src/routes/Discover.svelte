@@ -4,6 +4,7 @@
   import PostingList from "../lib/components/discovery/PostingList.svelte";
   import ScanHeader from "../lib/components/discovery/ScanHeader.svelte";
   import Watchlist from "../lib/components/discovery/Watchlist.svelte";
+  import { tabKeyTarget } from "../lib/tabs";
   import type { PostingSort, PostingView } from "../lib/types/discovery";
 
   type Tab = PostingView | "watchlist";
@@ -34,13 +35,7 @@
   }
 
   async function onTabKeydown(event: KeyboardEvent, index: number) {
-    const last = TABS.length - 1;
-    const target =
-      event.key === "ArrowRight" ? (index === last ? 0 : index + 1)
-      : event.key === "ArrowLeft" ? (index === 0 ? last : index - 1)
-      : event.key === "Home" ? 0
-      : event.key === "End" ? last
-      : null;
+    const target = tabKeyTarget(event.key, index, TABS.length);
     if (target === null) return;
     event.preventDefault();
     tab = TABS[target].id;

@@ -1,8 +1,11 @@
-from datetime import date, datetime, timedelta, timezone
+from collections.abc import Iterable
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+# Explicit timestamp, as in application_service: now() is constant per transaction.
+from app.core.time import utc_now as _now
 from app.models.application import Application
 from app.models.contact import Contact, ContactKind, ContactOrigin, ContactStatus
 from app.models.contact_status_history import ContactStatusHistory
@@ -27,11 +30,6 @@ from app.services.settings_service import get_settings, nudge_settings
 
 _DRAFT_FIELDS = ("draft_subject", "draft_body")
 _FOLLOWUP_FIELDS = ("followup_subject", "followup_body")
-
-
-def _now() -> datetime:
-    # Explicit timestamp, as in application_service: now() is constant per transaction.
-    return datetime.now(timezone.utc)
 
 
 def _check_application(db: Session, application_id: int | None) -> None:
@@ -206,13 +204,16 @@ def get_recent_contact_activity(db: Session, limit: int = 10) -> list[dict]:
     ]
 
 
-def last_status_changes(db: Session) -> dict[int, datetime]:
-    """Newest history timestamp per contact, in one grouped query."""
-    rows = db.execute(
-        select(ContactStatusHistory.contact_id, func.max(ContactStatusHistory.changed_at)).group_by(
-            ContactStatusHistory.contact_id
-        )
-    )
+def last_status_changes(db: Session, contact_ids: Iterable[int] | None = None) -> dict[int, datetime]:
+    """Newest history timestamp per contact, in one grouped query; only for
+    `contact_ids` when given."""
+    query = select(ContactStatusHistory.contact_id, func.max(ContactStatusHistory.changed_at))
+    if contact_ids is not None:
+        ids = list(contact_ids)
+        if not ids:
+            return {}
+        query = query.where(ContactStatusHistory.contact_id.in_(ids))
+    rows = db.execute(query.group_by(ContactStatusHistory.contact_id))
     return {contact_id: changed_at for contact_id, changed_at in rows}
 
 
@@ -238,5 +239,5 @@ def contact_nudges(db: Session, contacts: list[Contact], today: date) -> dict[in
         )
         last_changes = {contacts[0].id: last}
     else:
-        last_changes = last_status_changes(db)
+        last_changes = last_status_changes(db, [c.id for c in contacts])
     return {c.id: compute_nudge(c, last_changes.get(c.id), settings, today) for c in contacts}

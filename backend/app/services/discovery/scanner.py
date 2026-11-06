@@ -34,15 +34,15 @@ scan job between scans (`rescore_if_due`).
 
 import logging
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Connection, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.db.locks import advisory_lock
 from app.models.app_settings import AppSettings
 from app.models.watch_company import WatchCompany
 from app.services.discovery.filters import filters_from_settings, match_count
@@ -84,36 +84,6 @@ class ScanReport:
 
 
 # --- the lock ----------------------------------------------------------------
-
-
-@contextmanager
-def _lock_connection(db: Session) -> Iterator[Connection]:
-    """A connection of its own from the session's engine, in autocommit mode."""
-    conn = db.get_bind().engine.connect()
-    try:
-        conn.execution_options(isolation_level="AUTOCOMMIT")
-        yield conn
-    finally:
-        conn.close()
-
-
-def _try_lock(conn: Connection) -> bool:
-    return bool(
-        conn.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": SCAN_LOCK_KEY}).scalar_one()
-    )
-
-
-def _unlock(conn: Connection) -> None:
-    try:
-        released = conn.execute(
-            text("SELECT pg_advisory_unlock(:key)"), {"key": SCAN_LOCK_KEY}
-        ).scalar_one()
-    except Exception:  # noqa: BLE001 - the lock must not outlive this call
-        logger.exception("could not release the scan lock")
-        released = False
-    if not released:
-        # Closing the database session is what finally releases the lock.
-        conn.invalidate()
 
 
 # Postgres reports a bigint advisory lock in pg_locks as classid = the key's
@@ -201,13 +171,10 @@ def rescore_if_due(db: Session, now: datetime | None = None) -> bool | None:
     last = db.scalar(select(AppSettings.last_rescore_at).where(AppSettings.id == SETTINGS_ID))
     if not _rescore_due(last, now):
         return False
-    with _lock_connection(db) as conn:
-        if not _try_lock(conn):
+    with advisory_lock(db.get_bind().engine, SCAN_LOCK_KEY) as locked:
+        if not locked:
             return None
-        try:
-            return _rescore_if_due(db, now)
-        finally:
-            _unlock(conn)
+        return _rescore_if_due(db, now)
 
 
 # --- the scan ----------------------------------------------------------------
@@ -361,13 +328,10 @@ def run_scan(
 ) -> ScanReport | None:
     """Scan every list and watched board. Returns None, having read and
     written nothing, when another scan holds the lock."""
-    with _lock_connection(db) as conn:
-        if not _try_lock(conn):
+    with advisory_lock(db.get_bind().engine, SCAN_LOCK_KEY) as locked:
+        if not locked:
             return None
-        try:
-            return _scan(db, http, now or datetime.now(UTC), pause)
-        finally:
-            _unlock(conn)
+        return _scan(db, http, now or datetime.now(UTC), pause)
 
 
 def scan_status(db: Session) -> dict[str, Any]:

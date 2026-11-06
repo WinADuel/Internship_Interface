@@ -213,6 +213,7 @@ def list_postings(
     offset: int = 0,
     sort: Sort = "best",
     min_score: int | None = None,
+    total: int | None = None,
 ) -> tuple[list[Posting], int]:
     """One page of a Discover tab and the tab's total. The Inbox applies
     `filters`, is ordered by `sort` (Best match: the best available score,
@@ -221,7 +222,8 @@ def list_postings(
     posting in that state (closed ones included), newest change first, and
     ignore filters, sort and `min_score`. Dismissed is capped at the most
     recent `DISMISSED_CAP`, and its total is capped too. Every order ends
-    with the id, so paging is stable."""
+    with the id, so paging is stable. An Inbox `total` already counted
+    (`inbox_counts`) is returned as given instead of counted again."""
     _check_paging(limit, offset)
     if view == "inbox":
         where = inbox_clause(filters)
@@ -246,7 +248,7 @@ def list_postings(
         if offset >= DISMISSED_CAP:
             return [], total
         limit = min(limit, DISMISSED_CAP - offset)
-    else:
+    elif view != "inbox" or total is None:
         total = db.scalar(select(func.count()).select_from(Posting).where(where)) or 0
 
     items = list(db.scalars(select(Posting).where(where).order_by(*order).limit(limit).offset(offset)))
@@ -263,6 +265,15 @@ def top_picks_count(db: Session, filters: DiscoveryFilters) -> int:
     """How many Inbox postings are Top picks (best score >= TOP_PICKS_SCORE)."""
     where = and_(inbox_clause(filters), best_score() >= TOP_PICKS_SCORE)
     return db.scalar(select(func.count()).select_from(Posting).where(where)) or 0
+
+
+def inbox_counts(db: Session, filters: DiscoveryFilters, min_score: int | None = None) -> tuple[int, int]:
+    """In one query: the Inbox total as `list_postings` counts it (with
+    `min_score` when given) and its Top picks count (`top_picks_count`)."""
+    top = func.count().filter(best_score() >= TOP_PICKS_SCORE)
+    total = func.count() if min_score is None else func.count().filter(best_score() >= min_score)
+    row = db.execute(select(total, top).select_from(Posting).where(inbox_clause(filters))).one()
+    return row[0] or 0, row[1] or 0
 
 
 def top_picks_preview(db: Session, filters: DiscoveryFilters, prefs: RankingPrefs, now: datetime) -> int:

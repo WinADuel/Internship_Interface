@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ApiError } from "../lib/api/client";
+  import { errorMessage } from "../lib/api/client";
   import { addQueueItem, listQueue } from "../lib/api/researchQueue";
   import { formatDateTime } from "../lib/format";
   import { showToast } from "../lib/stores/toast";
@@ -28,7 +28,7 @@
     try {
       items = await listQueue();
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't load the research queue.");
+      showToast(errorMessage(err, "Couldn't load the research queue."));
     }
   }
 
@@ -48,7 +48,7 @@
       items = [created, ...items];
       requestText = "";
     } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "Couldn't add the request.");
+      showToast(errorMessage(err, "Couldn't add the request."));
     } finally {
       saving = false;
     }
